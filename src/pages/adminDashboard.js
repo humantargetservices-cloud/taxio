@@ -4,6 +4,8 @@ import {
   listAllCompaniesForAdmin,
   approveCompany,
   rejectCompany,
+  suspendCompany,
+  reactivateCompany,
   countAllCarsAdmin,
   countCarsByCompanyIdsAdmin,
   setCompanySubscriptionPlan,
@@ -11,7 +13,7 @@ import {
 import { isPlatformAdmin, signOutEverywhere } from '../lib/auth.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
-import { bookPathFromSlug } from '../lib/tenant.js'
+import { absolutePublicBookingUrl } from '../lib/tenant.js'
 
 const adminState = { tab: 'requests' }
 
@@ -74,6 +76,7 @@ export async function mountAdminDashboard(root) {
 
   const pending = companies.filter((c) => c.status === 'pending')
   const active = companies.filter((c) => c.status === 'approved')
+  const suspended = companies.filter((c) => c.status === 'suspended')
   const revenue = monthlyRevenueEuro(companies, carMap)
 
   const tab = adminState.tab
@@ -135,23 +138,31 @@ export async function mountAdminDashboard(root) {
       </div>`
   } else if (tab === 'active') {
     const rows =
-      active.length === 0
-        ? `<tr><td colspan="6" class="px-4 py-12 text-center text-gray-500">No active companies.</td></tr>`
-        : active
+      active.length + suspended.length === 0
+        ? `<tr><td colspan="7" class="px-4 py-12 text-center text-gray-500">No approved or suspended companies.</td></tr>`
+        : [...active, ...suspended]
             .map((c) => {
               const ncars = carMap[c.id] || 0
-              const url = `${window.location.origin}${bookPathFromSlug(c.slug)}`
+              const statusBadge =
+                c.status === 'suspended'
+                  ? '<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Suspended</span>'
+                  : '<span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">Approved</span>'
               return `
           <tr class="border-b border-gray-100">
             <td class="px-4 py-3 font-semibold text-gray-900">${escapeHtml(c.name)}</td>
             <td class="px-4 py-3 font-mono text-sm text-gray-600">${escapeHtml(c.slug)}</td>
             <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(c.email)}</td>
+            <td class="px-4 py-3 text-sm">${statusBadge}</td>
             <td class="px-4 py-3 text-sm">${planBadge(c.subscription_plan)}</td>
             <td class="px-4 py-3 text-sm text-gray-600">${ncars}</td>
             <td class="px-4 py-3">
               <div class="flex flex-wrap gap-2">
                 <button type="button" data-adm="copy" data-slug="${escapeHtml(c.slug)}" class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold">Copy link</button>
-                <button type="button" data-adm="suspend" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700">Suspend</button>
+                ${
+                  c.status === 'suspended'
+                    ? `<button type="button" data-adm="reactivate" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">Reactivate</button>`
+                    : `<button type="button" data-adm="suspend" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">Suspend</button>`
+                }
               </div>
             </td>
           </tr>`
@@ -168,6 +179,7 @@ export async function mountAdminDashboard(root) {
                 <th class="py-3 pr-4">Company</th>
                 <th class="py-3 pr-4">Slug</th>
                 <th class="py-3 pr-4">Email</th>
+                <th class="py-3 pr-4">Status</th>
                 <th class="py-3 pr-4">Plan</th>
                 <th class="py-3 pr-4">Cars</th>
                 <th class="py-3">Actions</th>
@@ -281,7 +293,7 @@ export async function mountAdminDashboard(root) {
       </header>
 
       <div class="mx-auto max-w-6xl px-4 -mt-4">
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-5 shadow-md">
             <div>
               <p class="text-xs font-semibold uppercase text-gray-500">Pending Requests</p>
@@ -293,6 +305,13 @@ export async function mountAdminDashboard(root) {
             <div>
               <p class="text-xs font-semibold uppercase text-gray-500">Active Companies</p>
               <p class="text-3xl font-bold text-green-600">${active.length}</p>
+            </div>
+            ${icon.building2('h-10 w-10 text-gray-200')}
+          </div>
+          <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-5 shadow-md">
+            <div>
+              <p class="text-xs font-semibold uppercase text-gray-500">Suspended Companies</p>
+              <p class="text-3xl font-bold text-amber-600">${suspended.length}</p>
             </div>
             ${icon.building2('h-10 w-10 text-gray-200')}
           </div>
@@ -355,7 +374,7 @@ export async function mountAdminDashboard(root) {
       const plan = btn.getAttribute('data-plan')
 
       if (action === 'copy' && slug) {
-        const url = `${window.location.origin}${bookPathFromSlug(slug)}`
+        const url = absolutePublicBookingUrl(slug)
         try {
           await navigator.clipboard.writeText(url)
           showMsg('Booking link copied.')
@@ -366,14 +385,35 @@ export async function mountAdminDashboard(root) {
       }
 
       if (action === 'approve') {
+        btn.disabled = true
         const { error } = await approveCompany(id)
+        btn.disabled = false
+        if (error) {
+          showMsg(error.message)
+          return
+        }
+        adminState.tab = 'active'
+        await mountAdminDashboard(root)
+        showMsg('Company approved — open Active Companies to see the green Approved badge.')
+        return
+      }
+      if (action === 'reject') {
+        if (!window.confirm('Reject this company?')) return
+        const { error } = await rejectCompany(id)
         if (error) showMsg(error.message)
         else mountAdminDashboard(root)
         return
       }
-      if (action === 'reject' || action === 'suspend') {
-        if (!window.confirm('Reject this company?')) return
-        const { error } = await rejectCompany(id)
+      if (action === 'suspend') {
+        if (!window.confirm('Suspend this company?')) return
+        const { error } = await suspendCompany(id)
+        if (error) showMsg(error.message)
+        else mountAdminDashboard(root)
+        return
+      }
+      if (action === 'reactivate') {
+        if (!window.confirm('Reactivate this company?')) return
+        const { error } = await reactivateCompany(id)
         if (error) showMsg(error.message)
         else mountAdminDashboard(root)
         return

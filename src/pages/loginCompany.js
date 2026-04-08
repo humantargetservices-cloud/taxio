@@ -1,5 +1,5 @@
 import { navigate } from '../nav.js'
-import { signInWithPassword, getCompanyForUser } from '../lib/api.js'
+import { signInWithPassword, getCompanyForUser, getMyProfile } from '../lib/api.js'
 import { icon } from '../lib/icons.js'
 
 export function mountLoginCompany(root) {
@@ -72,10 +72,26 @@ export function mountLoginCompany(root) {
       navigate('/pending-approval')
       return
     }
+    if (company.status === 'suspended') {
+      errEl.textContent =
+        'Your company access is temporarily suspended. Contact support for reactivation.'
+      errEl.classList.remove('hidden')
+      return
+    }
     if (company.status === 'rejected') {
       errEl.textContent =
         'Your application was not approved. Contact support if you believe this is an error.'
       errEl.classList.remove('hidden')
+      return
+    }
+    if (company.status !== 'approved') {
+      errEl.textContent = 'Your account is not ready for login yet.'
+      errEl.classList.remove('hidden')
+      return
+    }
+    const profile = await getMyProfile(user.id)
+    if (profile?.first_login_required) {
+      navigate('/change-password/company')
       return
     }
     navigate('/dashboard/company')

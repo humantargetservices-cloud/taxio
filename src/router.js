@@ -4,11 +4,13 @@ import { mountRegister } from './pages/register.js'
 import { mountLoginCompany } from './pages/loginCompany.js'
 import { mountPendingApproval } from './pages/pendingApproval.js'
 import { mountDashboardCompany } from './pages/dashboardCompany.js'
+import { mountChangePasswordCompany } from './pages/changePasswordCompany.js'
 import { mountBookCompany } from './pages/bookCompany.js'
 import { mountAdminLogin } from './pages/adminLogin.js'
 import { mountAdminDashboard } from './pages/adminDashboard.js'
-import { mountTerms, mountPrivacy } from './pages/legal.js'
-import { parseBookSlug } from './lib/tenant.js'
+import { mountTerms, mountTermsRiders, mountPrivacy } from './pages/legal.js'
+import { mountTaxiDirectory } from './pages/taxiDirectory.js'
+import { resolveBookSlugForRouter } from './lib/tenant.js'
 
 function mountNotFound(root) {
   root.innerHTML = `
@@ -24,18 +26,36 @@ function route() {
   if (!root) return
 
   const path = window.location.pathname
-  const bookSlug = parseBookSlug(path)
+  const bookSlug = resolveBookSlugForRouter(path)
 
   if (path === '/' || path === '') {
-    mountLanding(root)
+    if (bookSlug) {
+      mountBookCompany(root, bookSlug).catch((err) => {
+        console.error(err)
+        mountNotFound(root)
+      })
+    } else {
+      mountLanding(root)
+    }
     return
   }
   if (path === '/register') {
     mountRegister(root)
     return
   }
+  if (path === '/terms/riders') {
+    mountTermsRiders(root)
+    return
+  }
   if (path === '/terms') {
     mountTerms(root)
+    return
+  }
+  if (path === '/taxis') {
+    mountTaxiDirectory(root).catch((err) => {
+      console.error(err)
+      mountNotFound(root)
+    })
     return
   }
   if (path === '/privacy') {
@@ -55,6 +75,13 @@ function route() {
   }
   if (path === '/dashboard/company') {
     mountDashboardCompany(root).catch((err) => {
+      console.error(err)
+      mountNotFound(root)
+    })
+    return
+  }
+  if (path === '/change-password/company') {
+    mountChangePasswordCompany(root).catch((err) => {
       console.error(err)
       mountNotFound(root)
     })

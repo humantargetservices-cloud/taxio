@@ -1,9 +1,8 @@
 import { navigate } from '../nav.js'
 import { getSession, getCompanyForUser } from '../lib/api.js'
-import { signOutEverywhere } from '../lib/auth.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
-import { bookPathFromSlug } from '../lib/tenant.js'
+import { absolutePublicBookingUrl } from '../lib/tenant.js'
 
 function loadingShell() {
   const dark = document.documentElement.classList.contains('dark')
@@ -19,7 +18,37 @@ export async function mountPendingApproval(root) {
 
   const session = await getSession()
   if (!session) {
-    navigate('/login/company')
+    const pendingRaw = localStorage.getItem('pendingRegistration')
+    let pending = null
+    try {
+      pending = pendingRaw ? JSON.parse(pendingRaw) : null
+    } catch {
+      pending = null
+    }
+    if (!pending?.companyName) {
+      navigate('/')
+      return
+    }
+    const dark = document.documentElement.classList.contains('dark')
+    root.innerHTML = `
+      <div class="min-h-screen flex flex-col items-center justify-center px-4 py-10 ${dark ? 'bg-slate-900' : 'bg-gradient-to-br from-blue-50 to-indigo-100'}">
+        <div class="max-w-lg rounded-xl border-2 ${dark ? 'border-slate-700 bg-slate-800' : 'border-gray-100 bg-white'} p-8 text-center shadow-2xl">
+          <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg ${dark ? 'bg-yellow-400' : 'bg-gradient-to-br from-blue-500 to-indigo-600'}">
+            ${icon.building2(dark ? 'h-8 w-8 text-slate-900' : 'h-8 w-8 text-white')}
+          </div>
+          <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Pending approval</h1>
+          <p class="mt-3 text-gray-600 dark:text-gray-400">
+            Thanks for registering <strong class="text-slate-800 dark:text-gray-200">${escapeHtml(pending.companyName)}</strong>.
+            A platform administrator will review your request shortly.
+          </p>
+          <p class="mt-2 text-sm text-gray-500 dark:text-gray-500">
+            We will email your credentials to <strong>${escapeHtml(pending.email || '')}</strong> once approved.
+          </p>
+          <div class="mt-8 flex justify-center">
+            <a href="/" class="inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-semibold shadow-md ${dark ? 'bg-yellow-400 text-slate-900 hover:bg-yellow-500' : 'bg-blue-600 text-white hover:bg-blue-700'}">Back home</a>
+          </div>
+        </div>
+      </div>`
     return
   }
 
@@ -32,6 +61,20 @@ export async function mountPendingApproval(root) {
     navigate('/dashboard/company')
     return
   }
+  if (company.status === 'suspended') {
+    root.innerHTML = `
+      <div class="min-h-screen flex flex-col items-center justify-center px-4 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-900">
+        <div class="max-w-md rounded-xl border-2 border-amber-200 bg-white p-8 text-center shadow-xl dark:border-amber-900/50 dark:bg-slate-800">
+          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 dark:bg-amber-950/50">
+            ${icon.helpCircle('h-8 w-8 text-amber-700 dark:text-amber-400')}
+          </div>
+          <h1 class="text-2xl font-bold text-slate-900 dark:text-white">Company suspended</h1>
+          <p class="mt-3 text-gray-600 dark:text-gray-400">Your company account is temporarily suspended. Please contact support for reactivation.</p>
+          <a href="/" class="mt-6 inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-slate-700">Back home</a>
+        </div>
+      </div>`
+    return
+  }
   if (company.status === 'rejected') {
     root.innerHTML = `
       <div class="min-h-screen flex flex-col items-center justify-center px-4 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-900">
@@ -41,17 +84,13 @@ export async function mountPendingApproval(root) {
           </div>
           <h1 class="text-2xl font-bold text-slate-900 dark:text-white">Application not approved</h1>
           <p class="mt-3 text-gray-600 dark:text-gray-400">Your company registration was not approved.</p>
-          <button type="button" id="logout" class="mt-6 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-slate-700">Sign out</button>
+          <a href="/" class="mt-6 inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-slate-700">Back home</a>
         </div>
       </div>`
-    root.querySelector('#logout').addEventListener('click', async () => {
-      await signOutEverywhere()
-      navigate('/')
-    })
     return
   }
 
-  const bookUrl = `${window.location.origin}${bookPathFromSlug(company.slug)}`
+  const bookUrl = absolutePublicBookingUrl(company.slug)
   const dark = document.documentElement.classList.contains('dark')
 
   root.innerHTML = `
@@ -69,16 +108,10 @@ export async function mountPendingApproval(root) {
           <p class="text-xs font-semibold uppercase ${dark ? 'text-gray-400' : 'text-slate-600'}">Your booking page (live after approval)</p>
           <p class="mt-1 break-all font-mono text-sm font-semibold ${dark ? 'text-yellow-400' : 'text-blue-700'}">${escapeHtml(bookUrl)}</p>
         </div>
-        <p class="mt-3 text-sm text-gray-500 dark:text-gray-500">You can sign in to the company dashboard once your company is approved.</p>
-        <div class="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
-          <button type="button" id="logout" class="rounded-md border-2 border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:text-gray-300 dark:hover:bg-slate-700">Sign out</button>
+        <p class="mt-3 text-sm text-gray-500 dark:text-gray-500">You will receive login credentials by email after approval.</p>
+        <div class="mt-8 flex justify-center">
           <a href="/" class="inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-semibold shadow-md ${dark ? 'bg-yellow-400 text-slate-900 hover:bg-yellow-500' : 'bg-blue-600 text-white hover:bg-blue-700'}">Back home</a>
         </div>
       </div>
     </div>`
-
-  root.querySelector('#logout').addEventListener('click', async () => {
-    await signOutEverywhere()
-    navigate('/')
-  })
 }

@@ -1,6 +1,7 @@
 import { navigate } from '../nav.js'
 import {
   getSession,
+  getMyProfile,
   getCompanyForUser,
   listBookingRequestsForCompany,
   listCarsForCompany,
@@ -14,7 +15,7 @@ import { signOutEverywhere } from '../lib/auth.js'
 import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
-import { bookPathFromSlug } from '../lib/tenant.js'
+import { absolutePublicBookingUrl } from '../lib/tenant.js'
 
 const dashState = {
   tab: 'overview',
@@ -58,6 +59,11 @@ export async function mountDashboardCompany(root) {
     navigate('/login/company')
     return
   }
+  const profile = await getMyProfile(session.user.id)
+  if (profile?.first_login_required) {
+    navigate('/change-password/company')
+    return
+  }
 
   const company = await getCompanyForUser(session.user.id)
   if (!company) {
@@ -65,6 +71,10 @@ export async function mountDashboardCompany(root) {
     return
   }
   if (company.status === 'pending') {
+    navigate('/pending-approval')
+    return
+  }
+  if (company.status === 'suspended') {
     navigate('/pending-approval')
     return
   }
@@ -89,7 +99,7 @@ export async function mountDashboardCompany(root) {
   const vatLine = company.vat_number
     ? `MY BTW ${escapeHtml(company.vat_number)}`
     : 'MY BTW —'
-  const bookPath = bookPathFromSlug(company.slug)
+  const bookPublicUrl = absolutePublicBookingUrl(company.slug)
   const pricing = pricingOf(company)
   const avail = company.availability_status || 'available'
 
@@ -149,7 +159,7 @@ export async function mountDashboardCompany(root) {
             ${icon.eye('h-5 w-5 text-amber-600')}
             Your Booking Page
           </div>
-          <a href="${escapeHtml(bookPath)}" class="mb-2 inline-flex items-center justify-center gap-2 rounded-xl bg-yellow-400 py-3 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">
+          <a href="${escapeHtml(bookPublicUrl)}" class="mb-2 inline-flex items-center justify-center gap-2 rounded-xl bg-yellow-400 py-3 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">
             ${icon.eye('h-4 w-4')}
             View Live
           </a>
@@ -232,8 +242,14 @@ export async function mountDashboardCompany(root) {
           </div>
           <div class="grid gap-4 sm:grid-cols-3">
             <div class="rounded-xl border border-gray-100 bg-white p-4">
-              <p class="text-xs text-gray-500">Phone</p>
-              <p class="mt-1 text-sm font-semibold text-gray-900">${escapeHtml(company.phone || '—')}</p>
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <p class="text-xs text-gray-500">Phone</p>
+                  <p class="mt-1 text-sm font-semibold text-gray-900">${escapeHtml(company.phone || '—')}</p>
+                </div>
+                <span class="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Locked</span>
+              </div>
+              <p class="mt-2 text-[11px] text-gray-400">Verification field — locked. Contact support to change.</p>
             </div>
             <div class="rounded-xl border border-gray-100 bg-white p-4">
               <p class="text-xs text-gray-500">Email</p>
@@ -244,12 +260,15 @@ export async function mountDashboardCompany(root) {
               <p class="mt-1 text-sm font-semibold text-gray-900">${escapeHtml(company.city || '—')}</p>
             </div>
           </div>
-          <div class="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
-            <div>
-              <p class="text-xs text-gray-500">BTW Number</p>
-              <p class="font-bold text-gray-900">${escapeHtml(company.vat_number || '—')}</p>
+          <div class="rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-xs text-gray-500">VAT / BTW number</p>
+                <p class="font-bold text-gray-900">${escapeHtml(company.vat_number || '—')}</p>
+              </div>
+              <span class="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-500">Locked</span>
             </div>
-            <button type="button" data-edit-field="vat" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}Edit</button>
+            <p class="mt-2 text-[11px] text-gray-400">Verification field — locked after registration.</p>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div>
@@ -260,7 +279,7 @@ export async function mountDashboardCompany(root) {
                 <span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">Luxury</span>
               </div>
             </div>
-            <button type="button" data-edit-field="contact" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}Edit</button>
+            <button type="button" data-edit-field="contact" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}Edit email/city</button>
           </div>
         </div>
       </div>`
@@ -432,7 +451,7 @@ export async function mountDashboardCompany(root) {
   })
 
   root.querySelector('[data-action="qr"]')?.addEventListener('click', () => {
-    window.alert('QR: ' + window.location.origin + bookPath)
+    window.alert('QR: ' + bookPublicUrl)
   })
 
   if (t === 'pricing') {
@@ -505,18 +524,12 @@ export async function mountDashboardCompany(root) {
         const v = window.prompt('Slogan', company.slogan || '')
         if (v == null) return
         updateCompanyByOwner(company.id, { slogan: v }).then(() => mountDashboardCompany(root))
-      } else if (f === 'vat') {
-        const v = window.prompt('BTW / VAT number', company.vat_number || '')
-        if (v == null) return
-        updateCompanyByOwner(company.id, { vat_number: v }).then(() => mountDashboardCompany(root))
       } else if (f === 'contact') {
-        const phone = window.prompt('Phone', company.phone || '')
-        if (phone == null) return
         const em = window.prompt('Email', company.email || '')
         if (em == null) return
         const city = window.prompt('City', company.city || '')
         if (city == null) return
-        updateCompanyByOwner(company.id, { phone, email: em, city }).then(() =>
+        updateCompanyByOwner(company.id, { email: em, city }).then(() =>
           mountDashboardCompany(root)
         )
       }

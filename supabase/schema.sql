@@ -31,6 +31,7 @@ CREATE TABLE public.profiles (
       'company_staff',
       'customer'
     )),
+  first_login_required boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -44,8 +45,8 @@ CREATE TABLE public.companies (
   city text,
   country text,
   status text NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'approved', 'rejected')),
-  owner_user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+    CHECK (status IN ('pending', 'approved', 'suspended', 'rejected')),
+  owner_user_id uuid REFERENCES auth.users (id) ON DELETE CASCADE,
   created_at timestamptz NOT NULL DEFAULT now(),
   approved_at timestamptz
 );
@@ -229,3 +230,13 @@ CREATE POLICY "booking_requests_update_company_staff"
 -- • booking_requests: inserts allowed when company_id references an APPROVED
 --   company (anonymous + logged-in customers). Select/update limited to
 --   members of that company and platform admins.
+--
+-- Fresh database: after this file, run in order:
+--   supabase/migration_add_vat_number.sql (if not merged)
+--   supabase/migration_structure_v2.sql
+--   supabase/migration_onboarding_admin_approval.sql
+--   supabase/migration_onboarding_company_trigger.sql
+--   supabase/migration_fix_companies_guard_service_role_bypass.sql (if approval updates are reverted)
+--   supabase/migration_company_status_suspended.sql
+--   supabase/migration_cars_select_public_booking.sql
+--   supabase/migration_registration_uniqueness_hardening.sql (optional but recommended)

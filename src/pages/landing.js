@@ -126,7 +126,7 @@ export function mountLanding(root) {
       </div>
 
       <div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
-        <a href="#" data-no-route class="inline-flex w-full cursor-default items-center justify-center rounded-md px-8 py-6 text-lg opacity-70 shadow-lg sm:w-auto ${t ? 'bg-slate-700 text-white' : 'bg-gray-900 text-white'}" title="Coming soon">
+        <a href="/taxis" class="inline-flex w-full items-center justify-center rounded-md px-8 py-6 text-lg font-semibold shadow-lg transition hover:opacity-95 sm:w-auto ${t ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-gray-900 text-white hover:bg-gray-800'}">
           ${icon.search('mr-2 h-5 w-5')}
           ${o.lookingTaxi}
         </a>

@@ -8,27 +8,18 @@ export const DEFAULT_PRICING = {
   Luxury: { start: '10.00', per_km: '4.00', initial_km: '3' },
 }
 
-const DEFAULT_SLOGAN = 'Your Ride, Your Way, Anytime!'
+const apiBase = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+
+function apiUrl(path) {
+  return `${apiBase}${path}`
+}
 
 /**
- * Sign up + insert profile, pending company, owner membership.
- * Slug is derived from company name. Extended profile fields for dashboard/booking UI.
+ * Submit pending company application (no auth user creation here).
+ * Auth user is created only after admin approval via server API.
  */
 export async function registerCompanyOwner(payload) {
-  const {
-    email,
-    password,
-    passwordConfirm,
-    companyName,
-    vatNumber,
-    phone,
-    city,
-    country,
-  } = payload
-
-  if (password !== passwordConfirm) {
-    return { error: new Error('Passwords do not match.') }
-  }
+  const { email, companyName, vatNumber, phone, city, country } = payload
 
   const slug = slugFromCompanyName(companyName)
   if (!slug || slug.length < 2) {
@@ -39,82 +30,37 @@ export async function registerCompanyOwner(payload) {
     }
   }
 
-  const { data: authData, error: signErr } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { full_name: companyName } },
-  })
-  if (signErr) return { error: signErr }
-
-  const user = authData.user
-  const session = authData.session
-  if (!user) {
-    return {
-      error: new Error(
-        'Account created. If email confirmation is enabled, confirm your email and sign in to finish setup.'
-      ),
-    }
-  }
-
-  if (!session) {
-    return {
-      error: new Error(
-        'No active session after signup. Disable email confirmation in Supabase Auth for this MVP, or complete email verification and run registration again.'
-      ),
-    }
-  }
-
-  const fullName = String(companyName || '').trim() || email.split('@')[0]
-
-  const { error: pErr } = await supabase.from('profiles').insert({
-    id: user.id,
-    full_name: fullName,
-    email,
-    role: 'company_owner',
-  })
-  if (pErr) return { error: pErr }
-
-  const companyRow = {
-    name: companyName,
-    slug,
-    vat_number: vatNumber || null,
-    email,
-    phone: phone || null,
-    city: city || null,
-    country: country || null,
-    status: 'pending',
-    owner_user_id: user.id,
-    slogan: DEFAULT_SLOGAN,
-    availability_status: 'available',
-    subscription_plan: 'basic',
-    pricing: DEFAULT_PRICING,
-  }
-
-  const { data: company, error: cErr } = await supabase
-    .from('companies')
-    .insert(companyRow)
-    .select('id, slug, status, name')
-    .single()
-
-  if (cErr) {
-    if (cErr.code === '23505') {
+  try {
+    const response = await fetch(apiUrl('/api/register-company'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        companyName,
+        vatNumber,
+        phone,
+        city,
+        country: country || null,
+        termsAccepted: true,
+      }),
+    })
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok) {
       return {
         error: new Error(
-          'That company name produces a subdomain already taken. Slightly change the company name and try again.'
+          body.error || `Could not submit registration (${response.status || 'error'}).`
         ),
       }
     }
-    return { error: cErr }
+    return { data: body.data || { slug }, error: null }
+  } catch (err) {
+    return {
+      error: new Error(
+        err?.message ||
+          'Registration could not be completed. Check your connection and try again.'
+      ),
+    }
   }
-
-  const { error: mErr } = await supabase.from('company_members').insert({
-    company_id: company.id,
-    user_id: user.id,
-    role: 'owner',
-  })
-  if (mErr) return { error: mErr }
-
-  return { data: { company, user, slug }, error: null }
 }
 
 export async function signInWithPassword(email, password) {
@@ -127,25 +73,66 @@ export async function getSession() {
   return data.session
 }
 
+export async function getMyProfile(userId) {
+  if (!userId) return null
+  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+  if (error) throw error
+  return data
+}
+
+/**
+ * Resolve the company context for a logged-in user.
+ * Prefer an approved company over pending/suspended; prefer owner over member-only; then newest.
+ * (A single arbitrary membership row was incorrectly sending approved owners back to pending.)
+ */
 export async function getCompanyForUser(userId) {
-  const { data: byOwner, error: e1 } = await supabase
+  if (!userId) return null
+
+  const { data: owned, error: e1 } = await supabase
     .from('companies')
     .select('*')
     .eq('owner_user_id', userId)
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
   if (e1) throw e1
-  if (byOwner) return byOwner
 
-  const { data: memberRow, error: e2 } = await supabase
+  const { data: memberships, error: e2 } = await supabase
     .from('company_members')
-    .select('company:companies(*)')
+    .select('role, company:companies(*)')
     .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle()
   if (e2) throw e2
-  return memberRow?.company || null
+
+  const candidates = []
+  const seen = new Set()
+
+  for (const c of owned || []) {
+    if (!c?.id || seen.has(c.id)) continue
+    seen.add(c.id)
+    candidates.push({ c, via: 'owner' })
+  }
+  for (const m of memberships || []) {
+    let c = m.company
+    if (Array.isArray(c)) c = c[0]
+    if (!c?.id || seen.has(c.id)) continue
+    seen.add(c.id)
+    candidates.push({ c, via: m.role || 'member' })
+  }
+
+  if (candidates.length === 0) return null
+
+  const statusRank = (s) =>
+    s === 'approved' ? 0 : s === 'suspended' ? 1 : s === 'pending' ? 2 : s === 'rejected' ? 3 : 4
+
+  candidates.sort((a, b) => {
+    const d = statusRank(a.c.status) - statusRank(b.c.status)
+    if (d !== 0) return d
+    if (a.via === 'owner' && b.via !== 'owner') return -1
+    if (b.via === 'owner' && a.via !== 'owner') return 1
+    const ta = new Date(a.c.created_at || 0).getTime()
+    const tb = new Date(b.c.created_at || 0).getTime()
+    return tb - ta
+  })
+
+  return candidates[0].c
 }
 
 export async function fetchApprovedCompanyBySlug(slug) {
@@ -213,17 +200,43 @@ export async function listAllCompaniesForAdmin() {
 }
 
 export async function approveCompany(companyId) {
-  const { error } = await supabase
-    .from('companies')
-    .update({ status: 'approved', approved_at: new Date().toISOString() })
-    .eq('id', companyId)
-  return { error }
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return { error: new Error('You must be signed in as admin.') }
+
+  const res = await fetch(apiUrl('/api/admin-approve-company'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ companyId }),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) return { error: new Error(json.error || 'Approval failed.') }
+  return { error: null }
 }
 
 export async function rejectCompany(companyId) {
   const { error } = await supabase
     .from('companies')
     .update({ status: 'rejected', approved_at: null })
+    .eq('id', companyId)
+  return { error }
+}
+
+export async function suspendCompany(companyId) {
+  const { error } = await supabase
+    .from('companies')
+    .update({ status: 'suspended' })
+    .eq('id', companyId)
+  return { error }
+}
+
+export async function reactivateCompany(companyId) {
+  const { error } = await supabase
+    .from('companies')
+    .update({ status: 'approved' })
     .eq('id', companyId)
   return { error }
 }
@@ -265,10 +278,8 @@ export async function updateCompanyByOwner(companyId, patch) {
   const allowed = [
     'name',
     'email',
-    'phone',
     'city',
     'country',
-    'vat_number',
     'slogan',
     'availability_status',
     'pricing',
@@ -334,4 +345,26 @@ export async function countCarsByCompanyIdsAdmin() {
     map[r.company_id] = (map[r.company_id] || 0) + 1
   }
   return map
+}
+
+/** Public directory: approved companies (RLS allows SELECT where status = approved). */
+export async function listApprovedCompaniesDirectory() {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('id, name, slug, city, country')
+    .eq('status', 'approved')
+    .order('name', { ascending: true })
+  if (error) throw error
+  return data || []
+}
+
+/** Fleet car types for public booking page (requires cars_select_public_approved_company policy). */
+export async function fetchFleetCarTypesForBooking(companyId) {
+  if (!companyId) return []
+  const { data, error } = await supabase.from('cars').select('car_type').eq('company_id', companyId)
+  if (error) {
+    console.warn('[fetchFleetCarTypesForBooking]', error.message)
+    return []
+  }
+  return data || []
 }
