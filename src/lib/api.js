@@ -260,6 +260,100 @@ export async function setCompanySubscriptionPlan(companyId, plan) {
   return { error }
 }
 
+const ADMIN_EDITABLE_COMPANY_FIELDS = [
+  'name',
+  'slug',
+  'email',
+  'phone',
+  'city',
+  'country',
+  'vat_number',
+  'slogan',
+  'availability_status',
+  'pricing',
+]
+
+const AVAILABILITY_STATUSES = ['available', 'busy', 'offline']
+
+/**
+ * Platform admin updates company profile fields (RLS: companies_update_admin).
+ * Only keys present on `patch` are written; `undefined` values are skipped (partial-safe).
+ */
+export async function updateCompanyAsAdmin(companyId, patch) {
+  const data = {}
+  for (const k of ADMIN_EDITABLE_COMPANY_FIELDS) {
+    if (!(k in patch)) continue
+    let v = patch[k]
+    if (v === undefined) continue
+    if (k === 'pricing') {
+      if (v == null || v === '') {
+        data[k] = {}
+      } else if (typeof v === 'string') {
+        try {
+          data[k] = JSON.parse(v)
+        } catch {
+          return { error: new Error('Pricing must be valid JSON.') }
+        }
+      } else if (typeof v === 'object') {
+        data[k] = v
+      } else {
+        return { error: new Error('Invalid pricing value.') }
+      }
+      continue
+    }
+    if (typeof v === 'string') v = v.trim()
+    if (k === 'availability_status' && v && !AVAILABILITY_STATUSES.includes(v)) {
+      return { error: new Error('Invalid availability status.') }
+    }
+    data[k] = v === '' ? null : v
+  }
+  if (Object.keys(data).length === 0) return { error: null }
+  const { error } = await supabase.from('companies').update(data).eq('id', companyId)
+  return { error }
+}
+
+export async function deleteCompanyAsAdmin(companyId) {
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return { error: new Error('You must be signed in as admin.') }
+
+  const res = await fetch(apiUrl('/api/admin-delete-company'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ companyId }),
+  })
+  const raw = await res.text()
+  let jsonBody = {}
+  try {
+    jsonBody = raw ? JSON.parse(raw) : {}
+  } catch {
+    const snippet = raw.replace(/\s+/g, ' ').trim().slice(0, 120)
+    const hint =
+      raw.trim().startsWith('<') || raw.includes('<!DOCTYPE')
+        ? ' The server returned HTML instead of JSON (often a missing /api route in local dev or a bad API base URL).'
+        : ''
+    return {
+      error: new Error(
+        snippet
+          ? `Delete failed (HTTP ${res.status}): ${snippet}${hint}`
+          : `Delete failed (HTTP ${res.status}).${hint}`
+      ),
+    }
+  }
+  if (!res.ok) {
+    return {
+      error: new Error(
+        jsonBody.error ||
+          `Delete failed (HTTP ${res.status}).`
+      ),
+    }
+  }
+  return { error: null }
+}
+
 const BOOKING_STATUSES = ['new', 'reviewed', 'accepted', 'rejected']
 
 export async function updateBookingRequestStatus(companyId, bookingId, status) {

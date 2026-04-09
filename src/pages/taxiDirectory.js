@@ -1,7 +1,12 @@
 import { listApprovedCompaniesDirectory } from '../lib/api.js'
-import { absolutePublicBookingUrl } from '../lib/tenant.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
+
+/** Public booking: subdomain only (no /book path for this list). */
+function approvedListBookingUrl(slug) {
+  const label = String(slug || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+  return `https://${label}.taxio.be`
+}
 
 export async function mountTaxiDirectory(root) {
   root.innerHTML = `
@@ -29,7 +34,7 @@ export async function mountTaxiDirectory(root) {
           ${companies
             .map((c) => {
               const loc = [c.city, c.country].filter(Boolean).join(', ') || '—'
-              const bookUrl = absolutePublicBookingUrl(c.slug)
+              const bookUrl = approvedListBookingUrl(c.slug)
               return `<li class="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div class="min-w-0 text-left">
                   <p class="font-bold text-gray-900">${escapeHtml(c.name)}</p>

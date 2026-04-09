@@ -9,13 +9,16 @@ import {
   countAllCarsAdmin,
   countCarsByCompanyIdsAdmin,
   setCompanySubscriptionPlan,
+  updateCompanyAsAdmin,
+  deleteCompanyAsAdmin,
 } from '../lib/api.js'
+import { slugFromCompanyName } from '../lib/slug.js'
 import { isPlatformAdmin, signOutEverywhere } from '../lib/auth.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 
-const adminState = { tab: 'requests' }
+const adminState = { tab: 'requests', editBaseline: null }
 
 function monthlyRevenueEuro(companies, carMap) {
   let total = 0
@@ -107,6 +110,8 @@ export async function mountAdminDashboard(root) {
             <td class="px-4 py-3"><span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Pending</span></td>
             <td class="px-4 py-3">
               <div class="flex flex-wrap gap-2">
+                <button type="button" data-adm="edit" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold">Edit</button>
+                <button type="button" data-adm="delete" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">Delete</button>
                 <button type="button" data-adm="approve" data-id="${escapeHtml(c.id)}" class="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-gray-800">${icon.check('h-3.5 w-3.5')}Approve</button>
                 <button type="button" data-adm="reject" data-id="${escapeHtml(c.id)}" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-500">${icon.x('h-3.5 w-3.5')}Reject</button>
               </div>
@@ -157,6 +162,8 @@ export async function mountAdminDashboard(root) {
             <td class="px-4 py-3 text-sm text-gray-600">${ncars}</td>
             <td class="px-4 py-3">
               <div class="flex flex-wrap gap-2">
+                <button type="button" data-adm="edit" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold">Edit</button>
+                <button type="button" data-adm="delete" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">Delete</button>
                 <button type="button" data-adm="copy" data-slug="${escapeHtml(c.slug)}" class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold">Copy link</button>
                 ${
                   c.status === 'suspended'
@@ -339,6 +346,53 @@ export async function mountAdminDashboard(root) {
 
         <p id="adm-msg" class="mt-4 hidden rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"></p>
 
+        <dialog id="adm-company-edit" class="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-0 shadow-xl">
+          <form id="adm-edit-form" class="p-6">
+            <h3 class="text-lg font-bold text-gray-900">Edit company</h3>
+            <input type="hidden" id="adm-edit-id" />
+            <div class="mt-4 grid max-h-[70vh] gap-3 overflow-y-auto sm:grid-cols-2">
+              <label class="block text-xs font-semibold text-gray-600 sm:col-span-2">Company name
+                <input id="adm-edit-name" required class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+              </label>
+              <label class="block text-xs font-semibold text-gray-600 sm:col-span-2">Slug (subdomain)
+                <input id="adm-edit-slug" required class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm text-gray-900" />
+              </label>
+              <label class="block text-xs font-semibold text-gray-600 sm:col-span-2">Email
+                <input id="adm-edit-email" type="email" required class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+              </label>
+              <label class="block text-xs font-semibold text-gray-600">Phone
+                <input id="adm-edit-phone" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+              </label>
+              <label class="block text-xs font-semibold text-gray-600">VAT number
+                <input id="adm-edit-vat" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+              </label>
+              <label class="block text-xs font-semibold text-gray-600">City
+                <input id="adm-edit-city" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+              </label>
+              <label class="block text-xs font-semibold text-gray-600">Country
+                <input id="adm-edit-country" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+              </label>
+              <label class="block text-xs font-semibold text-gray-600 sm:col-span-2">Slogan
+                <input id="adm-edit-slogan" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+              </label>
+              <label class="block text-xs font-semibold text-gray-600 sm:col-span-2">Availability
+                <select id="adm-edit-availability" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900">
+                  <option value="available">available</option>
+                  <option value="busy">busy</option>
+                  <option value="offline">offline</option>
+                </select>
+              </label>
+              <label class="block text-xs font-semibold text-gray-600 sm:col-span-2">Pricing (JSON)
+                <textarea id="adm-edit-pricing" rows="4" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-xs text-gray-900"></textarea>
+              </label>
+            </div>
+            <div class="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-4">
+              <button type="button" id="adm-edit-cancel" class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-800">Cancel</button>
+              <button type="submit" id="adm-edit-submit" class="rounded-lg bg-gray-900 px-4 py-2 text-sm font-bold text-white">Save</button>
+            </div>
+          </form>
+        </dialog>
+
         <div class="mt-6">${mainHtml}</div>
       </div>
     </div>`
@@ -348,6 +402,46 @@ export async function mountAdminDashboard(root) {
     el.textContent = t
     el.classList.remove('hidden')
     setTimeout(() => el.classList.add('hidden'), 4000)
+  }
+
+  function normalizePricingTextForCompare(s) {
+    const t = String(s || '').trim()
+    if (!t) return ''
+    try {
+      return JSON.stringify(JSON.parse(t))
+    } catch {
+      return t
+    }
+  }
+
+  function openEditCompany(c) {
+    root.querySelector('#adm-edit-id').value = c.id
+    root.querySelector('#adm-edit-name').value = c.name || ''
+    root.querySelector('#adm-edit-slug').value = c.slug || ''
+    root.querySelector('#adm-edit-email').value = c.email || ''
+    root.querySelector('#adm-edit-phone').value = c.phone || ''
+    root.querySelector('#adm-edit-city').value = c.city || ''
+    root.querySelector('#adm-edit-country').value = c.country || ''
+    root.querySelector('#adm-edit-vat').value = c.vat_number || ''
+    root.querySelector('#adm-edit-slogan').value = c.slogan || ''
+    root.querySelector('#adm-edit-availability').value = c.availability_status || 'available'
+    const pr = c.pricing
+    const pricingText = pr && typeof pr === 'object' ? JSON.stringify(pr, null, 2) : ''
+    root.querySelector('#adm-edit-pricing').value = pricingText
+    adminState.editBaseline = {
+      id: c.id,
+      name: String(c.name || '').trim(),
+      slug: slugFromCompanyName(c.slug || ''),
+      email: String(c.email || '').trim(),
+      phone: String(c.phone || '').trim(),
+      city: String(c.city || '').trim(),
+      country: String(c.country || '').trim(),
+      vat_number: String(c.vat_number || '').trim(),
+      slogan: String(c.slogan || '').trim(),
+      availability_status: c.availability_status || 'available',
+      pricingCompare: normalizePricingTextForCompare(pricingText),
+    }
+    root.querySelector('#adm-company-edit')?.showModal()
   }
 
   root.querySelectorAll('[data-adm-tab]').forEach((b) => {
@@ -380,6 +474,33 @@ export async function mountAdminDashboard(root) {
           showMsg('Booking link copied.')
         } catch {
           showMsg(url)
+        }
+        return
+      }
+
+      if (action === 'edit' && id) {
+        const c = companies.find((x) => x.id === id)
+        if (!c) return
+        openEditCompany(c)
+        return
+      }
+
+      if (action === 'delete' && id) {
+        const c = companies.find((x) => x.id === id)
+        if (!c) return
+        if (
+          !window.confirm(
+            `Delete company "${c.name}"? This removes the company, fleet, members, and booking requests. This cannot be undone.`
+          )
+        )
+          return
+        btn.disabled = true
+        const { error } = await deleteCompanyAsAdmin(id)
+        btn.disabled = false
+        if (error) showMsg(error.message)
+        else {
+          await mountAdminDashboard(root)
+          showMsg('Company deleted.')
         }
         return
       }
@@ -429,5 +550,78 @@ export async function mountAdminDashboard(root) {
         window.alert('Invoice send — hook to email/WhatsApp in production.')
       }
     })
+  })
+
+  root.querySelector('#adm-edit-cancel')?.addEventListener('click', () => {
+    root.querySelector('#adm-company-edit')?.close()
+  })
+
+  root.querySelector('#adm-edit-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const id = root.querySelector('#adm-edit-id')?.value
+    if (!id) return
+
+    const b = adminState.editBaseline
+    if (!b || b.id !== id) {
+      showMsg('Edit session expired. Close and open Edit again.')
+      return
+    }
+
+    const slug = slugFromCompanyName(root.querySelector('#adm-edit-slug')?.value || '')
+    const name = String(root.querySelector('#adm-edit-name')?.value || '').trim()
+    const email = String(root.querySelector('#adm-edit-email')?.value || '').trim()
+    const phone = String(root.querySelector('#adm-edit-phone')?.value || '').trim()
+    const city = String(root.querySelector('#adm-edit-city')?.value || '').trim()
+    const country = String(root.querySelector('#adm-edit-country')?.value || '').trim()
+    const vat_number = String(root.querySelector('#adm-edit-vat')?.value || '').trim()
+    const slogan = String(root.querySelector('#adm-edit-slogan')?.value || '').trim()
+    const availability_status =
+      root.querySelector('#adm-edit-availability')?.value ?? 'available'
+    const pricingRaw = root.querySelector('#adm-edit-pricing')?.value ?? ''
+    const pricingCompare = normalizePricingTextForCompare(pricingRaw)
+
+    const patch = {}
+    if (name !== b.name) patch.name = name
+    if (slug !== b.slug) patch.slug = slug
+    if (email !== b.email) patch.email = email
+    if (phone !== b.phone) patch.phone = phone
+    if (city !== b.city) patch.city = city
+    if (country !== b.country) patch.country = country
+    if (vat_number !== b.vat_number) patch.vat_number = vat_number
+    if (slogan !== b.slogan) patch.slogan = slogan
+    if (availability_status !== b.availability_status) patch.availability_status = availability_status
+    if (pricingCompare !== b.pricingCompare) {
+      patch.pricing = pricingRaw.trim() === '' ? {} : pricingRaw
+    }
+
+    if (Object.keys(patch).length === 0) {
+      showMsg('No changes to save.')
+      return
+    }
+
+    if ('name' in patch && !patch.name) {
+      showMsg('Name cannot be empty.')
+      return
+    }
+    if ('email' in patch && !patch.email) {
+      showMsg('Email cannot be empty.')
+      return
+    }
+    if ('slug' in patch && (!patch.slug || patch.slug.length < 2)) {
+      showMsg('Slug must be at least 2 letters or numbers.')
+      return
+    }
+
+    const submitBtn = root.querySelector('#adm-edit-submit')
+    submitBtn.disabled = true
+    const { error } = await updateCompanyAsAdmin(id, patch)
+    submitBtn.disabled = false
+    if (error) {
+      showMsg(error.message)
+      return
+    }
+    root.querySelector('#adm-company-edit')?.close()
+    await mountAdminDashboard(root)
+    showMsg('Company updated.')
   })
 }
