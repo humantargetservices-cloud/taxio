@@ -2,6 +2,8 @@ import { setRouteRunner } from './nav.js'
 import { mountLanding } from './pages/landing.js'
 import { mountRegister } from './pages/register.js'
 import { mountLoginCompany } from './pages/loginCompany.js'
+import { mountForgotPasswordCompany } from './pages/forgotPasswordCompany.js'
+import { mountResetPasswordCompany } from './pages/resetPasswordCompany.js'
 import { mountPendingApproval } from './pages/pendingApproval.js'
 import { mountDashboardCompany } from './pages/dashboardCompany.js'
 import { mountChangePasswordCompany } from './pages/changePasswordCompany.js'
@@ -83,6 +85,14 @@ function route() {
   }
   if (path === '/login/company') {
     mountLoginCompany(root)
+    return
+  }
+  if (path === '/forgot-password') {
+    mountForgotPasswordCompany(root)
+    return
+  }
+  if (path === '/reset-password') {
+    mountResetPasswordCompany(root)
     return
   }
   if (path === '/pending-approval') {

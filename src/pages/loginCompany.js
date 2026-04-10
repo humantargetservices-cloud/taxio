@@ -30,6 +30,9 @@ export function mountLoginCompany(root) {
             <div>
               <label class="text-sm font-bold text-gray-900">Password</label>
               <input name="password" type="password" required autocomplete="current-password" placeholder="Enter your password" class="mt-1.5 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" />
+              <p class="mt-2 text-right">
+                <a href="/forgot-password" class="text-sm font-semibold text-blue-600 hover:underline">Forgot password?</a>
+              </p>
             </div>
             <p id="login-err" class="hidden rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
             <button type="submit" class="w-full rounded-lg bg-gray-900 py-3.5 text-sm font-bold text-white shadow-md hover:bg-gray-800">Login</button>
