@@ -8,7 +8,14 @@ import { mountChangePasswordCompany } from './pages/changePasswordCompany.js'
 import { mountBookCompany } from './pages/bookCompany.js'
 import { mountAdminLogin } from './pages/adminLogin.js'
 import { mountAdminDashboard } from './pages/adminDashboard.js'
-import { mountTerms, mountTermsRiders, mountPrivacy } from './pages/legal.js'
+import {
+  mountTerms,
+  mountTermsRiders,
+  mountPrivacy,
+  mountLegalNotice,
+  mountCompanyTerms,
+  mountContact,
+} from './pages/legal.js'
 import { mountTaxiDirectory } from './pages/taxiDirectory.js'
 import { resolveBookSlugForRouter } from './lib/tenant.js'
 
@@ -60,6 +67,18 @@ function route() {
   }
   if (path === '/privacy') {
     mountPrivacy(root)
+    return
+  }
+  if (path === '/legal-notice') {
+    mountLegalNotice(root)
+    return
+  }
+  if (path === '/company-terms') {
+    mountCompanyTerms(root)
+    return
+  }
+  if (path === '/contact') {
+    mountContact(root)
     return
   }
   if (path === '/login/company') {

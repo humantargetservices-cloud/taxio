@@ -3,6 +3,7 @@ import {
   createQuickBookingLog,
   fetchFleetCarTypesForBooking,
 } from '../lib/api.js'
+import { TERMS_VERSION_BOOKING_RIDER } from '../lib/legalVersions.js'
 import { effectivePricingForTypes, resolveBookingCarTypes } from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
@@ -663,9 +664,17 @@ export async function mountBookCompany(root, slug) {
 
             <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
               <label class="flex cursor-pointer items-start gap-2">
-                <input type="checkbox" id="bk-terms" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-yellow-500 focus:ring-yellow-500" />
-                <span class="text-sm text-gray-700">I accept the <a href="/terms/riders" class="font-semibold text-blue-600 hover:underline">terms and conditions</a> for riders</span>
+                <input type="checkbox" id="bk-terms" class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-yellow-500 focus:ring-yellow-500" />
+                <span class="text-sm text-gray-700">I agree to the <a href="/terms" class="font-semibold text-blue-600 hover:underline">Terms of Use</a>, <a href="/company-terms" class="font-semibold text-blue-600 hover:underline">Company Terms</a>, and <a href="/privacy" class="font-semibold text-blue-600 hover:underline">Privacy Policy</a></span>
               </label>
+              <p class="mt-2 text-xs leading-relaxed text-gray-600">By submitting this request, you acknowledge that TAXIO acts only as a platform connecting you with independent taxi companies. The transport service is provided solely by the selected taxi company, which is fully responsible for the ride.</p>
+              <p class="mt-2 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-500">
+                <a href="/terms/riders" class="hover:text-gray-700 hover:underline">Booking terms</a>
+                <span aria-hidden="true">·</span>
+                <a href="/legal-notice" class="hover:text-gray-700 hover:underline">Legal notice</a>
+                <span aria-hidden="true">·</span>
+                <a href="/contact" class="hover:text-gray-700 hover:underline">Contact</a>
+              </p>
             </div>
 
             <p id="bk-err" class="hidden text-sm text-red-600"></p>
@@ -859,7 +868,8 @@ Car type: ${selectedCar}`
   waBtn.addEventListener('click', async () => {
     errEl.classList.add('hidden')
     if (!termsEl.checked) {
-      errEl.textContent = 'Please accept the terms to continue.'
+      errEl.textContent =
+        'Please agree to the Terms of Use, Company Terms, and Privacy Policy to continue.'
       errEl.classList.remove('hidden')
       return
     }
@@ -907,6 +917,11 @@ Car type: ${selectedCar}`
       customer_phone: phone,
       ride_datetime: rideDateIso,
       notes: `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLine}`,
+      termsAcceptance: {
+        terms_accepted: true,
+        accepted_at: new Date().toISOString(),
+        terms_version: TERMS_VERSION_BOOKING_RIDER,
+      },
     })
     window.open(url, '_blank', 'noopener,noreferrer')
   })

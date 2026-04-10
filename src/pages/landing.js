@@ -310,6 +310,13 @@ export function mountLanding(root) {
   <footer class="px-4 py-8 ${t ? 'bg-slate-950' : 'bg-gray-900'}">
     <div class="container mx-auto max-w-6xl text-center">
       <p class="text-sm text-gray-400">${o.copyright}</p>
+      <p class="mt-4 flex flex-wrap justify-center gap-x-3 gap-y-2 text-xs text-gray-500 sm:gap-x-4">
+        <a href="/legal-notice" class="hover:text-gray-300 hover:underline">${o.footerLegalNotice}</a>
+        <a href="/terms" class="hover:text-gray-300 hover:underline">${o.footerTerms}</a>
+        <a href="/company-terms" class="hover:text-gray-300 hover:underline">${o.footerCompanyTerms}</a>
+        <a href="/privacy" class="hover:text-gray-300 hover:underline">${o.footerPrivacy}</a>
+        <a href="/contact" class="hover:text-gray-300 hover:underline">${o.footerContact}</a>
+      </p>
     </div>
   </footer>
 </div>`

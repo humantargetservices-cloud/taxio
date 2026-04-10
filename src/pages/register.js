@@ -1,5 +1,6 @@
 import { navigate } from '../nav.js'
 import { registerCompanyOwner } from '../lib/api.js'
+import { REGISTRATION_TERMS_BUNDLE } from '../lib/legalVersions.js'
 import { signOutEverywhere } from '../lib/auth.js'
 import { translations } from '../i18n.js'
 import { icon } from '../lib/icons.js'
@@ -104,10 +105,7 @@ export function mountRegister(root) {
           <div id="terms-wrap" class="flex items-start gap-3 rounded-lg border-2 p-4 transition-colors ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-gray-200 bg-gray-50'}">
             <input type="checkbox" id="terms" name="terms" class="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-yellow-500 focus:ring-yellow-500 dark:border-slate-500 dark:bg-slate-700" />
             <label for="terms" class="cursor-pointer text-sm leading-relaxed ${dark ? 'text-gray-300' : 'text-gray-600'}">
-              ${R.termsLead}
-              <a href="/terms" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.termsLink}</a>
-              ${R.termsMid}
-              <a href="/privacy" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.privacyLink}</a>
+              ${R.termsLead}<a href="/terms" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.termsOfUse}</a>${R.termsJoin}<a href="/company-terms" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.termsCompany}</a>${R.termsAnd}<a href="/privacy" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.privacyLink}</a>
             </label>
           </div>
 
@@ -249,6 +247,8 @@ export function mountRegister(root) {
       email: fd.get('email'),
       city: fd.get('city'),
       country: null,
+      termsAcceptedAt: new Date().toISOString(),
+      termsVersion: REGISTRATION_TERMS_BUNDLE,
     }
     const btn = root.querySelector('#btn-submit')
     btn.disabled = true

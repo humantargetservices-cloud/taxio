@@ -19,7 +19,8 @@ function apiUrl(path) {
  * Auth user is created only after admin approval via server API.
  */
 export async function registerCompanyOwner(payload) {
-  const { email, companyName, vatNumber, phone, city, country } = payload
+  const { email, companyName, vatNumber, phone, city, country, termsAcceptedAt, termsVersion } =
+    payload
 
   const slug = slugFromCompanyName(companyName)
   if (!slug || slug.length < 2) {
@@ -31,6 +32,7 @@ export async function registerCompanyOwner(payload) {
   }
 
   try {
+    // termsAcceptedAt / termsVersion: for future backend audit (terms_accepted, accepted_at, terms_version).
     const response = await fetch(apiUrl('/api/register-company'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -42,6 +44,8 @@ export async function registerCompanyOwner(payload) {
         city,
         country: country || null,
         termsAccepted: true,
+        termsAcceptedAt: termsAcceptedAt || null,
+        termsVersion: termsVersion || null,
       }),
     })
     const body = await response.json().catch(() => ({}))
@@ -152,9 +156,30 @@ export async function createBookingRequest(row) {
   return { error }
 }
 
+function riderTermsColumnsMissing(err) {
+  const m = String(err?.message || '').toLowerCase()
+  return (
+    m.includes('rider_terms_accepted') ||
+    m.includes('rider_terms_accepted_at') ||
+    m.includes('rider_terms_version')
+  )
+}
+
+function bookingLegalNotesFallback(row, baseNote) {
+  if (!row.termsAcceptance || typeof row.termsAcceptance !== 'object') return baseNote || null
+  const a = row.termsAcceptance
+  const tag = `taxio_legal[terms_accepted=${a.terms_accepted === true};accepted_at=${a.accepted_at || ''};terms_version=${a.terms_version || ''}]`
+  return baseNote ? `${baseNote} | ${tag}` : tag
+}
+
 /** Log a quick-book intent (e.g. after WhatsApp) with minimal fields. */
 export async function createQuickBookingLog(row) {
-  const payload = {
+  const baseNote = row.notes || ''
+  const a = row.termsAcceptance && typeof row.termsAcceptance === 'object' ? row.termsAcceptance : null
+  const acceptedAt = a?.accepted_at || new Date().toISOString()
+  const version = a?.terms_version != null ? String(a.terms_version) : null
+
+  const basePayload = {
     company_id: row.company_id,
     pickup_address: row.pickup_address,
     dropoff_address: row.dropoff_address,
@@ -163,10 +188,30 @@ export async function createQuickBookingLog(row) {
     customer_phone: row.customer_phone ?? '',
     customer_email: null,
     ride_datetime: row.ride_datetime ?? new Date().toISOString(),
-    notes: row.notes || null,
+    notes: baseNote || null,
     status: 'new',
   }
-  const { error } = await supabase.from('booking_requests').insert(payload)
+
+  const legalPayload =
+    a && a.terms_accepted === true
+      ? {
+          rider_terms_accepted: true,
+          rider_terms_accepted_at: acceptedAt,
+          rider_terms_version: version,
+        }
+      : {}
+
+  let payload = { ...basePayload, ...legalPayload }
+  let { error } = await supabase.from('booking_requests').insert(payload)
+
+  if (error && riderTermsColumnsMissing(error)) {
+    payload = {
+      ...basePayload,
+      notes: bookingLegalNotesFallback(row, baseNote),
+    }
+    ;({ error } = await supabase.from('booking_requests').insert(payload))
+  }
+
   return { error }
 }
 

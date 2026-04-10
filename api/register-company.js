@@ -111,6 +111,12 @@ export default async function handler(req, res) {
     const email = normalizeEmail(body.email)
     const city = required(body.city)
     const termsAccepted = !!body.termsAccepted
+    let companyTermsAcceptedAt = new Date().toISOString()
+    if (body.termsAcceptedAt) {
+      const d = new Date(body.termsAcceptedAt)
+      if (!Number.isNaN(d.getTime())) companyTermsAcceptedAt = d.toISOString()
+    }
+    const companyTermsVersion = String(body.termsVersion || '').trim() || null
     const normalizedVat = normalizeVatForCompare(vatNumberInput)
     const normalizedPhone = normalizePhoneForCompare(phoneInput)
 
@@ -195,25 +201,53 @@ export default async function handler(req, res) {
       })
     }
 
-    const { data: company, error: cErr } = await supabase
+    const baseCompanyRow = {
+      name: companyName,
+      slug,
+      vat_number: normalizedVat,
+      email,
+      phone: phoneInput.trim(),
+      city,
+      country: null,
+      status: 'pending',
+      owner_user_id: null,
+      slogan: 'Your Ride, Your Way, Anytime!',
+      availability_status: 'available',
+      subscription_plan: 'basic',
+      pricing: DEFAULT_PRICING,
+    }
+
+    const legalCompanyRow = {
+      company_terms_accepted: true,
+      company_terms_accepted_at: companyTermsAcceptedAt,
+      company_terms_version: companyTermsVersion,
+    }
+
+    function companyTermsColumnsMissing(err) {
+      const m = String(err?.message || '').toLowerCase()
+      return (
+        m.includes('company_terms_accepted') ||
+        m.includes('company_terms_accepted_at') ||
+        m.includes('company_terms_version')
+      )
+    }
+
+    let { data: company, error: cErr } = await supabase
       .from('companies')
-      .insert({
-        name: companyName,
-        slug,
-        vat_number: normalizedVat,
-        email,
-        phone: phoneInput.trim(),
-        city,
-        country: null,
-        status: 'pending',
-        owner_user_id: null,
-        slogan: 'Your Ride, Your Way, Anytime!',
-        availability_status: 'available',
-        subscription_plan: 'basic',
-        pricing: DEFAULT_PRICING,
-      })
+      .insert({ ...baseCompanyRow, ...legalCompanyRow })
       .select('id, name, slug, email, vat_number, phone, city, status, created_at')
       .single()
+
+    if (cErr && companyTermsColumnsMissing(cErr)) {
+      console.warn(
+        '[register-company] Legal acceptance columns missing; retry without them. Apply supabase/migration_legal_acceptance.sql.'
+      )
+      ;({ data: company, error: cErr } = await supabase
+        .from('companies')
+        .insert(baseCompanyRow)
+        .select('id, name, slug, email, vat_number, phone, city, status, created_at')
+        .single())
+    }
 
     if (cErr) {
       console.error('[register-company:insert]', cErr)

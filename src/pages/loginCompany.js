@@ -40,6 +40,17 @@ export function mountLoginCompany(root) {
           Don't have an account?
           <a href="/register" class="font-semibold text-blue-600 hover:underline">Register here</a>
         </p>
+        <p class="mt-4 flex flex-wrap justify-center gap-x-3 gap-y-1 text-center text-xs text-gray-500">
+          <a href="/terms" class="hover:text-gray-800 hover:underline">Terms of Use</a>
+          <span class="text-gray-300" aria-hidden="true">·</span>
+          <a href="/company-terms" class="hover:text-gray-800 hover:underline">Company Terms</a>
+          <span class="text-gray-300" aria-hidden="true">·</span>
+          <a href="/privacy" class="hover:text-gray-800 hover:underline">Privacy</a>
+          <span class="text-gray-300" aria-hidden="true">·</span>
+          <a href="/legal-notice" class="hover:text-gray-800 hover:underline">Legal notice</a>
+          <span class="text-gray-300" aria-hidden="true">·</span>
+          <a href="/contact" class="hover:text-gray-800 hover:underline">Contact</a>
+        </p>
       </div>
     </div>`
 
