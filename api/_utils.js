@@ -54,6 +54,17 @@ export function makeResendClient() {
   return new Resend(key)
 }
 
+/** Company-facing email / DB `preferred_locale`: nl default, matches app UI. */
+const COMPANY_UI_LOCALES = ['en', 'fr', 'nl']
+export const DEFAULT_COMPANY_LOCALE = 'nl'
+
+export function normalizeCompanyLocale(raw) {
+  const s = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+  return COMPANY_UI_LOCALES.includes(s) ? s : DEFAULT_COMPANY_LOCALE
+}
+
 /** Escape text for HTML email bodies (avoid template injection). */
 export function escapeHtmlEmail(s) {
   return String(s ?? '')

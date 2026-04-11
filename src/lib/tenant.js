@@ -16,7 +16,7 @@
 
 export const BOOK_PATH_PREFIX = '/book/'
 
-const DEFAULT_RESERVED = new Set(['www', 'app', 'admin', 'api', 'mail', 'cdn'])
+const DEFAULT_RESERVED = new Set(['www', 'app', 'admin', 'api', 'mail', 'cdn', 'demo'])
 
 function bookingRootDomain() {
   return String(import.meta.env.VITE_TAXIO_BOOKING_ROOT_DOMAIN || '')

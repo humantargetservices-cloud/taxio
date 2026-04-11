@@ -6,6 +6,7 @@ import {
   makeTempPassword,
   safeSendEmail,
   validateSupabaseServiceEnv,
+  normalizeCompanyLocale,
 } from './_utils.js'
 
 function isDuplicateAuthEmailError(err) {
@@ -52,6 +53,86 @@ async function assertEmailNotLinkedToOtherCompany(supabase, userId, companyId) {
     }
   }
   return { ok: true }
+}
+
+function approvalEmailForLocale(locale, ctx) {
+  const loc = normalizeCompanyLocale(locale)
+  const esc = ctx.escape
+  const { companyName, vat, em, city, bookingUrl, loginUrl, tempPassword, qrSrc } = ctx
+
+  const copy = {
+    en: {
+      subject: 'TAXIO — Your company is approved',
+      greet: 'Hello',
+      lead: 'Your registration is <strong>approved</strong>. Sign in below with your temporary password.',
+      nameL: 'Name',
+      vatL: 'VAT',
+      emailL: 'Email',
+      cityL: 'City',
+      booking: 'Public booking page',
+      qrHint: 'Share this link or QR with customers.',
+      login: 'Dashboard login',
+      user: 'Email (login)',
+      pass: 'Temporary password',
+      mustChange: 'You must change your password on first login.',
+      signoff: '— TAXIO',
+    },
+    fr: {
+      subject: 'TAXIO — Entreprise approuvée',
+      greet: 'Bonjour',
+      lead: 'Votre inscription est <strong>approuvée</strong>. Connectez-vous avec le mot de passe temporaire ci-dessous.',
+      nameL: 'Nom',
+      vatL: 'TVA',
+      emailL: 'E-mail',
+      cityL: 'Ville',
+      booking: 'Page de réservation publique',
+      qrHint: 'Partagez ce lien ou ce QR code avec vos clients.',
+      login: 'Connexion tableau de bord',
+      user: 'E-mail (connexion)',
+      pass: 'Mot de passe temporaire',
+      mustChange: 'Vous devez changer votre mot de passe à la première connexion.',
+      signoff: '— TAXIO',
+    },
+    nl: {
+      subject: 'TAXIO — Uw bedrijf is goedgekeurd',
+      greet: 'Beste',
+      lead: 'Uw registratie is <strong>goedgekeurd</strong>. Log in met het tijdelijke wachtwoord hieronder.',
+      nameL: 'Naam',
+      vatL: 'BTW',
+      emailL: 'E-mail',
+      cityL: 'Stad',
+      booking: 'Openbare boekingspagina',
+      qrHint: 'Deel deze link of QR-code met klanten.',
+      login: 'Dashboardlogin',
+      user: 'E-mail (login)',
+      pass: 'Tijdelijk wachtwoord',
+      mustChange: 'Wijzig dit wachtwoord bij de eerste login.',
+      signoff: '— TAXIO',
+    },
+  }
+  const t = copy[loc]
+  const html = `
+      <div style="font-family:system-ui,Segoe UI,sans-serif;line-height:1.5;color:#111;font-size:15px;">
+        <p>${esc(t.greet)} ${esc(companyName)},</p>
+        <p>${t.lead}</p>
+        <ul style="margin:0.75em 0;padding-left:1.2em;">
+          <li><strong>${esc(t.nameL)}:</strong> ${esc(companyName)}</li>
+          <li><strong>${esc(t.vatL)}:</strong> ${vat}</li>
+          <li><strong>${esc(t.emailL)}:</strong> ${em}</li>
+          <li><strong>${esc(t.cityL)}:</strong> ${city}</li>
+        </ul>
+        <h2 style="font-size:15px;margin:1.2em 0 0.4em;">${esc(t.booking)}</h2>
+        <p><a href="${esc(bookingUrl)}">${esc(bookingUrl)}</a></p>
+        <p style="margin-top:0.5em;color:#444;">${esc(t.qrHint)}</p>
+        <p style="margin-top:0.5em;"><img src="${esc(qrSrc)}" alt="QR" width="180" height="180" style="border:1px solid #e5e7eb;border-radius:8px;" /></p>
+        <h2 style="font-size:15px;margin:1.2em 0 0.4em;">${esc(t.login)}</h2>
+        <p><strong>${esc(t.user)}:</strong> ${em}</p>
+        <p><strong>${esc(t.pass)}:</strong> <code style="font-size:14px;background:#f3f4f6;padding:2px 6px;border-radius:4px;">${esc(tempPassword)}</code></p>
+        <p><a href="${esc(loginUrl)}">${esc(loginUrl)}</a></p>
+        <p style="margin-top:1em;"><strong>${esc(t.mustChange)}</strong></p>
+        <p style="margin-top:1.25em;color:#444;">${esc(t.signoff)}</p>
+      </div>`
+  return { subject: t.subject, html }
 }
 
 async function ensureAdminFromBearer(supabase, authHeader) {
@@ -235,41 +316,26 @@ export default async function handler(req, res) {
     const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(bookingUrl)}`
 
     const esc = escapeHtmlEmail
-    const name = esc(company.name)
     const vat = esc(company.vat_number || '—')
     const em = esc(company.email)
     const city = esc(company.city || '—')
+    const uiLocale = normalizeCompanyLocale(company.preferred_locale)
 
-    const approvalHtml = `
-      <div style="font-family:system-ui,Segoe UI,sans-serif;line-height:1.5;color:#111;">
-        <p>Hello ${name},</p>
-        <p>Your TAXIO registration has been <strong>approved</strong>. Your company dashboard access is now active.</p>
-
-        <h2 style="font-size:16px;margin:1.25em 0 0.5em;">Company details</h2>
-        <ul>
-          <li><strong>Name:</strong> ${name}</li>
-          <li><strong>VAT:</strong> ${vat}</li>
-          <li><strong>Email:</strong> ${em}</li>
-          <li><strong>City:</strong> ${city}</li>
-        </ul>
-
-        <h2 style="font-size:16px;margin:1.25em 0 0.5em;">Your public booking page</h2>
-        <p><a href="${esc(bookingUrl)}">${esc(bookingUrl)}</a></p>
-        <p style="margin-top:0.75em;">Share this link with customers. You can also share the QR code below (e.g. on a business card or poster).</p>
-        <p style="margin-top:0.5em;"><img src="${esc(qrSrc)}" alt="Booking page QR" width="180" height="180" style="border:1px solid #e5e7eb;border-radius:8px;" /></p>
-
-        <h2 style="font-size:16px;margin:1.25em 0 0.5em;">Sign in to the company dashboard</h2>
-        <p><strong>Username (login email):</strong> ${em}</p>
-        <p><strong>Temporary password:</strong> <code style="font-size:14px;background:#f3f4f6;padding:2px 6px;border-radius:4px;">${esc(tempPassword)}</code></p>
-        <p><a href="${esc(loginUrl)}">${esc(loginUrl)}</a></p>
-        <p style="margin-top:1em;"><strong>Important:</strong> This password is temporary. You must change it on first login.</p>
-        <p style="margin-top:1.5em;color:#444;">Thank you,<br/>TAXIO</p>
-      </div>
-    `
+    const { subject: approvalSubject, html: approvalHtml } = approvalEmailForLocale(uiLocale, {
+      escape: esc,
+      companyName: company.name,
+      vat,
+      em,
+      city,
+      bookingUrl,
+      loginUrl,
+      tempPassword,
+      qrSrc,
+    })
 
     const mail = await safeSendEmail({
       to: company.email,
-      subject: 'TAXIO — your company is approved (login details inside)',
+      subject: approvalSubject,
       html: approvalHtml,
     })
     if (mail?.skipped || mail?.ok === false) {

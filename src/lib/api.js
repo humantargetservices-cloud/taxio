@@ -19,8 +19,17 @@ function apiUrl(path) {
  * Auth user is created only after admin approval via server API.
  */
 export async function registerCompanyOwner(payload) {
-  const { email, companyName, vatNumber, phone, city, country, termsAcceptedAt, termsVersion } =
-    payload
+  const {
+    email,
+    companyName,
+    vatNumber,
+    phone,
+    city,
+    country,
+    termsAcceptedAt,
+    termsVersion,
+    locale,
+  } = payload
 
   const slug = slugFromCompanyName(companyName)
   if (!slug || slug.length < 2) {
@@ -46,6 +55,7 @@ export async function registerCompanyOwner(payload) {
         termsAccepted: true,
         termsAcceptedAt: termsAcceptedAt || null,
         termsVersion: termsVersion || null,
+        locale: locale || null,
       }),
     })
     const body = await response.json().catch(() => ({}))
@@ -490,7 +500,7 @@ export async function countCarsByCompanyIdsAdmin() {
 export async function listApprovedCompaniesDirectory() {
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name, slug, city, country')
+    .select('id, name, slug, city, country, availability_status')
     .eq('status', 'approved')
     .order('name', { ascending: true })
   if (error) throw error

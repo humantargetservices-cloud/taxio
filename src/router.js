@@ -10,16 +10,10 @@ import { mountChangePasswordCompany } from './pages/changePasswordCompany.js'
 import { mountBookCompany } from './pages/bookCompany.js'
 import { mountAdminLogin } from './pages/adminLogin.js'
 import { mountAdminDashboard } from './pages/adminDashboard.js'
-import {
-  mountTerms,
-  mountTermsRiders,
-  mountPrivacy,
-  mountLegalNotice,
-  mountCompanyTerms,
-  mountContact,
-} from './pages/legal.js'
+import { mountTerms, mountPrivacy, mountCompanyTerms, mountContact } from './pages/legal.js'
 import { mountTaxiDirectory } from './pages/taxiDirectory.js'
 import { resolveBookSlugForRouter } from './lib/tenant.js'
+import { getLocale, syncDocumentLang } from './lib/locale.js'
 
 function mountNotFound(root) {
   root.innerHTML = `
@@ -33,6 +27,7 @@ function mountNotFound(root) {
 function route() {
   const root = document.getElementById('app')
   if (!root) return
+  syncDocumentLang(getLocale())
 
   const path = window.location.pathname
   const bookSlug = resolveBookSlugForRouter(path)
@@ -52,8 +47,9 @@ function route() {
     mountRegister(root)
     return
   }
-  if (path === '/terms/riders') {
-    mountTermsRiders(root)
+  if (path === '/terms/riders' || path === '/legal-notice') {
+    window.history.replaceState({}, '', '/terms')
+    mountTerms(root)
     return
   }
   if (path === '/terms') {
@@ -69,10 +65,6 @@ function route() {
   }
   if (path === '/privacy') {
     mountPrivacy(root)
-    return
-  }
-  if (path === '/legal-notice') {
-    mountLegalNotice(root)
     return
   }
   if (path === '/company-terms') {

@@ -1,4 +1,5 @@
 import { navigate } from '../nav.js'
+import { translations, tDashboard } from '../i18n.js'
 import {
   getSession,
   getMyProfile,
@@ -16,6 +17,7 @@ import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
+import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 
 const dashState = {
   tab: 'overview',
@@ -48,10 +50,12 @@ function overviewCard(opts) {
 }
 
 export async function mountDashboardCompany(root) {
+  syncDocumentLang(getLocale())
+  const loadLang = getLocale()
   root.innerHTML = `
     <div class="min-h-screen flex flex-col items-center justify-center bg-[#eef0f3]">
       <div class="h-10 w-10 animate-pulse rounded-full border-2 border-gray-300 border-t-yellow-500"></div>
-      <p class="mt-3 text-sm text-gray-500">Loading dashboard…</p>
+      <p class="mt-3 text-sm text-gray-500">${tDashboard(loadLang).loading}</p>
     </div>`
 
   const session = await getSession()
@@ -96,23 +100,27 @@ export async function mountDashboardCompany(root) {
     bookings = []
   }
 
+  const dashLang = getLocale()
+  const td = tDashboard(dashLang)
+
   const vatLine = company.vat_number
-    ? `MY BTW ${escapeHtml(company.vat_number)}`
-    : 'MY BTW —'
+    ? `${td.vatLine} ${escapeHtml(company.vat_number)}`
+    : `${td.vatLine} —`
   const bookPublicUrl = absolutePublicBookingUrl(company.slug)
+  const bookingQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(bookPublicUrl)}`
   const pricing = pricingOf(company)
   const avail = company.availability_status || 'available'
 
   const tabsR1 = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'cars', label: 'Cars' },
-    { id: 'pricing', label: 'Set Pricing' },
-    { id: 'essential', label: 'Essential Info' },
+    { id: 'overview', label: td.tabOverview },
+    { id: 'cars', label: td.tabCars },
+    { id: 'pricing', label: td.tabPricing },
+    { id: 'essential', label: td.tabEssential },
   ]
   const tabsR2 = [
-    { id: 'drivers', label: 'Drivers' },
-    { id: 'ride-requests', label: 'Ride Requests' },
-    { id: 'license', label: 'License Plan' },
+    { id: 'drivers', label: td.tabDrivers },
+    { id: 'ride-requests', label: td.tabRides },
+    { id: 'license', label: td.tabLicense },
   ]
 
   function tabRowHtml(row, current) {
@@ -129,56 +137,62 @@ export async function mountDashboardCompany(root) {
 
   if (t === 'overview') {
     bodyHtml = `
+      <div class="mb-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-gray-900">${td.shareTitle}</h2>
+            <p class="mt-1 text-sm text-gray-500">${td.shareSubtitle}</p>
+            <div class="mt-4 flex max-w-full flex-col gap-2 sm:flex-row sm:items-center">
+              <input type="text" readonly value="${escapeHtml(bookPublicUrl)}" class="min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-800 sm:text-sm" id="dash-booking-url-field" />
+              <div class="flex flex-wrap gap-2">
+                <button type="button" id="dash-copy-booking-url" class="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-gray-800">${td.copyLink}</button>
+                <a href="${escapeHtml(bookPublicUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50">${icon.eye('h-4 w-4')}${td.openLive}</a>
+                <a href="${escapeHtml(bookingQrSrc)}" download="taxio-booking-qr.png" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 hover:bg-amber-100">${td.downloadQr}</a>
+              </div>
+            </div>
+            <p id="dash-copy-feedback" class="mt-2 hidden text-xs font-medium text-emerald-600">${td.copied}</p>
+          </div>
+          <div class="mx-auto shrink-0 rounded-xl border border-gray-100 bg-white p-2 shadow-inner lg:mx-0">
+            <img src="${escapeHtml(bookingQrSrc)}" width="160" height="160" alt="" class="h-40 w-40 rounded-lg" loading="lazy" decoding="async" />
+          </div>
+        </div>
+      </div>
       <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         ${overviewCard({
           id: 'add-car',
           color: 'bg-blue-500',
           iconHtml: icon.plus('h-8 w-8 text-white'),
-          title: 'Add Car',
+          title: td.cardAddCar,
         })}
         ${overviewCard({
           id: 'set-pricing',
           color: 'bg-violet-500',
           iconHtml: `<span class="text-2xl font-bold text-white">$</span>`,
-          title: 'Set Pricing',
+          title: td.cardPricing,
         })}
         ${overviewCard({
           id: 'customize',
           color: 'bg-yellow-400',
           iconHtml: icon.palette('h-8 w-8 text-gray-900'),
-          title: 'Customize Page',
+          title: td.cardCustomize,
         })}
         ${overviewCard({
           id: 'essential',
           color: 'bg-emerald-500',
           iconHtml: icon.helpCircle('h-8 w-8 text-white'),
-          title: 'Essential Information',
+          title: td.cardEssential,
         })}
-        <div class="flex flex-col rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-md">
-          <div class="mb-3 flex items-center justify-center gap-2 text-sm font-bold text-gray-900">
-            ${icon.eye('h-5 w-5 text-amber-600')}
-            Your Booking Page
-          </div>
-          <a href="${escapeHtml(bookPublicUrl)}" class="mb-2 inline-flex items-center justify-center gap-2 rounded-xl bg-yellow-400 py-3 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">
-            ${icon.eye('h-4 w-4')}
-            View Live
-          </a>
-          <button type="button" data-action="qr" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-gray-200 bg-white py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50">
-            ${icon.sparkles('h-4 w-4')}
-            QR Code
-          </button>
-        </div>
         ${overviewCard({
           id: 'car-types',
           color: 'bg-orange-500',
           iconHtml: icon.car('h-8 w-8 text-white'),
-          title: 'Car Types',
+          title: td.cardCarTypes,
         })}
       </div>`
   } else if (t === 'cars') {
     const rows =
       cars.length === 0
-        ? `<p class="py-8 text-center text-sm text-gray-500">No vehicles yet. Add your first car below.</p>`
+        ? `<p class="py-8 text-center text-sm text-gray-500">${td.noCars}</p>`
         : cars
             .map(
               (c) => `
@@ -193,123 +207,123 @@ export async function mountDashboardCompany(root) {
         <span class="rounded-full bg-yellow-400 px-3 py-0.5 text-xs font-bold text-gray-900">${escapeHtml(c.car_type)}</span>
         <button type="button" data-edit-car="${escapeHtml(c.id)}" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-white">
           ${icon.pencil('h-3.5 w-3.5')}
-          Edit
+          ${td.edit}
         </button>
       </div>`
             )
             .join('')
     bodyHtml = `
       <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
-        <h2 class="text-lg font-bold text-gray-900">Registered Cars</h2>
-        <p class="text-sm text-gray-500">All vehicles with their types</p>
+        <h2 class="text-lg font-bold text-gray-900">${td.carsHead}</h2>
+        <p class="text-sm text-gray-500">${td.carsSub}</p>
         <div class="mt-6 space-y-3">${rows}</div>
         <button type="button" id="open-add-car" class="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-400 py-3.5 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">
           ${icon.plus('h-5 w-5')}
-          Add New Car
+          ${td.addCar}
         </button>
       </div>`
   } else if (t === 'pricing') {
     bodyHtml = `
       <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
-        <h2 class="text-lg font-bold text-gray-900">Set Pricing</h2>
-        <p class="text-sm text-gray-500">Configure pricing for all vehicle types</p>
+        <h2 class="text-lg font-bold text-gray-900">${td.pricingHead}</h2>
+        <p class="text-sm text-gray-500">${td.pricingSub}</p>
         <div id="pricing-form-mount" class="mt-6 space-y-4"></div>
-        <button type="button" id="save-pricing" class="mt-6 w-full rounded-xl bg-yellow-400 py-3.5 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">Save Pricing</button>
+        <button type="button" id="save-pricing" class="mt-6 w-full rounded-xl bg-yellow-400 py-3.5 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">${td.savePricing}</button>
       </div>`
   } else if (t === 'essential') {
     const slogan = company.slogan || 'Fast & Reliable Service'
     bodyHtml = `
       <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
-        <h2 class="text-lg font-bold text-gray-900">Company Information</h2>
-        <p class="text-sm text-gray-500">All essential business details</p>
+        <h2 class="text-lg font-bold text-gray-900">${td.essentialHead}</h2>
+        <p class="text-sm text-gray-500">${td.essentialSub}</p>
         <div class="mt-6 space-y-4">
           <div class="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div class="flex items-start gap-3">
               <span class="text-emerald-600">${icon.helpCircle('h-5 w-5')}</span>
               <div>
-                <p class="text-xs text-gray-500">Company Name</p>
+                <p class="text-xs text-gray-500">${td.companyName}</p>
                 <p class="font-bold text-gray-900">${escapeHtml(company.name)}</p>
               </div>
             </div>
-            <button type="button" data-edit-field="name" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}Edit</button>
+            <button type="button" data-edit-field="name" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}${td.edit}</button>
           </div>
           <div class="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div>
-              <p class="text-xs text-gray-500">Slogan</p>
+              <p class="text-xs text-gray-500">${td.slogan}</p>
               <p class="font-bold text-gray-900">${escapeHtml(slogan)}</p>
             </div>
-            <button type="button" data-edit-field="slogan" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}Edit</button>
+            <button type="button" data-edit-field="slogan" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}${td.edit}</button>
           </div>
           <div class="grid gap-4 sm:grid-cols-3">
             <div class="rounded-xl border border-gray-100 bg-white p-4">
               <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0">
-                  <p class="text-xs text-gray-500">Phone</p>
+                  <p class="text-xs text-gray-500">${td.phone}</p>
                   <p class="mt-1 text-sm font-semibold text-gray-900">${escapeHtml(company.phone || '—')}</p>
                 </div>
                 <span class="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Locked</span>
               </div>
-              <p class="mt-2 text-[11px] text-gray-400">Verification field — locked. Contact support to change.</p>
+              <p class="mt-2 text-[11px] text-gray-400">${td.lockedHint}</p>
             </div>
             <div class="rounded-xl border border-gray-100 bg-white p-4">
-              <p class="text-xs text-gray-500">Email</p>
+              <p class="text-xs text-gray-500">${td.email}</p>
               <p class="mt-1 text-sm font-semibold text-gray-900 break-all">${escapeHtml(company.email)}</p>
             </div>
             <div class="rounded-xl border border-gray-100 bg-white p-4">
-              <p class="text-xs text-gray-500">City</p>
+              <p class="text-xs text-gray-500">${td.city}</p>
               <p class="mt-1 text-sm font-semibold text-gray-900">${escapeHtml(company.city || '—')}</p>
             </div>
           </div>
           <div class="rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div class="flex items-center justify-between gap-4">
               <div>
-                <p class="text-xs text-gray-500">VAT / BTW number</p>
+                <p class="text-xs text-gray-500">${td.vatLine}</p>
                 <p class="font-bold text-gray-900">${escapeHtml(company.vat_number || '—')}</p>
               </div>
               <span class="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-500">Locked</span>
             </div>
-            <p class="mt-2 text-[11px] text-gray-400">Verification field — locked after registration.</p>
+            <p class="mt-2 text-[11px] text-gray-400">${td.lockedHintVat}</p>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div>
-              <p class="text-xs text-gray-500 mb-2">Car Types</p>
+              <p class="text-xs text-gray-500 mb-2">${td.carTypes}</p>
               <div class="flex flex-wrap gap-2">
                 <span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">Standard</span>
                 <span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">Van</span>
                 <span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">Luxury</span>
               </div>
             </div>
-            <button type="button" data-edit-field="contact" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}Edit email/city</button>
+            <button type="button" data-edit-field="contact" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}${td.edit}</button>
           </div>
         </div>
       </div>`
   } else if (t === 'drivers') {
     bodyHtml = `
       <div class="rounded-2xl border border-gray-200 bg-white p-10 text-center shadow-md">
-        <p class="font-semibold text-gray-900">Drivers</p>
-        <p class="mt-2 text-sm text-gray-500">Driver roster and assignments will be available in a future update.</p>
+        <p class="font-semibold text-gray-900">${td.driversHead}</p>
+        <p class="mt-2 text-sm text-gray-500">${td.driversSub}</p>
       </div>`
   } else if (t === 'ride-requests') {
     const filtered = [...bookings]
     bodyHtml = `
       <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
-        <h2 class="text-lg font-bold text-gray-900">Ride Requests</h2>
-        <p class="text-sm text-gray-500">View and respond to requests</p>
+        <h2 class="text-lg font-bold text-gray-900">${td.ridesHead}</h2>
+        <p class="text-sm text-gray-500">${td.ridesSub}</p>
         <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <input type="search" id="ride-search" placeholder="Search by location, contact, or date" class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" />
+          <input type="search" id="ride-search" placeholder="${escapeHtml(td.ridesSearch)}" class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" />
           <button type="button" disabled title="Coming soon" class="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-400">
-            Export to Excel
+            ${td.exportSoon}
           </button>
         </div>
         <div class="mt-4 overflow-x-auto">
           <table class="w-full min-w-[720px] text-left text-sm">
             <thead>
               <tr class="border-b border-gray-200 text-xs font-semibold uppercase text-gray-500">
-                <th class="py-3 pr-4">Passenger</th>
-                <th class="py-3 pr-4">From</th>
-                <th class="py-3 pr-4">To</th>
-                <th class="py-3 pr-4">Date &amp; Time</th>
-                <th class="py-3">Actions</th>
+                <th class="py-3 pr-4">${td.thPassenger}</th>
+                <th class="py-3 pr-4">${td.thFrom}</th>
+                <th class="py-3 pr-4">${td.thTo}</th>
+                <th class="py-3 pr-4">${td.thWhen}</th>
+                <th class="py-3">${td.thActions}</th>
               </tr>
             </thead>
             <tbody id="ride-tbody">
@@ -327,8 +341,8 @@ export async function mountDashboardCompany(root) {
                   <td class="py-3 pr-4 whitespace-nowrap text-gray-600">${escapeHtml(formatDateTime(b.ride_datetime))}</td>
                   <td class="py-3">
                     <div class="flex flex-wrap gap-2">
-                      <a href="${wa ? escapeHtml(wa) : '#'}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 ${!company.phone ? 'pointer-events-none opacity-40' : ''}">${icon.messageCircle('h-3.5 w-3.5')}WhatsApp</a>
-                      <a href="${escapeHtml(em)}" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50">${icon.mail('h-3.5 w-3.5')}Email</a>
+                      <a href="${wa ? escapeHtml(wa) : '#'}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 ${!company.phone ? 'pointer-events-none opacity-40' : ''}">${icon.messageCircle('h-3.5 w-3.5')}${td.wa}</a>
+                      <a href="${escapeHtml(em)}" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50">${icon.mail('h-3.5 w-3.5')}${td.mail}</a>
                     </div>
                   </td>
                 </tr>`
@@ -336,16 +350,16 @@ export async function mountDashboardCompany(root) {
                 .join('')}
             </tbody>
           </table>
-          ${filtered.length === 0 ? '<p class="py-8 text-center text-sm text-gray-500">No ride requests yet.</p>' : ''}
+          ${filtered.length === 0 ? `<p class="py-8 text-center text-sm text-gray-500">${td.noRides}</p>` : ''}
         </div>
       </div>`
   } else if (t === 'license') {
     const plan = company.subscription_plan === 'premium' ? 'Premium' : 'Basic'
     bodyHtml = `
       <div class="rounded-2xl border border-gray-200 bg-white p-8 shadow-md">
-        <h2 class="text-lg font-bold text-gray-900">License Plan</h2>
-        <p class="mt-2 text-sm text-gray-600">Your current plan: <span class="rounded-full bg-gray-900 px-3 py-0.5 text-xs font-bold text-white">${plan}</span></p>
-        <p class="mt-4 text-sm text-gray-500">Upgrade or billing changes are managed by TAXIO platform administrators.</p>
+        <h2 class="text-lg font-bold text-gray-900">${td.licenseHead}</h2>
+        <p class="mt-2 text-sm text-gray-600"><span class="rounded-full bg-gray-900 px-3 py-0.5 text-xs font-bold text-white">${plan}</span></p>
+        <p class="mt-4 text-sm text-gray-500">${td.licenseSub}</p>
       </div>`
   }
 
@@ -359,21 +373,27 @@ export async function mountDashboardCompany(root) {
             </div>
             <div>
               <h1 class="text-xl font-bold text-gray-900">${escapeHtml(company.name)}</h1>
-              <p class="text-xs text-gray-500">Dashboard</p>
+              <p class="text-xs text-gray-500">${td.dashBadge}</p>
               <p class="mt-1 text-xs font-medium text-gray-600">${vatLine}</p>
             </div>
           </div>
           <div class="flex flex-col items-end gap-2">
             <div class="flex flex-wrap items-center justify-end gap-2">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full border-2 border-green-500 text-xs font-bold text-green-600">100%</div>
-              <button type="button" data-help class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">${icon.helpCircle('h-4 w-4')}Help</button>
-              <div class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700">🇬🇧 GB</div>
-              <button type="button" id="co-logout" class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">${icon.logOut('h-4 w-4')}Logout</button>
+              <div class="flex rounded-full border border-gray-200 bg-white p-0.5 shadow-sm">
+                ${['nl', 'fr', 'en']
+                  .map(
+                    (lc) =>
+                      `<button type="button" data-dash-lang="${lc}" class="rounded-full px-2.5 py-1.5 text-xs font-semibold ${dashLang === lc ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'}">${lc.toUpperCase()}</button>`
+                  )
+                  .join('')}
+              </div>
+              <button type="button" data-help class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">${icon.helpCircle('h-4 w-4')}${td.help}</button>
+              <button type="button" id="co-logout" class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">${icon.logOut('h-4 w-4')}${td.logout}</button>
             </div>
             <select id="co-avail" class="rounded-full border border-gray-200 bg-white py-1.5 pl-3 pr-8 text-xs font-semibold text-gray-800 shadow-sm">
-              <option value="available" ${avail === 'available' ? 'selected' : ''}>●● Available</option>
-              <option value="busy" ${avail === 'busy' ? 'selected' : ''}>Busy</option>
-              <option value="offline" ${avail === 'offline' ? 'selected' : ''}>Offline</option>
+              <option value="available" ${avail === 'available' ? 'selected' : ''}>● ${td.availAvailable}</option>
+              <option value="busy" ${avail === 'busy' ? 'selected' : ''}>${td.availBusy}</option>
+              <option value="offline" ${avail === 'offline' ? 'selected' : ''}>${td.availOffline}</option>
             </select>
           </div>
         </div>
@@ -389,8 +409,11 @@ export async function mountDashboardCompany(root) {
       </main>
 
       <footer class="mx-auto max-w-6xl px-4 pb-8 text-center text-xs text-gray-500">
-        <p>© 2026 TAXIO. All rights reserved.</p>
-        <p class="mt-1 font-medium text-amber-600">Powered by TAXIO</p>
+        <p>© 2026 TAXIO</p>
+        <p class="mt-2">
+          <a href="/terms" class="font-medium text-gray-700 underline decoration-gray-300 underline-offset-2 hover:text-gray-900">${translations[dashLang]?.footerTerms || 'Terms'}</a>
+        </p>
+        <p class="mt-2 font-medium text-amber-700/90">${td.footerPowered}</p>
       </footer>
 
       <div id="dash-modal-root"></div>
@@ -410,7 +433,31 @@ export async function mountDashboardCompany(root) {
   })
 
   root.querySelector('[data-help]')?.addEventListener('click', () => {
-    window.alert('Help: contact support@taxio.be')
+    navigate('/contact')
+  })
+
+  root.querySelectorAll('[data-dash-lang]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const lc = b.getAttribute('data-dash-lang')
+      if (lc) setLocale(lc)
+      mountDashboardCompany(root)
+    })
+  })
+
+  root.querySelector('#dash-copy-booking-url')?.addEventListener('click', async () => {
+    const el = root.querySelector('#dash-booking-url-field')
+    const fb = root.querySelector('#dash-copy-feedback')
+    const url = el?.value || bookPublicUrl
+    try {
+      await navigator.clipboard.writeText(url)
+      fb?.classList.remove('hidden')
+      window.setTimeout(() => fb?.classList.add('hidden'), 2000)
+    } catch {
+      el?.select()
+      document.execCommand('copy')
+      fb?.classList.remove('hidden')
+      window.setTimeout(() => fb?.classList.add('hidden'), 2000)
+    }
   })
 
   root.querySelector('#co-avail')?.addEventListener('change', async (e) => {
@@ -448,10 +495,6 @@ export async function mountDashboardCompany(root) {
         window.alert('Customize page — coming soon.')
       }
     })
-  })
-
-  root.querySelector('[data-action="qr"]')?.addEventListener('click', () => {
-    window.alert('QR: ' + bookPublicUrl)
   })
 
   if (t === 'pricing') {

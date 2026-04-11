@@ -20656,7 +20656,7 @@ function Ox() {
 • Object to processing
 • Withdraw consent
 
-To exercise these rights, contact us at: privacy@taxio.be`
+To exercise these rights, contact us at: info@taxio.be`
         },
         {
           title: "8. Data Retention",
@@ -20692,7 +20692,7 @@ You can disable non-essential cookies in your browser settings.`
           title: "13. Contact Us",
           content: `For privacy questions or to exercise your GDPR rights:
 
-Email: privacy@taxio.be
+Email: info@taxio.be
 Data Protection Officer: dpo@taxio.be
 Address: TAXIO Privacy Team, Belgium
 
@@ -20769,7 +20769,7 @@ Website: www.dataprotectionauthority.be`
 • Vous opposer au traitement
 • Retirer votre consentement
 
-Pour exercer ces droits, contactez-nous à : privacy@taxio.be`
+Pour exercer ces droits, contactez-nous à : info@taxio.be`
         },
         {
           title: "8. Conservation des Données",
@@ -20805,7 +20805,7 @@ Vous pouvez désactiver les cookies non essentiels dans les paramètres de votre
           title: "13. Nous Contacter",
           content: `Pour les questions de confidentialité ou pour exercer vos droits RGPD :
 
-Email : privacy@taxio.be
+Email : info@taxio.be
 Délégué à la protection des données : dpo@taxio.be
 Adresse : TAXIO Privacy Team, Belgique
 
@@ -20882,7 +20882,7 @@ Site web : www.dataprotectionauthority.be`
 • Bezwaar te maken tegen verwerking
 • Toestemming in te trekken
 
-Om deze rechten uit te oefenen, neem contact met ons op via: privacy@taxio.be`
+Om deze rechten uit te oefenen, neem contact met ons op via: info@taxio.be`
         },
         {
           title: "8. Gegevensbewaring",
@@ -20918,7 +20918,7 @@ U kunt niet-essentiële cookies uitschakelen in uw browserinstellingen.`
           title: "13. Contact Opnemen",
           content: `Voor privacyvragen of om uw AVG-rechten uit te oefenen:
 
-E-mail: privacy@taxio.be
+E-mail: info@taxio.be
 Functionaris Gegevensbescherming: dpo@taxio.be
 Adres: TAXIO Privacy Team, België
 

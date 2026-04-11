@@ -4,130 +4,54 @@ import {
   fetchFleetCarTypesForBooking,
 } from '../lib/api.js'
 import { TERMS_VERSION_BOOKING_RIDER } from '../lib/legalVersions.js'
-import { effectivePricingForTypes, resolveBookingCarTypes } from '../lib/bookingCarTypes.js'
+import {
+  effectivePricingForTypes,
+  normalizeFleetCarType,
+  resolveBookingCarTypes,
+} from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
-
-const DEFAULT_SLOGAN = 'Your Ride, Your Way, Anytime!'
+import { tBooking } from '../i18n.js'
+import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
+import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
+import { getDemoBookingCompany, isDemoBookingSlug } from '../lib/demoBookingCompany.js'
+import { absolutePublicBookingUrl } from '../lib/tenant.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
+/** Same ordering as `resolveBookingCarTypes` (fleet / display sort). */
+const BOOKING_CAR_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
+
+function bookingCarTypeSeatsLabel(t) {
+  const s = String(t).toLowerCase()
+  if (s.includes('van')) return '1–7'
+  if (s.includes('lux')) return '1–3'
+  return '1–4'
+}
+
+/** Icon for booking vehicle type row (HTML string). */
+function bookingCarTypeIconHtml(t, sizeClass) {
+  const s = String(t).toLowerCase()
+  const c = `${sizeClass} shrink-0`
+  if (s.includes('van')) return icon.users(`${c} text-amber-600 dark:text-amber-400`)
+  if (s.includes('lux')) return icon.star(`${c} text-amber-600 dark:text-amber-400`)
+  return icon.car(`${c} text-slate-600 dark:text-slate-200`)
+}
+
 let googleMapsPlacesPromise = null
-let bookingPacObserver = null
-let bookingPacOutsideClose = null
-/** Single active booking address field (Google shares one `.pac-container`). */
-let taxioBookingPacActiveInput = null
-let bookingPacFocusInHandler = null
-let bookingPacPointerDownHandler = null
-let bookingPacEventRoot = null
-let bookingPacLayoutSync = null
-/** Map booking inputs → Places Autocomplete (registry for teardown / future hooks). */
-let taxioPlacesAcRegistry = new Map()
+/** Detach address controllers + doc listeners from the previous booking mount. */
+let taxioBookCompanyAddressCleanup = null
 
-/** Clear inline hide so Google can show predictions again. */
-function resetBookingPacContainers() {
-  document.querySelectorAll('.pac-container').forEach((el) => {
-    el.style.removeProperty('display')
-    el.style.removeProperty('visibility')
-  })
-}
-
-/** Force-close all Places dropdowns (shared .pac-container). */
-function forceHideBookingPacContainers() {
-  document.querySelectorAll('.pac-container').forEach((el) => {
-    el.style.display = 'none'
-  })
-}
-
-/** Remove rendered rows so the shared pac cannot show the previous field's predictions. */
-function clearStalePacItems() {
-  document.querySelectorAll('.pac-container').forEach((pac) => {
-    pac.querySelectorAll(':scope > .pac-item').forEach((row) => row.remove())
-  })
-}
-
-/** Fixed-position `.pac-container` often has `offsetParent === null` — use computed style only. */
-function isBookingPacContainerVisible(pac) {
-  if (!pac?.isConnected) return false
-  const st = window.getComputedStyle(pac)
-  return st.display !== 'none' && st.visibility !== 'hidden'
-}
-
-/**
- * One visible tagged panel to anchor under the input (avoids stacking the same rect on every node).
- * Prefers the container that actually holds suggestion rows.
- */
-function pickVisibleBookingPacForSync() {
-  const tagged = [...document.querySelectorAll('.pac-container.taxio-booking-pac')].filter(
-    isBookingPacContainerVisible
-  )
-  if (!tagged.length) return null
-  tagged.sort(
-    (a, b) =>
-      b.querySelectorAll(':scope > .pac-item').length -
-      a.querySelectorAll(':scope > .pac-item').length
-  )
-  return tagged[0]
-}
-
-/**
- * Keep a single native Google footer inside each *visible* panel only:
- * - Multiple sibling `:scope > .pac-logo` (Maps sometimes injects two).
- * - `.pac-logo` on the container AND a child `.pac-logo` (two paint sources for the same strip).
- */
-function dedupePacAttributionFooters() {
-  document.querySelectorAll('.pac-container').forEach((pac) => {
-    if (!isBookingPacContainerVisible(pac)) return
-    if (pac.classList.contains('pac-logo')) {
-      pac.querySelectorAll(':scope > .pac-logo').forEach((n) => n.remove())
-      return
-    }
-    const logos = [...pac.querySelectorAll(':scope > .pac-logo')]
-    if (logos.length <= 1) return
-    logos.slice(0, -1).forEach((n) => n.remove())
-  })
-}
-
-/** Dismiss Google's panel state for the field we are leaving (Escape + DOM clear + hide). */
-function flushInactiveBookingFieldPac(prevInput) {
-  if (!prevInput) return
-  try {
-    prevInput.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Escape',
-        code: 'Escape',
-        keyCode: 27,
-        which: 27,
-        bubbles: true,
-        cancelable: true,
-      })
-    )
-  } catch {
-    /* ignore */
-  }
-  clearStalePacItems()
-  dedupePacAttributionFooters()
-  forceHideBookingPacContainers()
-}
-
-/**
- * Hide dropdown only if no booking autocomplete input is focused
- * (avoids closing drop-off suggestions right after moving focus from pick-up).
- */
-function hideBookingPacIfNoAcFocused() {
-  if (document.querySelector('.taxio-booking-ac-input:focus')) return
-  forceHideBookingPacContainers()
-}
-
-/** Close panel repeatedly — Google may repopen on focus until the next frame. */
-function pulseHideBookingPacContainers() {
-  const h = () => forceHideBookingPacContainers()
-  h()
-  window.requestAnimationFrame(h)
-  window.setTimeout(h, 0)
-  window.setTimeout(h, 50)
-  window.setTimeout(h, 120)
-  window.setTimeout(h, 250)
+function ensureBookingFieldSuggestStyles() {
+  let style = document.getElementById('taxio-booking-field-suggest-styles')
+  if (style) return
+  style = document.createElement('style')
+  style.id = 'taxio-booking-field-suggest-styles'
+  style.textContent = `
+    .taxio-booking-suggest-row:first-child { border-top-left-radius: 0.625rem; border-top-right-radius: 0.625rem; }
+    .taxio-booking-suggest-row:last-of-type { border-bottom-left-radius: 0.625rem; border-bottom-right-radius: 0.625rem; }
+  `
+  document.head.appendChild(style)
 }
 
 function isBookingAddressConfirmedIdle(input, state) {
@@ -136,266 +60,198 @@ function isBookingAddressConfirmedIdle(input, state) {
   return typeof c === 'string' && c.length > 0 && v === c
 }
 
-/** Global Google Places dropdown (.pac-container is on document.body). */
-function ensureBookingPacStyles() {
-  let style = document.getElementById('taxio-booking-pac-styles')
-  if (!style) {
-    style = document.createElement('style')
-    style.id = 'taxio-booking-pac-styles'
-    document.head.appendChild(style)
-  }
-  style.textContent = `
-    .pac-container.taxio-booking-pac {
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif !important;
-      border-radius: 0 0 12px 12px !important;
-      margin-top: 0 !important;
-      padding: 0 !important;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.04) !important;
-      background: #fff !important;
-      border: 1px solid #e8e8ec !important;
-      border-top: 1px solid #e8e8ec !important;
-      margin-top: -1px !important;
-      max-height: 220px !important;
-      overflow-y: auto !important;
-      overflow-x: hidden !important;
-      -webkit-overflow-scrolling: touch !important;
-      z-index: 10050 !important;
-      box-sizing: border-box !important;
-      max-width: min(100vw - 24px, 100%) !important;
-    }
-    .pac-container.taxio-booking-pac .pac-item {
-      display: flex !important;
-      flex-direction: row !important;
-      flex-wrap: nowrap !important;
-      align-items: center !important;
-      gap: 8px !important;
-      padding: 7px 10px !important;
-      margin: 0 !important;
-      border: none !important;
-      border-top: 1px solid #ececf0 !important;
-      cursor: pointer !important;
-      line-height: 1.25 !important;
-      min-height: 0 !important;
-    }
-    .pac-container.taxio-booking-pac .pac-item:first-of-type {
-      border-top: none !important;
-    }
-    .pac-container.taxio-booking-pac .pac-item:hover,
-    .pac-container.taxio-booking-pac .pac-item-selected {
-      background: #f5f6f8 !important;
-    }
-    .pac-container.taxio-booking-pac .pac-icon {
-      display: block !important;
-      flex-shrink: 0 !important;
-      width: 15px !important;
-      height: 18px !important;
-      margin-top: 1px !important;
-      opacity: 0.42 !important;
-    }
-    .pac-container.taxio-booking-pac .pac-item-query {
-      font-size: 13px !important;
-      font-weight: 700 !important;
-      color: #111 !important;
-      padding-right: 0 !important;
-      display: inline !important;
-    }
-    .pac-container.taxio-booking-pac .pac-item .pac-item-query + span {
-      font-size: 12px !important;
-      font-weight: 400 !important;
-      color: #6b7280 !important;
-      display: inline !important;
-      margin-left: 4px !important;
-      margin-top: 0 !important;
-    }
-    .pac-container.taxio-booking-pac .pac-matched {
-      font-weight: 700 !important;
-      color: #111 !important;
-    }
-    /* One attribution only: Google often paints logo on BOTH the div and ::after → double row */
-    .pac-container.taxio-booking-pac .pac-logo {
-      margin: 0 !important;
-      padding: 5px 10px 7px !important;
-      height: 18px !important;
-      min-height: 18px !important;
-      text-align: right !important;
-      background-image: none !important;
-      background: transparent none !important;
-      opacity: 0.48 !important;
-    }
-    .pac-container.taxio-booking-pac .pac-logo:after {
-      opacity: 1 !important;
-      background-position: right center !important;
-      background-size: 64px auto !important;
-    }
-    .pac-container.taxio-booking-pac .pac-logo ~ .pac-logo {
-      display: none !important;
-    }
-    /* Container carries .pac-logo AND a footer child → duplicate attribution; keep container strip */
-    .pac-container.taxio-booking-pac.pac-logo > .pac-logo {
-      display: none !important;
-      height: 0 !important;
-      min-height: 0 !important;
-      padding: 0 !important;
-      margin: 0 !important;
-      overflow: hidden !important;
-      visibility: hidden !important;
-    }
-    .pac-container.taxio-booking-pac .pac-logo img {
-      max-height: 16px !important;
-      width: auto !important;
-      margin-left: auto !important;
-      display: block !important;
-      opacity: 0.48 !important;
-    }
-    .pac-container.taxio-booking-pac .pac-logo:has(img)::after {
-      display: none !important;
-      content: none !important;
-      background: none !important;
-    }
-  `
-}
-
 /**
- * Pin the shared Google `.pac-container` under the active input (viewport coords).
- * Prevents the dropdown from staying under the previous field after focus switch.
+ * One booking address field: own DOM suggestion panel + AutocompleteService + PlacesService.getDetails.
+ * No shared Google `.pac-container` (root cause of pickup/drop-off cross-talk).
  */
-function syncPacContainerToInput(inputEl) {
-  if (!inputEl || typeof document === 'undefined') return
-  const pac = pickVisibleBookingPacForSync()
-  if (!pac) return
-  const rect = inputEl.getBoundingClientRect()
-  const w = Math.min(Math.max(rect.width, 160), window.innerWidth - 16)
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - w - 8))
-  const top = rect.bottom
-  pac.style.position = 'fixed'
-  pac.style.left = `${left}px`
-  pac.style.top = `${top}px`
-  pac.style.width = `${w}px`
-  pac.style.minWidth = `${w}px`
-  pac.style.maxWidth = `${w}px`
-  pac.style.boxSizing = 'border-box'
-}
+function attachBookingAddressController({ inputEl, panelEl, state, onUpdate, poweredByHtml }) {
+  if (!inputEl || !panelEl || !GOOGLE_API_KEY) {
+    return { detach: () => {} }
+  }
+  if (state.committed === undefined) state.committed = null
+  if (state.lat === undefined) state.lat = null
+  if (state.lng === undefined) state.lng = null
+  if (state.placeId === undefined) state.placeId = null
 
-function schedulePacAnchorSync(inputEl) {
-  if (!inputEl) return
-  const run = () => {
-    if (taxioBookingPacActiveInput !== inputEl) return
-    syncPacContainerToInput(inputEl)
-  }
-  window.requestAnimationFrame(run)
-  window.setTimeout(run, 0)
-  window.setTimeout(run, 32)
-  window.setTimeout(run, 80)
-}
+  inputEl.classList.add('taxio-booking-ac-input')
+  ensureBookingFieldSuggestStyles()
 
-function detachBookingPacChrome() {
-  if (bookingPacObserver) {
-    bookingPacObserver.disconnect()
-    bookingPacObserver = null
+  let acService = null
+  let placesService = null
+  let predTimer = null
+  let docPointerDown = null
+
+  function ensureServices() {
+    if (!window.google?.maps?.places) return
+    if (!acService) acService = new google.maps.places.AutocompleteService()
+    if (!placesService) placesService = new google.maps.places.PlacesService(document.createElement('div'))
   }
-  const prevResize = window.__taxioBookingPacResize
-  if (prevResize) {
-    window.removeEventListener('resize', prevResize)
-    window.__taxioBookingPacResize = null
+
+  function hidePanel() {
+    panelEl.classList.add('hidden')
+    panelEl.innerHTML = ''
   }
-  if (bookingPacOutsideClose) {
-    document.removeEventListener('mousedown', bookingPacOutsideClose, true)
-    document.removeEventListener('touchstart', bookingPacOutsideClose, true)
-    bookingPacOutsideClose = null
-  }
-  if (bookingPacEventRoot) {
-    if (bookingPacFocusInHandler) {
-      bookingPacEventRoot.removeEventListener('focusin', bookingPacFocusInHandler, true)
-      bookingPacFocusInHandler = null
+
+  function showPredictions(predictions) {
+    if (!predictions?.length) {
+      hidePanel()
+      return
     }
-    if (bookingPacPointerDownHandler) {
-      bookingPacEventRoot.removeEventListener('pointerdown', bookingPacPointerDownHandler, true)
-      bookingPacPointerDownHandler = null
+    const rows = predictions.slice(0, 8).map((p) => {
+      const main = escapeHtml(p.structured_formatting?.main_text || p.description || '')
+      const secondary = escapeHtml(p.structured_formatting?.secondary_text || '')
+      const pid = escapeHtml(p.place_id || '')
+      return `<button type="button" class="taxio-booking-suggest-row w-full border-0 border-t border-slate-100 bg-white px-3.5 py-2.5 text-left transition-colors first:border-t-0 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none dark:border-slate-700/90 dark:bg-slate-900 dark:hover:bg-slate-800/90 dark:focus:bg-slate-800/90" data-place-id="${pid}">
+        <span class="text-sm font-semibold text-slate-900 dark:text-slate-100">${main}</span>
+        ${secondary ? `<span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">${secondary}</span>` : ''}
+      </button>`
+    })
+    const attrib =
+      poweredByHtml && predictions.length
+        ? `<div class="taxio-booking-suggest-attrib border-t border-slate-200 bg-slate-50 px-3 py-2 text-center text-[10px] font-medium leading-tight text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-500">${poweredByHtml}</div>`
+        : ''
+    panelEl.innerHTML = rows.join('') + attrib
+    panelEl.classList.remove('hidden')
+  }
+
+  function fetchPredictions() {
+    ensureServices()
+    if (!acService) return
+    const q = String(inputEl.value || '').trim()
+    if (q.length < 2) {
+      hidePanel()
+      return
     }
-    bookingPacEventRoot = null
+    if (isBookingAddressConfirmedIdle(inputEl, state)) {
+      hidePanel()
+      return
+    }
+    acService.getPlacePredictions({ input: q }, (predictions, status) => {
+      if (
+        status !== google.maps.places.PlacesServiceStatus.OK ||
+        !predictions ||
+        predictions.length === 0
+      ) {
+        hidePanel()
+        return
+      }
+      showPredictions(predictions)
+    })
   }
-  if (bookingPacLayoutSync) {
-    window.removeEventListener('resize', bookingPacLayoutSync)
-    window.removeEventListener('scroll', bookingPacLayoutSync, true)
-    bookingPacLayoutSync = null
+
+  function applyPlaceDetails(place) {
+    const addr = String(place?.formatted_address || '').trim()
+    const loc = place?.geometry?.location
+    let lat = null
+    let lng = null
+    if (loc) {
+      lat = typeof loc.lat === 'function' ? loc.lat() : Number(loc.lat)
+      lng = typeof loc.lng === 'function' ? loc.lng() : Number(loc.lng)
+    }
+    if (!addr) return
+    state.__applyingCommit = true
+    try {
+      inputEl.value = addr
+      state.committed = addr
+      state.placeId = place.place_id || null
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        state.lat = lat
+        state.lng = lng
+      } else {
+        state.lat = null
+        state.lng = null
+      }
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }))
+      inputEl.dispatchEvent(new Event('change', { bubbles: true }))
+    } finally {
+      state.__applyingCommit = false
+    }
+    hidePanel()
+    onUpdate()
   }
-  taxioBookingPacActiveInput = null
-  taxioPlacesAcRegistry.clear()
-}
 
-function attachBookingPacObserver(root, inputs) {
-  if (typeof MutationObserver === 'undefined') return
-  detachBookingPacChrome()
+  function selectPlaceId(placeId) {
+    ensureServices()
+    if (!placesService || !placeId) return
+    placesService.getDetails(
+      {
+        placeId,
+        fields: ['formatted_address', 'geometry', 'place_id'],
+      },
+      (place, status) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !place) return
+        applyPlaceDetails(place)
+      }
+    )
+  }
 
-  bookingPacEventRoot = root
+  function onInputOrEdit() {
+    if (state.__applyingCommit) return
+    const v = String(inputEl.value || '').trim()
+    const c = state.committed
+    if (typeof c === 'string' && c.length > 0 && v !== c) {
+      state.committed = null
+      state.lat = null
+      state.lng = null
+      state.placeId = null
+    }
+    onUpdate()
+    if (predTimer) window.clearTimeout(predTimer)
+    predTimer = window.setTimeout(fetchPredictions, 200)
+  }
 
-  bookingPacPointerDownHandler = (e) => {
+  function onFocusIn() {
+    if (!isBookingAddressConfirmedIdle(inputEl, state)) fetchPredictions()
+  }
+
+  function onKeydown(e) {
+    if (e.key === 'Escape') hidePanel()
+  }
+
+  function onBlur() {
+    window.setTimeout(() => hidePanel(), 200)
+  }
+
+  function onPanelPointerDown(e) {
+    const btn = e.target.closest?.('[data-place-id]')
+    if (!btn) return
+    const pid = btn.getAttribute('data-place-id')
+    if (pid) {
+      e.preventDefault()
+      selectPlaceId(pid)
+    }
+  }
+
+  inputEl.addEventListener('input', onInputOrEdit)
+  inputEl.addEventListener('focus', onFocusIn)
+  inputEl.addEventListener('keydown', onKeydown)
+  inputEl.addEventListener('blur', onBlur)
+  panelEl.addEventListener('pointerdown', onPanelPointerDown)
+
+  docPointerDown = (e) => {
     const t = e.target
-    if (!t?.classList?.contains('taxio-booking-ac-input')) return
-    if (!inputs.includes(t)) return
-    const prev = taxioBookingPacActiveInput
-    if (prev && prev !== t) {
-      flushInactiveBookingFieldPac(prev)
-      resetBookingPacContainers()
-    }
+    if (panelEl.contains(t) || inputEl.contains(t)) return
+    hidePanel()
   }
-  root.addEventListener('pointerdown', bookingPacPointerDownHandler, true)
+  document.addEventListener('pointerdown', docPointerDown, true)
 
-  bookingPacFocusInHandler = (e) => {
-    const t = e.target
-    if (!t?.classList?.contains('taxio-booking-ac-input')) return
-    if (!inputs.includes(t)) return
-    const prev = taxioBookingPacActiveInput
-    if (prev && prev !== t) {
-      flushInactiveBookingFieldPac(prev)
-      resetBookingPacContainers()
-    }
-    taxioBookingPacActiveInput = t
-    schedulePacAnchorSync(t)
-  }
-  root.addEventListener('focusin', bookingPacFocusInHandler, true)
-
-  bookingPacObserver = new MutationObserver(() => {
-    dedupePacAttributionFooters()
-    const pac = pickVisibleBookingPacForSync()
-    if (!pac) return
-    const inp =
-      taxioBookingPacActiveInput ||
-      inputs.find((el) => root.contains(el) && el === document.activeElement)
-    if (inp && root.contains(inp)) {
-      syncPacContainerToInput(inp)
-    }
+  loadGoogleMapsPlaces().catch(() => {
+    /* key missing */
   })
-  bookingPacObserver.observe(document.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['style', 'class'],
-  })
 
-  bookingPacLayoutSync = () => {
-    const inp =
-      taxioBookingPacActiveInput ||
-      inputs.find((el) => root.contains(el) && el === document.activeElement)
-    if (inp && root.contains(inp)) {
-      dedupePacAttributionFooters()
-      syncPacContainerToInput(inp)
-    }
+  return {
+    detach() {
+      if (predTimer) window.clearTimeout(predTimer)
+      if (docPointerDown) document.removeEventListener('pointerdown', docPointerDown, true)
+      inputEl.removeEventListener('input', onInputOrEdit)
+      inputEl.removeEventListener('focus', onFocusIn)
+      inputEl.removeEventListener('keydown', onKeydown)
+      inputEl.removeEventListener('blur', onBlur)
+      panelEl.removeEventListener('pointerdown', onPanelPointerDown)
+      hidePanel()
+      inputEl.classList.remove('taxio-booking-ac-input')
+    },
   }
-  window.__taxioBookingPacResize = bookingPacLayoutSync
-  window.addEventListener('resize', bookingPacLayoutSync)
-  window.addEventListener('scroll', bookingPacLayoutSync, true)
-
-  bookingPacOutsideClose = (e) => {
-    const t = e.target
-    if (typeof t?.closest === 'function' && t.closest('.pac-container')) return
-    for (const inp of inputs) {
-      if (t === inp || (typeof inp.contains === 'function' && inp.contains(t))) return
-    }
-    hideBookingPacIfNoAcFocused()
-  }
-  document.addEventListener('mousedown', bookingPacOutsideClose, true)
-  document.addEventListener('touchstart', bookingPacOutsideClose, { capture: true, passive: true })
 }
 
 function loadGoogleMapsPlaces() {
@@ -430,96 +286,6 @@ function loadGoogleMapsPlaces() {
   return googleMapsPlacesPromise
 }
 
-/**
- * @param {HTMLInputElement} input
- * @param {{ committed: string | null, __applyingCommit?: boolean }} state
- *        `committed` = last Maps-selected formatted address; null = no confirmed pick yet or user edited away.
- */
-function bindPlacesAutocomplete(input, state) {
-  if (!input || !GOOGLE_API_KEY) return
-  if (!state || typeof state !== 'object') state = { committed: null }
-  if (state.committed === undefined) state.committed = null
-
-  loadGoogleMapsPlaces()
-    .then(() => {
-      if (!window.google?.maps?.places?.Autocomplete) return
-      ensureBookingPacStyles()
-      input.classList.add('taxio-booking-ac-input')
-      const ac = new google.maps.places.Autocomplete(input, {
-        fields: ['formatted_address'],
-        types: ['address'],
-      })
-      taxioPlacesAcRegistry.set(input, ac)
-      const tagPac = () => {
-        requestAnimationFrame(() => {
-          document.querySelectorAll('.pac-container').forEach((el) => {
-            el.classList.add('taxio-booking-pac')
-          })
-          dedupePacAttributionFooters()
-          const anchor =
-            document.activeElement === input ? input : taxioBookingPacActiveInput || input
-          syncPacContainerToInput(anchor)
-        })
-      }
-      const onFocus = () => {
-        if (isBookingAddressConfirmedIdle(input, state)) {
-          pulseHideBookingPacContainers()
-          return
-        }
-        resetBookingPacContainers()
-        tagPac()
-      }
-      const onInput = () => {
-        if (state.__applyingCommit) return
-        const v = String(input.value || '').trim()
-        const c = state.committed
-        if (typeof c === 'string' && c.length > 0 && v !== c) {
-          state.committed = null
-        }
-        resetBookingPacContainers()
-        tagPac()
-      }
-      const onKeydown = () => {
-        if (isBookingAddressConfirmedIdle(input, state)) {
-          pulseHideBookingPacContainers()
-          return
-        }
-        tagPac()
-      }
-      input.addEventListener('focus', onFocus)
-      input.addEventListener('input', onInput)
-      input.addEventListener('keydown', onKeydown)
-      input.addEventListener('blur', () => {
-        window.setTimeout(() => {
-          if (!document.querySelector('.taxio-booking-ac-input:focus')) {
-            taxioBookingPacActiveInput = null
-          }
-          hideBookingPacIfNoAcFocused()
-        }, 200)
-      })
-      ac.addListener('place_changed', () => {
-        const place = ac.getPlace()
-        const addr = String(place?.formatted_address || '').trim()
-        if (addr) {
-          state.__applyingCommit = true
-          try {
-            input.value = addr
-            state.committed = addr
-            input.dispatchEvent(new Event('input', { bubbles: true }))
-            input.dispatchEvent(new Event('change', { bubbles: true }))
-          } finally {
-            state.__applyingCommit = false
-          }
-        }
-        dedupePacAttributionFooters()
-        pulseHideBookingPacContainers()
-      })
-    })
-    .catch(() => {
-      /* key missing or APIs disabled — fields stay plain text */
-    })
-}
-
 function digitsOnly(phone) {
   return String(phone || '').replace(/\D/g, '')
 }
@@ -530,181 +296,296 @@ function waLink(phone, body) {
   return `https://wa.me/${n}?text=${encodeURIComponent(body)}`
 }
 
+/** Optional company logo (if column / field exists). Safe fallback when missing or broken. */
+function bookingCompanyPhotoHtml(company) {
+  const raw = String(company?.logo_url || company?.logo || company?.image_url || '').trim()
+  const allowed = /^https?:\/\//i.test(raw) || (raw.startsWith('/') && !raw.startsWith('//'))
+  const src = allowed ? raw : ''
+  if (!src) {
+    return `<div class="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500 shadow-[0_12px_40px_rgba(251,191,36,0.25)] ring-2 ring-amber-400/35 sm:h-32 sm:w-32">${icon.car('h-14 w-14 text-slate-900 sm:h-16 sm:w-16')}</div>`
+  }
+  return `<div class="relative h-28 w-28 shrink-0 overflow-hidden rounded-2xl bg-slate-800 shadow-[0_12px_40px_rgba(0,0,0,0.35)] ring-2 ring-amber-400/25 ring-offset-2 ring-offset-slate-100 dark:ring-offset-[#0c0e12] sm:h-32 sm:w-32">
+    <img src="${escapeHtml(src)}" alt="" class="bk-company-photo-img h-full w-full object-cover" loading="lazy" decoding="async" />
+    <div class="bk-company-photo-fallback absolute inset-0 hidden items-center justify-center bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500">${icon.car('h-14 w-14 text-slate-900 sm:h-16 sm:w-16')}</div>
+  </div>`
+}
+
 export async function mountBookCompany(root, slug) {
+  if (taxioBookCompanyAddressCleanup) {
+    taxioBookCompanyAddressCleanup()
+    taxioBookCompanyAddressCleanup = null
+  }
+  syncDocumentLang(getLocale())
+  syncPublicThemeClass()
+  const tbLoad = tBooking(getLocale())
   root.innerHTML = `
-    <div class="min-h-screen flex flex-col items-center justify-center bg-[#f3f4f6] px-4 py-8">
-      <div class="h-10 w-10 animate-pulse rounded-full border-2 border-gray-300 border-t-yellow-500"></div>
-      <p class="mt-3 text-sm text-gray-500">Loading…</p>
+    <div class="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-slate-100 via-white to-slate-100 px-4 py-8 dark:from-[#0c0e12] dark:via-[#12151c] dark:to-[#0a0b0f]">
+      <div class="h-11 w-11 animate-spin rounded-full border-2 border-slate-300 border-t-amber-500 dark:border-slate-700 dark:border-t-amber-400"></div>
+      <p class="mt-4 text-sm font-medium tracking-tight text-slate-500 dark:text-slate-400">${escapeHtml(tbLoad.loading)}</p>
     </div>`
+
+  const isDemo = isDemoBookingSlug(slug)
 
   let company
   try {
-    company = await fetchApprovedCompanyBySlug(slug)
+    company = isDemo ? getDemoBookingCompany() : await fetchApprovedCompanyBySlug(slug)
   } catch {
     company = null
   }
 
   if (!company) {
+    const tb = tBooking(getLocale())
     root.innerHTML = `
-      <div class="min-h-screen flex flex-col items-center justify-center bg-[#f3f4f6] px-4 py-12">
-        <p class="text-lg font-bold text-gray-900">Company not found</p>
-        <p class="mt-2 text-center text-sm text-gray-600">This booking link is invalid or the company is not approved.</p>
-        <a href="/" class="mt-6 text-sm font-semibold text-yellow-600 hover:underline">TAXIO home</a>
+      <div class="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-slate-100 via-white to-slate-100 px-4 py-12 dark:from-[#0c0e12] dark:via-[#12151c] dark:to-[#0a0b0f]">
+        <p class="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">${escapeHtml(tb.notFoundTitle)}</p>
+        <p class="mt-3 max-w-sm text-center text-sm leading-relaxed text-slate-600 dark:text-slate-400">${escapeHtml(tb.notFoundBody)}</p>
+        <a href="/" class="mt-10 inline-flex items-center rounded-2xl bg-amber-400 px-6 py-3 text-sm font-bold text-slate-900 shadow-[0_8px_30px_rgba(251,191,36,0.25)] transition hover:bg-amber-300">${escapeHtml(tb.homeCta)}</a>
       </div>`
     return
   }
 
-  const fleetRows = await fetchFleetCarTypesForBooking(company.id)
+  const fleetRows = isDemo
+    ? [{ car_type: 'Standard' }, { car_type: 'Van' }]
+    : await fetchFleetCarTypesForBooking(company.id)
   const carTypes = resolveBookingCarTypes(fleetRows, company.pricing)
   const effectivePricing = effectivePricingForTypes(carTypes, company.pricing)
-  const showCarSelector = carTypes.length > 1
 
-  const slogan = (company.slogan || DEFAULT_SLOGAN).trim()
-  const vat = company.vat_number ? `BTW: ${company.vat_number}` : ''
-  const phone = company.phone || ''
-  const avail = company.availability_status === 'busy' ? 'Busy' : company.availability_status === 'offline' ? 'Offline' : 'Available'
-  const availDot = company.availability_status === 'available' ? 'bg-green-500' : 'bg-amber-500'
+  const fromFleetUnique = [
+    ...new Set(
+      (fleetRows || [])
+        .filter((r) => String(r?.car_type || '').trim())
+        .map((r) => normalizeFleetCarType(r.car_type))
+    ),
+  ].sort(
+    (a, b) => BOOKING_CAR_TYPE_ORDER.indexOf(a) - BOOKING_CAR_TYPE_ORDER.indexOf(b)
+  )
 
-  const carCardsHtml = showCarSelector
-    ? carTypes
-        .map((t, idx) => {
-          const selectedCls =
-            idx === 0
-              ? 'border-yellow-400 bg-yellow-400 shadow-sm'
-              : 'border-gray-200 bg-white hover:border-gray-300'
-          const iconHtml =
-            String(t).toLowerCase().includes('van')
-              ? icon.users('h-6 w-6 text-amber-600')
-              : String(t).toLowerCase().includes('lux')
-                ? icon.star('h-6 w-6 text-amber-600')
-                : icon.car('h-6 w-6 text-gray-900')
-          const seats = String(t).toLowerCase().includes('van')
-            ? '1-7'
-            : String(t).toLowerCase().includes('lux')
-              ? '1-3'
-              : '1-4'
-          return `<button type="button" data-car="${escapeHtml(t)}" class="book-car flex flex-col items-center rounded-xl border-2 ${selectedCls} p-3 text-center transition-all">
-              ${iconHtml}
-              <span class="mt-1 text-xs font-bold text-gray-900">${escapeHtml(t)}</span>
-              <span class="text-[10px] text-gray-700">${seats}</span>
-            </button>`
+  /** Cards only from fleet rows; if none, use resolved types except lone default Standard (no phantom card). */
+  const phantomFleetEmptyStandardOnly =
+    fromFleetUnique.length === 0 && carTypes.length === 1 && carTypes[0] === 'Standard'
+  const displayCarTypes =
+    fromFleetUnique.length > 0 ? fromFleetUnique : phantomFleetEmptyStandardOnly ? [] : carTypes
+
+  const showVehicleSection = displayCarTypes.length > 1
+
+  const tb = tBooking(getLocale())
+  const defaultSelectedCar = displayCarTypes[0] ?? carTypes[0] ?? 'Standard'
+
+  const bkCarOptBase =
+    'bk-car-opt flex w-full items-center gap-3 border-0 border-t border-slate-100 px-4 py-3.5 text-left transition first:border-t-0 dark:border-slate-700/80 '
+  const bkCarOptOn = 'bg-amber-50 ring-1 ring-inset ring-amber-400/25 dark:bg-amber-400/15 dark:ring-amber-400/20'
+  const bkCarOptOff =
+    'bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80'
+
+  const bkCarOptsHtml = !showVehicleSection
+    ? ''
+    : displayCarTypes
+        .map((t) => {
+          const seats = bookingCarTypeSeatsLabel(t)
+          const iconH = bookingCarTypeIconHtml(t, 'h-6 w-6')
+          const on = t === defaultSelectedCar
+          return `<button type="button" role="option" data-car="${escapeHtml(t)}" aria-selected="${on ? 'true' : 'false'}" class="${bkCarOptBase}${on ? bkCarOptOn : bkCarOptOff}"><span class="flex shrink-0">${iconH}</span><span class="min-w-0 flex-1"><span class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(t)}</span><span class="mt-0.5 block text-xs font-medium text-slate-500 dark:text-slate-400">${escapeHtml(seats)}</span></span></button>`
         })
         .join('')
-    : ''
+
+  const vehicleSectionHtml = !showVehicleSection
+    ? ''
+    : `<div id="bk-car-wrap" class="relative z-[45]">
+          <p class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.chooseCarType)}</p>
+          <button type="button" id="bk-car-trigger" class="mt-2 flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border-2 border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-amber-300/80 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600 dark:bg-slate-800/90 dark:hover:border-amber-400/40 dark:focus:ring-amber-400/25" aria-expanded="false" aria-haspopup="listbox" aria-controls="bk-car-panel">
+            <span id="bk-car-trigger-icon" class="flex shrink-0">${bookingCarTypeIconHtml(defaultSelectedCar, 'h-7 w-7')}</span>
+            <span class="min-w-0 flex-1">
+              <span id="bk-car-trigger-name" class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(defaultSelectedCar)}</span>
+              <span id="bk-car-trigger-seats" class="mt-0.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">${escapeHtml(bookingCarTypeSeatsLabel(defaultSelectedCar))}</span>
+            </span>
+            <span id="bk-car-chevron" class="shrink-0 text-slate-400 transition-transform duration-200 dark:text-slate-500">${icon.chevronDown('h-5 w-5')}</span>
+          </button>
+          <div id="bk-car-panel" class="pointer-events-auto absolute left-0 right-0 top-full z-[80] mt-1.5 hidden max-h-[min(22rem,55vh)] overflow-y-auto overflow-x-hidden rounded-xl border border-slate-200 bg-white py-0.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/[0.06] dark:border-slate-600 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/10" role="listbox" aria-label="${escapeHtml(tb.carTypesListAria)}">
+            ${bkCarOptsHtml}
+          </div>
+        </div>`
+  const bookingPageUrl =
+    typeof window !== 'undefined' && company?.slug
+      ? absolutePublicBookingUrl(company.slug)
+      : typeof window !== 'undefined'
+        ? window.location.href
+        : ''
+  const bookingQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=16&data=${encodeURIComponent(bookingPageUrl)}`
+
+  const slogan = (company.slogan || tb.defaultSlogan).trim()
+  const vat = company.vat_number ? `${tb.vatPrefix}: ${company.vat_number}` : ''
+  const phone = company.phone || ''
+  const avail =
+    company.availability_status === 'busy'
+      ? tb.availBusy
+      : company.availability_status === 'offline'
+        ? tb.availOffline
+        : tb.availAvailable
+  const availDot =
+    company.availability_status === 'available' ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.55)]' : 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]'
 
   root.innerHTML = `
-    <div class="min-h-screen bg-[#f0f2f5] px-4 py-8 pb-16">
-      <div class="mx-auto max-w-md space-y-5">
-        <div class="relative overflow-hidden rounded-2xl border border-gray-200/90 bg-white p-5 shadow-md ring-1 ring-black/[0.04]">
-          <div class="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-400"></div>
-          <button type="button" id="book-qr-hint" class="absolute right-4 top-5 rounded-lg p-2 text-amber-600 transition-colors hover:bg-amber-50" title="QR code" aria-label="QR code">
-            ${icon.sparkles('h-5 w-5')}
+    <div class="min-h-screen bg-gradient-to-b from-slate-100 via-white to-slate-100 px-4 pb-24 pt-6 text-slate-900 dark:bg-[#0c0e12] dark:from-[#0c0e12] dark:via-[#12151c] dark:to-[#0a0b0f] dark:text-slate-100 sm:pb-28 sm:pt-8">
+      <div class="mx-auto max-w-lg space-y-5 sm:space-y-6">
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" id="bk-toggle-dark" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-600/50 dark:bg-slate-900/80 dark:text-amber-200/90 dark:hover:bg-slate-800" title="${escapeHtml(tb.themeToggle)}" aria-label="${escapeHtml(tb.themeToggle)}">
+            ${isPublicDarkMode() ? icon.moon('h-4 w-4') : icon.sun('h-4 w-4')}
           </button>
-          <div class="flex gap-4 pr-10 pt-0.5">
-            <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-yellow-400 to-amber-400 shadow-md ring-2 ring-white/80">
-              ${icon.car('h-8 w-8 text-gray-900')}
-            </div>
-            <div class="min-w-0 flex-1">
-              <h1 class="text-xl font-bold leading-tight tracking-tight text-gray-900">${escapeHtml(company.name)}</h1>
-              <p class="mt-1 text-sm font-medium italic leading-snug text-amber-700">${escapeHtml(slogan)}</p>
-              ${vat ? `<p class="mt-2 text-xs leading-relaxed text-gray-600">${escapeHtml(vat)}</p>` : ''}
-              ${phone ? `<p class="text-xs leading-relaxed text-gray-600">${escapeHtml(phone)}</p>` : ''}
-            </div>
-          </div>
-          <div class="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3">
-            <span class="h-2 w-2 shrink-0 rounded-full ${availDot} ring-2 ring-white shadow-sm"></span>
-            <span class="text-sm font-semibold text-gray-800">${avail}</span>
+          <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-500">${escapeHtml(tb.langLabel)}</span>
+          <div class="flex rounded-full border border-slate-200 bg-white p-0.5 shadow-sm dark:border-slate-600/50 dark:bg-slate-900/80 dark:shadow-inner dark:shadow-black/20">
+            ${['nl', 'fr', 'en']
+              .map(
+                (lc) =>
+                  `<button type="button" data-taxio-locale="${lc}" class="rounded-full px-3 py-1 text-xs font-bold transition ${getLocale() === lc ? 'bg-amber-400 text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200'}">${lc.toUpperCase()}</button>`
+              )
+              .join('')}
           </div>
         </div>
 
-        <div class="rounded-2xl border border-gray-200 bg-white p-5 shadow-md">
-          <div class="space-y-4">
-            <div class="taxio-ac-field">
-              <label class="text-sm font-bold text-gray-900">Pick-up Location</label>
-              <div class="relative z-10 mt-2">
-                <span class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-green-600">${icon.mapPin('h-4 w-4')}</span>
-                <input id="bk-pickup" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Enter pick-up address" class="w-full rounded-xl border border-gray-300 bg-white py-2.5 pl-10 pr-3 text-sm text-gray-900 shadow-sm transition-colors focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/25" />
+        <div class="relative overflow-hidden rounded-3xl border border-slate-200/90 bg-white p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.45)] dark:ring-white/[0.06] sm:p-6">
+          <div class="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-amber-400/10 blur-3xl"></div>
+          <button type="button" id="book-qr-hint" class="absolute right-4 top-4 z-10 flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-400/20 text-amber-700 shadow-md ring-1 ring-amber-400/40 transition hover:bg-amber-400/30 dark:bg-amber-400/15 dark:text-amber-300 dark:shadow-lg dark:shadow-black/20 dark:ring-amber-400/30 dark:hover:bg-amber-400/25 dark:hover:text-amber-200" title="${escapeHtml(tb.qrTitle)}" aria-label="${escapeHtml(tb.qrTitle)}">
+            ${icon.qrCode('h-5 w-5')}
+          </button>
+          <div class="relative flex gap-4 pr-14 sm:gap-5 sm:pr-16">
+            ${bookingCompanyPhotoHtml(company)}
+            <div class="min-w-0 flex-1 pt-0.5">
+              <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700/90 dark:text-amber-400/80">${escapeHtml(tb.bookingEyebrow)}</p>
+              <h1 class="mt-1.5 text-[1.4rem] font-bold leading-tight tracking-tight text-slate-900 dark:text-white sm:text-2xl">${escapeHtml(company.name)}</h1>
+              <p class="mt-2 text-sm font-semibold leading-snug text-amber-700 dark:text-amber-300/95">${escapeHtml(slogan)}</p>
+              <div class="mt-3 space-y-1 text-xs">
+                ${vat ? `<p class="leading-relaxed text-slate-500 dark:text-slate-400">${escapeHtml(vat)}</p>` : ''}
+                ${phone ? `<p class="font-semibold text-slate-700 dark:text-slate-300">${escapeHtml(phone)}</p>` : ''}
               </div>
             </div>
-            <div class="taxio-ac-field">
-              <label class="text-sm font-bold text-gray-900">Drop-off Location</label>
-              <div class="relative z-10 mt-2">
-                <span class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-red-500">${icon.mapPin('h-4 w-4')}</span>
-                <input id="bk-dropoff" type="text" placeholder="Enter drop-off address" class="w-full rounded-xl border border-gray-300 bg-white py-2.5 pl-10 pr-3 text-sm text-gray-900 shadow-sm transition-colors focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/25" />
+          </div>
+          <div class="relative mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/90 pt-4 dark:border-slate-700/50">
+            <div class="flex items-center gap-2 rounded-full bg-slate-100 px-3.5 py-2 ring-1 ring-slate-200/80 dark:bg-slate-800/90 dark:ring-slate-600/40">
+              <span class="h-2 w-2 shrink-0 rounded-full ${availDot} ring-2 ring-white dark:ring-slate-900"></span>
+              <span class="text-[11px] font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">${escapeHtml(avail)}</span>
+            </div>
+            <p class="max-w-[11rem] text-right text-[10px] font-medium leading-snug text-slate-500 sm:max-w-none">${escapeHtml(isDemo ? tb.demoDirectHint : tb.directToCompany)}</p>
+          </div>
+        </div>
+
+        <div class="relative z-0 rounded-3xl border border-slate-200/90 bg-white p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:ring-white/[0.05] sm:p-6">
+          <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-600/90 dark:text-amber-400/75">${escapeHtml(tb.tripEyebrow)}</p>
+          ${isDemo ? `<div class="mb-1 rounded-xl border border-amber-400/35 bg-amber-50 px-3 py-2.5 text-xs font-medium leading-snug text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-50">${escapeHtml(tb.demoRibbon)}</div>` : ''}
+          <div class="mt-5 space-y-6">
+            <div class="taxio-ac-field relative z-50 focus-within:z-[120]">
+              <label class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.pickupLabel)}</label>
+              <div class="relative mt-2">
+                <span class="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-emerald-500 dark:text-emerald-400">${icon.mapPin('h-[18px] w-[18px]')}</span>
+                <input id="bk-pickup" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="${escapeHtml(tb.pickupPh)}" class="h-12 w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:bg-slate-800 dark:focus:ring-amber-400/25" />
+                <div id="bk-pickup-suggest" class="taxio-booking-field-suggest pointer-events-auto absolute left-0 right-0 top-full z-[130] mt-1.5 hidden max-h-56 overflow-x-hidden overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/[0.06] dark:border-slate-600 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/10" role="listbox" aria-label="Pick-up suggestions"></div>
+              </div>
+            </div>
+            <div class="taxio-ac-field relative z-50 focus-within:z-[120]">
+              <label class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.dropLabel)}</label>
+              <div class="relative mt-2">
+                <span class="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-rose-500 dark:text-rose-400">${icon.mapPin('h-[18px] w-[18px]')}</span>
+                <input id="bk-dropoff" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="${escapeHtml(tb.dropPh)}" class="h-12 w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:bg-slate-800 dark:focus:ring-amber-400/25" />
+                <div id="bk-dropoff-suggest" class="taxio-booking-field-suggest pointer-events-auto absolute left-0 right-0 top-full z-[130] mt-1.5 hidden max-h-56 overflow-x-hidden overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/[0.06] dark:border-slate-600 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/10" role="listbox" aria-label="Drop-off suggestions"></div>
               </div>
             </div>
 
-            ${showCarSelector ? `<div>
-              <p class="text-sm font-bold text-gray-900">Select Car Type</p>
-              <div class="mt-2 grid grid-cols-3 gap-2">
-                ${carCardsHtml}
-              </div>
-            </div>` : ''}
+            ${vehicleSectionHtml}
 
             <div>
-              <p class="text-sm font-bold text-gray-900">When do you need the ride?</p>
-              <div class="mt-2 grid grid-cols-2 gap-2">
-                <button type="button" id="bk-ride-now" class="rounded-lg border-2 border-yellow-400 bg-yellow-400 px-3 py-2 text-sm font-semibold text-gray-900">Ride Now</button>
-                <button type="button" id="bk-ride-schedule" class="rounded-lg border-2 border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">Schedule</button>
+              <p class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.when)}</p>
+              <div class="mt-3 grid grid-cols-2 gap-3">
+                <button type="button" id="bk-ride-now" class="min-h-12 rounded-2xl border-2 border-amber-400/80 bg-amber-400/15 px-3 py-3 text-sm font-bold text-amber-900 shadow-sm ring-1 ring-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100 dark:ring-amber-400/25">${escapeHtml(tb.rideNow)}</button>
+                <button type="button" id="bk-ride-schedule" class="min-h-12 rounded-2xl border-2 border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-300">${escapeHtml(tb.schedule)}</button>
               </div>
               <div id="bk-schedule-wrap" class="mt-3 hidden">
-                <input id="bk-schedule-at" type="datetime-local" class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm focus:border-yellow-500 focus:outline-none focus:ring-1 focus:ring-yellow-500" />
+                <input id="bk-schedule-at" type="datetime-local" class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
               </div>
             </div>
 
-            <div id="bk-estimate" class="hidden rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-              <p class="text-sm font-bold text-gray-900">Trip Estimate</p>
-              <div id="bk-estimate-loading" class="mt-2 text-xs text-gray-500">Calculating...</div>
-              <div id="bk-estimate-body" class="mt-2 hidden text-sm text-gray-700">
-                <p>Distance: <span id="bk-est-dist" class="font-semibold"></span></p>
-                <p>Duration: <span id="bk-est-dur" class="font-semibold"></span></p>
-                <p>Estimated price: <span id="bk-est-price" class="font-semibold text-gray-900"></span></p>
+            <div id="bk-estimate" class="hidden rounded-2xl border border-amber-300/40 bg-gradient-to-br from-amber-50 via-white to-slate-50 px-4 py-4 shadow-md ring-1 ring-amber-200/50 dark:border-amber-400/20 dark:from-amber-400/10 dark:via-slate-900/40 dark:to-slate-900/80 dark:shadow-lg dark:shadow-black/20 dark:ring-amber-400/15">
+              <p class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.estimateTitle)}</p>
+              <div id="bk-estimate-loading" class="mt-2 text-xs font-medium text-slate-500">${escapeHtml(tb.calculating)}</div>
+              <div id="bk-estimate-body" class="mt-3 hidden space-y-1.5 text-sm text-slate-600 dark:text-slate-300">
+                <p><span class="text-slate-500">${escapeHtml(tb.distance)}</span> <span id="bk-estimate-distance" class="font-semibold text-slate-900 dark:text-white"></span></p>
+                <p><span class="text-slate-500">${escapeHtml(tb.duration)}</span> <span id="bk-estimate-duration" class="font-semibold text-slate-900 dark:text-white"></span></p>
+                <p class="pt-1 text-base"><span class="text-slate-500">${escapeHtml(tb.estPrice)}</span> <span id="bk-estimate-price" class="font-bold text-amber-700 dark:text-amber-300"></span></p>
               </div>
             </div>
 
-            <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
-              <label class="flex cursor-pointer items-start gap-2">
-                <input type="checkbox" id="bk-terms" class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-yellow-500 focus:ring-yellow-500" />
-                <span class="text-sm text-gray-700">I agree to the <a href="/terms" class="font-semibold text-blue-600 hover:underline">Terms of Use</a>, <a href="/company-terms" class="font-semibold text-blue-600 hover:underline">Company Terms</a>, and <a href="/privacy" class="font-semibold text-blue-600 hover:underline">Privacy Policy</a></span>
+            <div class="rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-4 ring-1 ring-slate-900/[0.04] dark:border-slate-700/60 dark:bg-slate-800/40 dark:ring-white/[0.04] sm:px-5 sm:py-5">
+              <label class="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" id="bk-terms" class="mt-0.5 h-[18px] w-[18px] shrink-0 rounded border-slate-300 bg-white text-amber-500 focus:ring-amber-400/40 focus:ring-offset-0 dark:border-slate-500 dark:bg-slate-800 dark:text-amber-400" />
+                <span class="text-sm leading-relaxed text-slate-600 dark:text-slate-400">${escapeHtml(tb.acceptRiderLead)}<a href="/terms" class="font-bold text-amber-700 underline decoration-amber-400/50 underline-offset-2 hover:text-amber-800 dark:text-amber-200/95 dark:hover:text-amber-100">${escapeHtml(tb.acceptRiderTerms)}</a>${escapeHtml(tb.acceptRiderAnd)}<a href="/privacy" class="font-bold text-amber-700 underline decoration-amber-400/50 underline-offset-2 hover:text-amber-800 dark:text-amber-200/95 dark:hover:text-amber-100">${escapeHtml(tb.acceptRiderPrivacy)}</a></span>
               </label>
-              <p class="mt-2 text-xs leading-relaxed text-gray-600">By submitting this request, you acknowledge that TAXIO acts only as a platform connecting you with independent taxi companies. The transport service is provided solely by the selected taxi company, which is fully responsible for the ride.</p>
-              <p class="mt-2 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-500">
-                <a href="/terms/riders" class="hover:text-gray-700 hover:underline">Booking terms</a>
-                <span aria-hidden="true">·</span>
-                <a href="/legal-notice" class="hover:text-gray-700 hover:underline">Legal notice</a>
-                <span aria-hidden="true">·</span>
-                <a href="/contact" class="hover:text-gray-700 hover:underline">Contact</a>
-              </p>
             </div>
 
-            <p id="bk-err" class="hidden text-sm text-red-600"></p>
+            <p id="bk-err" class="hidden rounded-xl bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800 ring-1 ring-red-200 dark:bg-red-950/60 dark:text-red-200 dark:ring-red-500/30"></p>
 
-            <button type="button" id="bk-wa" disabled class="flex w-full items-center justify-center gap-2 rounded-xl bg-gray-300 py-3.5 text-sm font-bold text-gray-500 shadow-sm disabled:cursor-not-allowed enabled:bg-green-600 enabled:text-white enabled:hover:bg-green-700">
+            <button type="button" id="bk-wa" disabled class="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-200 text-sm font-bold text-slate-500 shadow-md ring-1 ring-slate-300 transition disabled:cursor-not-allowed dark:bg-slate-800 dark:shadow-lg dark:shadow-black/20 dark:ring-slate-700 enabled:bg-[#25D366] enabled:text-white enabled:ring-[#1fb855]/50 enabled:shadow-[0_12px_40px_rgba(37,211,102,0.25)] enabled:hover:bg-[#20bd5a]">
               ${icon.messageCircle('h-5 w-5')}
-              Book with WhatsApp
+              ${escapeHtml(tb.bookWhatsapp)}
             </button>
 
             <div class="grid grid-cols-2 gap-3">
-              <a id="bk-mail" href="#" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-gray-200 bg-white py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50">
-                ${icon.mail('h-4 w-4')}
-                Email
+              <a id="bk-mail" href="#" class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:shadow-md dark:shadow-black/15 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+                ${icon.mail('h-[18px] w-[18px] text-amber-600 dark:text-amber-400/90')}
+                ${escapeHtml(tb.email)}
               </a>
-              <a id="bk-call" href="#" class="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-gray-200 bg-white py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50">
-                ${icon.phone('h-4 w-4')}
-                Call
+              <a id="bk-call" href="#" class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:shadow-md dark:shadow-black/15 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+                ${icon.phone('h-[18px] w-[18px] text-amber-600 dark:text-amber-400/90')}
+                ${escapeHtml(tb.call)}
               </a>
             </div>
           </div>
         </div>
 
-        <footer class="pt-4 text-center text-xs text-gray-500">
-          <p>© 2026 TAXIO. All rights reserved.</p>
-          <p class="mt-1 font-medium text-amber-600">Powered by TAXIO</p>
+        <footer class="px-1 pb-2 pt-2 text-center text-xs text-slate-500 dark:text-slate-500">
+          <p>${escapeHtml(tb.footerCopyright)}</p>
+          <p class="mt-2 font-bold tracking-tight text-amber-600 dark:text-amber-400/90">${escapeHtml(tb.footerPowered)}</p>
+          <p class="mt-2.5"><a href="/contact" class="font-semibold text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-amber-700 dark:text-slate-400 dark:decoration-slate-600 dark:hover:text-amber-200/90">${escapeHtml(tb.footerContact)}</a></p>
         </footer>
+      </div>
+
+      <div id="bk-qr-modal" class="fixed inset-0 z-[300] hidden items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] dark:bg-black/70 sm:items-center sm:p-4" aria-hidden="true">
+        <button type="button" class="absolute inset-0 cursor-default border-0 bg-transparent" tabindex="-1" aria-label="${escapeHtml(tb.qrClose)}" data-bk-qr-backdrop></button>
+        <div class="relative z-10 w-full max-w-sm rounded-t-3xl border border-slate-200/90 bg-white p-6 shadow-2xl ring-1 ring-slate-900/[0.06] dark:border-slate-700/80 dark:bg-slate-900 dark:shadow-black/50 dark:ring-white/[0.06] sm:rounded-3xl" role="dialog" aria-modal="true" aria-labelledby="bk-qr-heading">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 pr-2">
+              <h2 id="bk-qr-heading" class="text-lg font-bold tracking-tight text-slate-900 dark:text-white">${escapeHtml(tb.qrModalTitle)}</h2>
+              <p class="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">${escapeHtml(tb.qrModalHint)}</p>
+            </div>
+            <button type="button" data-bk-qr-close class="shrink-0 rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-amber-700 dark:hover:bg-slate-800 dark:hover:text-amber-200" aria-label="${escapeHtml(tb.qrClose)}">${icon.x('h-5 w-5')}</button>
+          </div>
+          <div class="mt-5 flex justify-center rounded-2xl border border-slate-200/90 bg-slate-50 p-5 ring-1 ring-slate-900/[0.04] dark:border-slate-700/50 dark:bg-slate-950/80 dark:ring-white/[0.04]">
+            <img src="${escapeHtml(bookingQrSrc)}" alt="" width="220" height="220" class="h-[220px] w-[220px] rounded-xl bg-white object-contain shadow-lg shadow-slate-900/15 dark:shadow-black/30" />
+          </div>
+          <p class="mt-3 text-center text-sm font-semibold tracking-tight text-slate-800 dark:text-slate-200">${escapeHtml(company.name)}</p>
+          <div class="mt-5 grid grid-cols-3 gap-2">
+            <button type="button" id="bk-qr-download" class="rounded-xl border border-slate-200 bg-white py-2.5 text-center text-xs font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:hover:border-amber-400/40 dark:hover:bg-slate-800">${escapeHtml(tb.qrDownload)}</button>
+            <button type="button" id="bk-qr-share" class="rounded-xl border border-slate-200 bg-white py-2.5 text-center text-xs font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:hover:border-amber-400/40 dark:hover:bg-slate-800">${escapeHtml(tb.qrShare)}</button>
+            <button type="button" id="bk-qr-print" class="rounded-xl border border-slate-200 bg-white py-2.5 text-center text-xs font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:hover:border-amber-400/40 dark:hover:bg-slate-800">${escapeHtml(tb.qrPrint)}</button>
+          </div>
+        </div>
       </div>
     </div>`
 
-  let selectedCar = carTypes[0]
+  root.querySelectorAll('[data-taxio-locale]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const lc = btn.getAttribute('data-taxio-locale')
+      if (lc) {
+        setLocale(lc)
+        mountBookCompany(root, slug)
+      }
+    })
+  })
+
+  root.querySelector('#bk-toggle-dark')?.addEventListener('click', () => {
+    setPublicDarkMode(!isPublicDarkMode())
+    syncPublicThemeClass()
+    mountBookCompany(root, slug)
+  })
+
+  let selectedCar = displayCarTypes[0] ?? carTypes[0] ?? 'Standard'
   let rideMode = 'now'
   let estimateTimer = null
   const pickupEl = root.querySelector('#bk-pickup')
@@ -715,9 +596,9 @@ export async function mountBookCompany(root, slug) {
   const estWrap = root.querySelector('#bk-estimate')
   const estLoading = root.querySelector('#bk-estimate-loading')
   const estBody = root.querySelector('#bk-estimate-body')
-  const estDist = root.querySelector('#bk-est-dist')
-  const estDur = root.querySelector('#bk-est-dur')
-  const estPrice = root.querySelector('#bk-est-price')
+  const estDist = root.querySelector('#bk-estimate-distance')
+  const estDur = root.querySelector('#bk-estimate-duration')
+  const estPrice = root.querySelector('#bk-estimate-price')
   const rideNowBtn = root.querySelector('#bk-ride-now')
   const rideScheduleBtn = root.querySelector('#bk-ride-schedule')
   const scheduleWrap = root.querySelector('#bk-schedule-wrap')
@@ -727,7 +608,7 @@ export async function mountBookCompany(root, slug) {
   const mailA = root.querySelector('#bk-mail')
   const callA = root.querySelector('#bk-call')
   if (company.email) {
-    mailA.href = `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent('Taxi booking request')}`
+    mailA.href = `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(tBooking(getLocale()).mailSubject)}`
   } else {
     mailA.classList.add('pointer-events-none', 'opacity-40')
   }
@@ -737,16 +618,61 @@ export async function mountBookCompany(root, slug) {
     callA.classList.add('pointer-events-none', 'opacity-40')
   }
 
+  const carWrapEl = showVehicleSection ? root.querySelector('#bk-car-wrap') : null
+  const carTriggerEl = showVehicleSection ? root.querySelector('#bk-car-trigger') : null
+  const carPanelEl = showVehicleSection ? root.querySelector('#bk-car-panel') : null
+  const carChevronEl = showVehicleSection ? root.querySelector('#bk-car-chevron') : null
+  let bkCarOutsideHandler = null
+
+  function closeCarPanel() {
+    if (!showVehicleSection || !carPanelEl) return
+    carPanelEl.classList.add('hidden')
+    carTriggerEl?.setAttribute('aria-expanded', 'false')
+    carChevronEl?.classList.remove('rotate-180')
+    if (bkCarOutsideHandler) {
+      document.removeEventListener('pointerdown', bkCarOutsideHandler, true)
+      bkCarOutsideHandler = null
+    }
+  }
+
+  function openCarPanel() {
+    if (!showVehicleSection || !carPanelEl || !carTriggerEl) return
+    if (bkCarOutsideHandler) {
+      document.removeEventListener('pointerdown', bkCarOutsideHandler, true)
+      bkCarOutsideHandler = null
+    }
+    carPanelEl.classList.remove('hidden')
+    carTriggerEl.setAttribute('aria-expanded', 'true')
+    carChevronEl?.classList.add('rotate-180')
+    bkCarOutsideHandler = (e) => {
+      const t = e.target
+      if (carWrapEl?.contains(t)) return
+      closeCarPanel()
+    }
+    window.setTimeout(() => {
+      document.addEventListener('pointerdown', bkCarOutsideHandler, true)
+    }, 0)
+  }
+
+  function toggleCarPanel() {
+    if (!carPanelEl) return
+    if (carPanelEl.classList.contains('hidden')) openCarPanel()
+    else closeCarPanel()
+  }
+
   function syncCarUi() {
-    if (!showCarSelector) return
-    root.querySelectorAll('.book-car').forEach((btn) => {
+    if (!showVehicleSection) return
+    const nameEl = root.querySelector('#bk-car-trigger-name')
+    const seatsEl = root.querySelector('#bk-car-trigger-seats')
+    const iconEl = root.querySelector('#bk-car-trigger-icon')
+    if (nameEl) nameEl.textContent = selectedCar
+    if (seatsEl) seatsEl.textContent = bookingCarTypeSeatsLabel(selectedCar)
+    if (iconEl) iconEl.innerHTML = bookingCarTypeIconHtml(selectedCar, 'h-7 w-7')
+    root.querySelectorAll('.bk-car-opt').forEach((btn) => {
       const t = btn.getAttribute('data-car')
       const on = t === selectedCar
-      btn.className =
-        'book-car flex flex-col items-center rounded-xl border-2 p-3 text-center transition-all ' +
-        (on
-          ? 'border-yellow-400 bg-yellow-400 shadow-sm'
-          : 'border-gray-200 bg-white hover:border-gray-300')
+      btn.setAttribute('aria-selected', on ? 'true' : 'false')
+      btn.className = `${bkCarOptBase}${on ? bkCarOptOn : bkCarOptOff}`
     })
   }
 
@@ -774,36 +700,51 @@ Car type: ${selectedCar}`
     const isNow = rideMode === 'now'
     if (rideNowBtn) {
       rideNowBtn.className =
-        'rounded-lg border-2 px-3 py-2 text-sm font-semibold ' +
+        'min-h-12 rounded-2xl border-2 px-3 py-3 text-sm transition ' +
         (isNow
-          ? 'border-yellow-400 bg-yellow-400 text-gray-900'
-          : 'border-gray-200 bg-white text-gray-700')
+          ? 'border-amber-400/80 bg-amber-400/15 font-bold text-amber-900 shadow-sm ring-1 ring-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100 dark:ring-amber-400/25'
+          : 'border-slate-200 bg-slate-50 font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-300')
     }
     if (rideScheduleBtn) {
       rideScheduleBtn.className =
-        'rounded-lg border-2 px-3 py-2 text-sm font-semibold ' +
+        'min-h-12 rounded-2xl border-2 px-3 py-3 text-sm transition ' +
         (!isNow
-          ? 'border-yellow-400 bg-yellow-400 text-gray-900'
-          : 'border-gray-200 bg-white text-gray-700')
+          ? 'border-amber-400/80 bg-amber-400/15 font-bold text-amber-900 shadow-sm ring-1 ring-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100 dark:ring-amber-400/25'
+          : 'border-slate-200 bg-slate-50 font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-300')
     }
     if (scheduleWrap) scheduleWrap.classList.toggle('hidden', isNow)
   }
 
+  function bookingFieldHasConfirmedPlace(state, inputEl) {
+    const v = String(inputEl?.value || '').trim()
+    const c = state?.committed
+    return typeof c === 'string' && c.length > 0 && v === c
+  }
+
   async function refreshEstimate() {
-    const pickup = pickupEl.value.trim()
-    const dropoff = dropEl.value.trim()
-    if (!pickup || !dropoff) {
+    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
+    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
+    if (!pickupOk || !dropoffOk) {
       latestEstimate = null
       estWrap?.classList.add('hidden')
       return
     }
+
+    const pickupText = pickupEl.value.trim()
+    const dropoffText = dropEl.value.trim()
+    const useCoords =
+      Number.isFinite(pickupPlacesState.lat) &&
+      Number.isFinite(pickupPlacesState.lng) &&
+      Number.isFinite(dropoffPlacesState.lat) &&
+      Number.isFinite(dropoffPlacesState.lng)
+
     estWrap?.classList.remove('hidden')
     estLoading?.classList.remove('hidden')
     estBody?.classList.add('hidden')
 
     const trip = await estimateTrip({
-      pickupAddress: pickup,
-      dropoffAddress: dropoff,
+      pickupAddress: useCoords ? `${pickupPlacesState.lat},${pickupPlacesState.lng}` : pickupText,
+      dropoffAddress: useCoords ? `${dropoffPlacesState.lat},${dropoffPlacesState.lng}` : dropoffText,
       pricing: effectivePricing,
       carType: selectedCar || 'Standard',
       apiKey: GOOGLE_API_KEY,
@@ -826,10 +767,26 @@ Car type: ${selectedCar}`
     }, 350)
   }
 
-  root.querySelectorAll('.book-car').forEach((btn) => {
+  if (showVehicleSection && carTriggerEl) {
+    carTriggerEl.addEventListener('click', (e) => {
+      e.preventDefault()
+      toggleCarPanel()
+    })
+    carTriggerEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        closeCarPanel()
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        toggleCarPanel()
+      }
+    })
+  }
+  root.querySelectorAll('.bk-car-opt').forEach((btn) => {
     btn.addEventListener('click', () => {
-      selectedCar = btn.getAttribute('data-car')
+      selectedCar = btn.getAttribute('data-car') || selectedCar
       syncCarUi()
+      closeCarPanel()
       queueEstimate()
     })
   })
@@ -849,40 +806,133 @@ Car type: ${selectedCar}`
     el.addEventListener('input', refreshWaState)
     el.addEventListener('change', refreshWaState)
   })
-  pickupEl.addEventListener('input', queueEstimate)
-  dropEl.addEventListener('input', queueEstimate)
   refreshWaState()
 
-  const pickupPlacesState = { committed: null }
-  const dropoffPlacesState = { committed: null }
-  bindPlacesAutocomplete(pickupEl, pickupPlacesState)
-  bindPlacesAutocomplete(dropEl, dropoffPlacesState)
-  attachBookingPacObserver(root, [pickupEl, dropEl])
+  const pickupPlacesState = { committed: null, lat: null, lng: null, placeId: null }
+  const dropoffPlacesState = { committed: null, lat: null, lng: null, placeId: null }
 
-  root.querySelector('#book-qr-hint')?.addEventListener('click', () => {
-    window.alert(
-      'Share your booking page: ' + window.location.href + '\n(QR generation can be added in a future release.)'
+  function onAddressFieldsUpdated() {
+    refreshWaState()
+    queueEstimate()
+  }
+
+  const pickupSuggestEl = root.querySelector('#bk-pickup-suggest')
+  const dropoffSuggestEl = root.querySelector('#bk-dropoff-suggest')
+  const poweredByEsc = escapeHtml(tb.poweredByGoogle || 'Powered by Google')
+  const detachPickupCtrl = attachBookingAddressController({
+    inputEl: pickupEl,
+    panelEl: pickupSuggestEl,
+    state: pickupPlacesState,
+    onUpdate: onAddressFieldsUpdated,
+    poweredByHtml: poweredByEsc,
+  })
+  const detachDropoffCtrl = attachBookingAddressController({
+    inputEl: dropEl,
+    panelEl: dropoffSuggestEl,
+    state: dropoffPlacesState,
+    onUpdate: onAddressFieldsUpdated,
+    poweredByHtml: poweredByEsc,
+  })
+  taxioBookCompanyAddressCleanup = () => {
+    closeCarPanel()
+    detachPickupCtrl.detach()
+    detachDropoffCtrl.detach()
+  }
+
+  root.querySelectorAll('.bk-company-photo-img').forEach((img) => {
+    img.addEventListener('error', () => {
+      img.classList.add('hidden')
+      const fb = img.nextElementSibling
+      if (fb?.classList.contains('bk-company-photo-fallback')) {
+        fb.classList.remove('hidden')
+        fb.classList.add('flex')
+      }
+    })
+  })
+
+  const qrModal = root.querySelector('#bk-qr-modal')
+  const openQrModal = () => {
+    if (!qrModal) return
+    qrModal.classList.remove('hidden')
+    qrModal.classList.add('flex')
+    document.body.style.overflow = 'hidden'
+    qrModal.setAttribute('aria-hidden', 'false')
+  }
+  const closeQrModal = () => {
+    if (!qrModal) return
+    qrModal.classList.add('hidden')
+    qrModal.classList.remove('flex')
+    document.body.style.overflow = ''
+    qrModal.setAttribute('aria-hidden', 'true')
+  }
+  root.querySelector('#book-qr-hint')?.addEventListener('click', openQrModal)
+  qrModal?.querySelectorAll('[data-bk-qr-close], [data-bk-qr-backdrop]').forEach((el) => {
+    el.addEventListener('click', closeQrModal)
+  })
+
+  root.querySelector('#bk-qr-download')?.addEventListener('click', async (e) => {
+    e.preventDefault()
+    try {
+      const r = await fetch(bookingQrSrc)
+      const blob = await r.blob()
+      const u = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = u
+      a.download = 'taxio-booking-qr.png'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(u)
+    } catch {
+      window.open(bookingQrSrc, '_blank', 'noopener,noreferrer')
+    }
+  })
+
+  root.querySelector('#bk-qr-share')?.addEventListener('click', async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ title: company.name, text: tb.qrModalTitle, url: bookingPageUrl })
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(bookingPageUrl)
+      }
+    } catch {
+      /* user cancelled or blocked */
+    }
+  })
+
+  root.querySelector('#bk-qr-print')?.addEventListener('click', () => {
+    const w = window.open('', '_blank', 'noopener,noreferrer')
+    if (!w) return
+    const srcEsc = bookingQrSrc.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    w.document.write(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>QR</title></head><body style="margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#fff"><img src="${srcEsc}" alt="" style="max-width:90vmin;height:auto" onload="window.focus();window.print()"/></body></html>`
     )
+    w.document.close()
   })
 
   waBtn.addEventListener('click', async () => {
+    const msgs = tBooking(getLocale())
     errEl.classList.add('hidden')
+    if (isDemo) {
+      errEl.textContent = msgs.demoNoWhatsapp
+      errEl.classList.remove('hidden')
+      return
+    }
     if (!termsEl.checked) {
-      errEl.textContent =
-        'Please agree to the Terms of Use, Company Terms, and Privacy Policy to continue.'
+      errEl.textContent = msgs.errTerms
       errEl.classList.remove('hidden')
       return
     }
     const pu = pickupEl.value.trim()
     const doff = dropEl.value.trim()
     if (!pu || !doff) {
-      errEl.textContent = 'Please enter pick-up and drop-off.'
+      errEl.textContent = msgs.errAddresses
       errEl.classList.remove('hidden')
       return
     }
     const n = digitsOnly(phone)
     if (!n) {
-      errEl.textContent = 'This company has no phone number for WhatsApp.'
+      errEl.textContent = msgs.errNoPhone
       errEl.classList.remove('hidden')
       return
     }
@@ -891,13 +941,13 @@ Car type: ${selectedCar}`
     if (rideMode === 'schedule') {
       const raw = scheduleInput?.value || ''
       if (!raw) {
-        errEl.textContent = 'Please select date and time for scheduled ride.'
+        errEl.textContent = msgs.errSchedule
         errEl.classList.remove('hidden')
         return
       }
       const d = new Date(raw)
       if (Number.isNaN(d.getTime())) {
-        errEl.textContent = 'Please enter a valid schedule date and time.'
+        errEl.textContent = msgs.errScheduleBad
         errEl.classList.remove('hidden')
         return
       }

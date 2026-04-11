@@ -4,11 +4,9 @@
  */
 export const OPERATOR_LEGAL_NAME = 'Human Target Services'
 
-export const OPERATOR_REGISTERED_ADDRESS_DISPLAY = 'Tieltsebaan 137 Aarschot 3200'
-
 export const OPERATOR_VAT_DISPLAY = 'BE1022387423'
 
-export const OPERATOR_LEGAL_EMAIL = 'privacy@taxio.be'
+export const OPERATOR_LEGAL_EMAIL = 'info@taxio.be'
 
 /** Shown in Company Terms §5 — keep in sync with actual contracts. */
 export const BILLING_CYCLE_DISPLAY = 'Monthly'

@@ -3,22 +3,19 @@ import { registerCompanyOwner } from '../lib/api.js'
 import { REGISTRATION_TERMS_BUNDLE } from '../lib/legalVersions.js'
 import { signOutEverywhere } from '../lib/auth.js'
 import { translations } from '../i18n.js'
+import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { icon } from '../lib/icons.js'
 import { slugFromCompanyName } from '../lib/slug.js'
 
-function getLang() {
-  return localStorage.getItem('language') || 'en'
-}
-
 function tr() {
-  const lang = getLang()
-  return translations[lang]?.registerPage || translations.en.registerPage
+  const lang = getLocale()
+  return translations[lang]?.registerPage || translations.nl.registerPage
 }
 
 function inputCls(dark) {
   return dark
-    ? 'w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2.5 text-white shadow-sm placeholder:text-gray-400 focus:border-yellow-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/30'
-    : 'w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30'
+    ? 'w-full rounded-xl border border-slate-600 bg-slate-700/90 px-4 py-3 text-white shadow-sm placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/25'
+    : 'w-full rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-amber-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-400/20'
 }
 
 function isDark() {
@@ -26,65 +23,68 @@ function isDark() {
 }
 
 export function mountRegister(root) {
+  syncDocumentLang(getLocale())
   const dark = isDark()
   const R = tr()
   const ic = inputCls(dark)
+  const lang = getLocale()
 
   root.innerHTML = `
-<div class="min-h-screen ${dark ? 'bg-slate-900' : 'bg-[#eef2f6]'} py-8 md:py-12 px-4">
+<div class="min-h-screen ${dark ? 'bg-slate-900' : 'bg-gradient-to-b from-slate-100/80 to-[#eef2f6]'} py-8 md:py-14 px-4">
   <div class="container mx-auto max-w-4xl">
-    <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-      <a href="/" class="inline-flex h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium ${dark ? 'text-white hover:bg-slate-800' : 'text-slate-700 hover:bg-white/60'}">
+    <div class="mb-8 flex flex-wrap items-center justify-between gap-4">
+      <a href="/" class="inline-flex h-10 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium transition ${dark ? 'text-white hover:bg-slate-800' : 'text-slate-700 hover:bg-white/90'}">
         ${icon.arrowLeft('h-4 w-4')}
         ${R.backHome}
       </a>
       <div class="flex items-center gap-2">
-        <div class="flex rounded-full p-1 shadow-md ${dark ? 'bg-slate-800' : 'bg-white'}">
-          <button type="button" data-reg-lang="en" class="rounded-full px-3 py-1.5 text-xs font-semibold ${getLang() === 'en' ? 'bg-slate-900 text-white dark:bg-yellow-400 dark:text-slate-900' : dark ? 'text-gray-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-100'}">EN</button>
-          <button type="button" data-reg-lang="fr" class="rounded-full px-3 py-1.5 text-xs font-semibold ${getLang() === 'fr' ? 'bg-slate-900 text-white dark:bg-yellow-400 dark:text-slate-900' : dark ? 'text-gray-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-100'}">FR</button>
-          <button type="button" data-reg-lang="nl" class="rounded-full px-3 py-1.5 text-xs font-semibold ${getLang() === 'nl' ? 'bg-slate-900 text-white dark:bg-yellow-400 dark:text-slate-900' : dark ? 'text-gray-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-100'}">NL</button>
+        <div class="flex rounded-full border border-black/5 p-1 shadow-sm ${dark ? 'border-slate-600 bg-slate-800' : 'bg-white'}">
+          <button type="button" data-reg-lang="nl" class="rounded-full px-3 py-1.5 text-xs font-semibold ${lang === 'nl' ? 'bg-slate-900 text-white dark:bg-yellow-400 dark:text-slate-900' : dark ? 'text-gray-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-100'}">NL</button>
+          <button type="button" data-reg-lang="fr" class="rounded-full px-3 py-1.5 text-xs font-semibold ${lang === 'fr' ? 'bg-slate-900 text-white dark:bg-yellow-400 dark:text-slate-900' : dark ? 'text-gray-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-100'}">FR</button>
+          <button type="button" data-reg-lang="en" class="rounded-full px-3 py-1.5 text-xs font-semibold ${lang === 'en' ? 'bg-slate-900 text-white dark:bg-yellow-400 dark:text-slate-900' : dark ? 'text-gray-400 hover:bg-slate-700' : 'text-gray-600 hover:bg-gray-100'}">EN</button>
         </div>
-        <button type="button" id="reg-toggle-dark" class="rounded-full p-2.5 shadow-md ${dark ? 'bg-slate-800 text-gray-300' : 'bg-white text-gray-600'}" aria-label="Toggle dark mode">
+        <button type="button" id="reg-toggle-dark" class="rounded-full border border-black/5 p-2.5 shadow-sm ${dark ? 'border-slate-600 bg-slate-800 text-gray-300' : 'bg-white text-gray-600'}" aria-label="Toggle dark mode">
           ${dark ? icon.moon('h-5 w-5') : icon.sun('h-5 w-5')}
         </button>
       </div>
     </div>
 
     <div class="mx-auto max-w-2xl">
-      <div class="rounded-xl border-2 ${dark ? 'border-slate-700 bg-slate-800' : 'border-gray-100 bg-white'} p-6 shadow-2xl md:p-8">
-        <div class="mb-6 flex flex-col gap-4 md:flex-row md:items-center">
-          <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl shadow-lg ${dark ? 'bg-yellow-400' : 'bg-gradient-to-br from-blue-500 to-indigo-600'}">
+      <div class="rounded-2xl border ${dark ? 'border-slate-700/80 bg-slate-800/90' : 'border-slate-200/90 bg-white'} p-6 shadow-lg ring-1 ring-black/[0.04] md:p-9">
+        <div class="mb-8 flex flex-col gap-4 md:flex-row md:items-center">
+          <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl shadow-sm ring-1 ring-black/5 ${dark ? 'bg-amber-400' : 'bg-gradient-to-br from-slate-800 to-slate-900'}">
             ${icon.building2(dark ? 'h-7 w-7 text-slate-900' : 'h-7 w-7 text-white')}
           </div>
           <div>
-            <h1 class="text-2xl font-bold tracking-tight md:text-3xl ${dark ? 'text-white' : 'text-slate-900'}">${R.title}</h1>
-            <p class="mt-1 text-sm ${dark ? 'text-gray-400' : 'text-gray-600'}">${R.subtitle}</p>
+            <p class="text-xs font-semibold uppercase tracking-wider ${dark ? 'text-amber-400/90' : 'text-amber-800/80'}">${R.registerEyebrow || 'TAXIO'}</p>
+            <h1 class="mt-1 text-2xl font-bold tracking-tight md:text-3xl ${dark ? 'text-white' : 'text-slate-900'}">${R.title}</h1>
+            <p class="mt-2 text-sm leading-relaxed ${dark ? 'text-gray-400' : 'text-slate-600'}">${R.subtitle}</p>
           </div>
         </div>
 
-        <form id="reg-form" class="space-y-5">
+        <form id="reg-form" class="space-y-6">
           <div class="space-y-2">
-            <label for="companyName" class="text-sm font-medium ${dark ? 'text-white' : 'text-slate-900'}">${R.companyName} <span class="${dark ? 'text-yellow-400' : 'text-blue-600'}">*</span></label>
+            <label for="companyName" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.companyName} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
             <input id="companyName" name="companyName" required autocomplete="organization" placeholder="${R.phCompany}" class="${ic}" />
           </div>
           <div class="space-y-2">
-            <label for="vatNumber" class="text-sm font-medium ${dark ? 'text-white' : 'text-slate-900'}">${R.vatNumber} <span class="${dark ? 'text-yellow-400' : 'text-blue-600'}">*</span></label>
+            <label for="vatNumber" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.vatNumber} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
             <input id="vatNumber" name="vatNumber" required placeholder="${R.phVat}" class="${ic}" />
           </div>
           <div class="space-y-2">
-            <label for="phone" class="text-sm font-medium ${dark ? 'text-white' : 'text-slate-900'}">${R.phone} <span class="${dark ? 'text-yellow-400' : 'text-blue-600'}">*</span></label>
+            <label for="phone" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.phone} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
             <input id="phone" name="phone" type="tel" required placeholder="${R.phPhone}" class="${ic}" />
           </div>
           <div class="space-y-2">
-            <label for="email" class="text-sm font-medium ${dark ? 'text-white' : 'text-slate-900'}">${R.email} <span class="${dark ? 'text-yellow-400' : 'text-blue-600'}">*</span></label>
+            <label for="email" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.email} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
             <input id="email" name="email" type="email" required autocomplete="email" placeholder="${R.phEmail}" class="${ic}" />
           </div>
           <div class="space-y-2">
-            <label for="city" class="text-sm font-medium ${dark ? 'text-white' : 'text-slate-900'}">${R.city} <span class="${dark ? 'text-yellow-400' : 'text-blue-600'}">*</span></label>
+            <label for="city" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.city} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
             <input id="city" name="city" required placeholder="${R.phCity}" class="${ic}" />
           </div>
 
-          <div id="reg-preview" class="hidden rounded-lg border p-4 ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-blue-200 bg-blue-50'}">
+          <div id="reg-preview" class="hidden rounded-xl border p-4 sm:p-5 ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-slate-200 bg-slate-50'}">
             <h3 class="mb-3 flex items-center gap-2 text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">
               ${icon.eye('h-4 w-4')}
               ${R.previewTitle}
@@ -102,21 +102,21 @@ export function mountRegister(root) {
             </div>
           </div>
 
-          <div id="terms-wrap" class="flex items-start gap-3 rounded-lg border-2 p-4 transition-colors ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-gray-200 bg-gray-50'}">
+          <div id="terms-wrap" class="flex items-start gap-3 rounded-2xl border-2 p-4 sm:p-5 transition-colors ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-slate-200 bg-slate-50/90'}">
             <input type="checkbox" id="terms" name="terms" class="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-yellow-500 focus:ring-yellow-500 dark:border-slate-500 dark:bg-slate-700" />
             <label for="terms" class="cursor-pointer text-sm leading-relaxed ${dark ? 'text-gray-300' : 'text-gray-600'}">
-              ${R.termsLead}<a href="/terms" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.termsOfUse}</a>${R.termsJoin}<a href="/company-terms" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.termsCompany}</a>${R.termsAnd}<a href="/privacy" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.privacyLink}</a>
+              ${R.acceptCompanyLead}<a href="/company-terms" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.acceptCompanyTerms}</a>${R.acceptCompanyAnd}<a href="/privacy" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.acceptCompanyPrivacy}</a>
             </label>
           </div>
 
-          <p id="reg-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"></p>
+          <p id="reg-err" class="hidden rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800 ring-1 ring-red-100 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900/30"></p>
 
-          <div class="flex flex-col gap-3 pt-2 sm:flex-row">
-            <button type="button" id="btn-preview" class="flex flex-1 items-center justify-center gap-2 rounded-md border-2 px-4 py-3 text-sm font-semibold shadow-sm ${dark ? 'border-slate-600 text-white hover:bg-slate-700' : 'border-gray-300 bg-white text-slate-900 hover:bg-gray-50'}">
+          <div class="flex flex-col gap-3 pt-1 sm:flex-row sm:gap-4">
+            <button type="button" id="btn-preview" class="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-300/90 px-4 py-3.5 text-sm font-semibold shadow-sm transition ${dark ? 'border-slate-600 text-white hover:bg-slate-700/80' : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300 hover:bg-slate-50'}">
               ${icon.eye('h-4 w-4')}
               ${R.preview}
             </button>
-            <button type="submit" id="btn-submit" disabled class="flex flex-1 items-center justify-center rounded-md px-4 py-3 text-sm font-semibold shadow-md disabled:cursor-not-allowed disabled:opacity-50 ${dark ? 'bg-yellow-400 text-slate-900 hover:bg-yellow-500' : 'bg-blue-600 text-white hover:bg-blue-700'}">
+            <button type="submit" id="btn-submit" disabled class="flex flex-1 items-center justify-center rounded-xl px-4 py-3.5 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-50 ${dark ? 'bg-amber-400 text-slate-900 hover:bg-amber-500' : 'bg-slate-900 text-white hover:bg-slate-800'}">
               ${R.btnSubmit}
             </button>
           </div>
@@ -190,14 +190,14 @@ export function mountRegister(root) {
   function updateTermsStyle() {
     const on = termsCb.checked
     termsWrap.className =
-      'flex items-start gap-3 rounded-lg border-2 p-4 transition-colors ' +
+      'flex items-start gap-3 rounded-2xl border-2 p-4 sm:p-5 transition-colors ' +
       (on
         ? dark
-          ? 'border-yellow-400 bg-yellow-400/10'
-          : 'border-blue-400 bg-blue-50'
+          ? 'border-amber-400 bg-amber-400/10'
+          : 'border-amber-400/80 bg-amber-50/80'
         : dark
           ? 'border-slate-600 bg-slate-700/50'
-          : 'border-gray-200 bg-gray-50')
+          : 'border-slate-200 bg-slate-50/90')
   }
 
   root.querySelector('#btn-preview').addEventListener('click', () => {
@@ -226,7 +226,7 @@ export function mountRegister(root) {
 
   root.querySelectorAll('[data-reg-lang]').forEach((b) => {
     b.addEventListener('click', () => {
-      localStorage.setItem('language', b.getAttribute('data-reg-lang'))
+      setLocale(b.getAttribute('data-reg-lang'))
       mountRegister(root)
     })
   })
@@ -249,6 +249,7 @@ export function mountRegister(root) {
       country: null,
       termsAcceptedAt: new Date().toISOString(),
       termsVersion: REGISTRATION_TERMS_BUNDLE,
+      locale: getLocale(),
     }
     const btn = root.querySelector('#btn-submit')
     btn.disabled = true

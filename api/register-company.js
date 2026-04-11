@@ -6,6 +6,7 @@ import {
   safeSendEmail,
   slugFromCompanyName,
   validateSupabaseServiceEnv,
+  normalizeCompanyLocale,
 } from './_utils.js'
 
 const DEFAULT_PRICING = {
@@ -117,6 +118,7 @@ export default async function handler(req, res) {
       if (!Number.isNaN(d.getTime())) companyTermsAcceptedAt = d.toISOString()
     }
     const companyTermsVersion = String(body.termsVersion || '').trim() || null
+    const preferred_locale = normalizeCompanyLocale(body.locale || body.preferred_locale)
     const normalizedVat = normalizeVatForCompare(vatNumberInput)
     const normalizedPhone = normalizePhoneForCompare(phoneInput)
 
@@ -215,6 +217,7 @@ export default async function handler(req, res) {
       availability_status: 'available',
       subscription_plan: 'basic',
       pricing: DEFAULT_PRICING,
+      preferred_locale,
     }
 
     const legalCompanyRow = {
@@ -232,21 +235,45 @@ export default async function handler(req, res) {
       )
     }
 
+    function preferredLocaleColumnMissing(err) {
+      const m = String(err?.message || '').toLowerCase()
+      return m.includes('preferred_locale')
+    }
+
     let { data: company, error: cErr } = await supabase
       .from('companies')
       .insert({ ...baseCompanyRow, ...legalCompanyRow })
       .select('id, name, slug, email, vat_number, phone, city, status, created_at')
       .single()
 
+    if (cErr && preferredLocaleColumnMissing(cErr)) {
+      console.warn(
+        '[register-company] preferred_locale missing; retry without it. Apply supabase/migration_company_preferred_locale.sql.'
+      )
+      const { preferred_locale: _drop, ...rowNoLocale } = baseCompanyRow
+      ;({ data: company, error: cErr } = await supabase
+        .from('companies')
+        .insert({ ...rowNoLocale, ...legalCompanyRow })
+        .select('id, name, slug, email, vat_number, phone, city, status, created_at')
+        .single())
+    }
     if (cErr && companyTermsColumnsMissing(cErr)) {
       console.warn(
         '[register-company] Legal acceptance columns missing; retry without them. Apply supabase/migration_legal_acceptance.sql.'
       )
+      const { preferred_locale: _pl, ...withoutLocale } = baseCompanyRow
       ;({ data: company, error: cErr } = await supabase
         .from('companies')
         .insert(baseCompanyRow)
         .select('id, name, slug, email, vat_number, phone, city, status, created_at')
         .single())
+      if (cErr && preferredLocaleColumnMissing(cErr)) {
+        ;({ data: company, error: cErr } = await supabase
+          .from('companies')
+          .insert(withoutLocale)
+          .select('id, name, slug, email, vat_number, phone, city, status, created_at')
+          .single())
+      }
     }
 
     if (cErr) {
@@ -290,6 +317,7 @@ export default async function handler(req, res) {
           <li><strong>City:</strong> ${escapeHtmlEmail(city)}</li>
           <li><strong>Request date (UTC):</strong> ${escapeHtmlEmail(requestedAt)}</li>
           <li><strong>Slug:</strong> ${escapeHtmlEmail(slug)}</li>
+          <li><strong>Registration language:</strong> ${escapeHtmlEmail(preferred_locale)}</li>
         </ul>
         <p><a href="${escapeHtmlEmail(adminDashboardUrl)}">Open admin dashboard</a></p>
       `,
