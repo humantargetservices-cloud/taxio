@@ -253,6 +253,8 @@ export const translations = {
       locateFailed: 'We could not detect your location. Please enter your pick-up manually.',
       locateUnavailable: 'Location is not available on this page or device. Please type your pick-up.',
       locateAddressFailed: 'We could not find an address for that location. Please type your pick-up.',
+      locatePromptHint:
+        'If your browser asks for permission, choose Allow once to fill pick-up from your position.',
       dropLabel: 'Drop-off location',
       dropPh: 'Where are you going?',
       vehicle: 'Vehicle',
@@ -607,6 +609,8 @@ export const translations = {
       locateFailed: 'Impossible de détecter votre position. Saisissez la prise en charge manuellement.',
       locateUnavailable: 'La position n’est pas disponible sur cet appareil ou cette page.',
       locateAddressFailed: 'Aucune adresse trouvée pour cet emplacement. Saisissez la prise en charge.',
+      locatePromptHint:
+        'Si votre navigateur demande l’autorisation, acceptez-la une fois pour remplir la prise en charge.',
       dropLabel: 'Destination',
       dropPh: 'Où allez-vous ?',
       vehicle: 'Véhicule',
@@ -964,6 +968,8 @@ export const translations = {
       locateFailed: 'We konden uw locatie niet bepalen. Vul het ophaaladres handmatig in.',
       locateUnavailable: 'Locatie is hier niet beschikbaar. Typ uw ophaaladres.',
       locateAddressFailed: 'Geen adres gevonden voor die plek. Typ uw ophaaladres.',
+      locatePromptHint:
+        'Als uw browser om toestemming vraagt, kies één keer “Toestaan” om het ophaaladres in te vullen.',
       dropLabel: 'Bestemming',
       dropPh: 'Waar naartoe?',
       vehicle: 'Voertuig',

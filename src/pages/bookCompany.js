@@ -305,6 +305,19 @@ function loadGoogleMapsPlaces() {
   return googleMapsPlacesPromise
 }
 
+/** `'granted' | 'denied' | 'prompt'` or `null` if unsupported / error (caller uses normal geolocation flow). */
+async function getBookingGeolocationPermissionState() {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return null
+    const status = await navigator.permissions.query({ name: 'geolocation' })
+    const s = status?.state
+    if (s === 'granted' || s === 'denied' || s === 'prompt') return s
+    return null
+  } catch {
+    return null
+  }
+}
+
 function reverseGeocodeLatLng(lat, lng) {
   return new Promise((resolve, reject) => {
     const g = window.google?.maps
@@ -922,17 +935,36 @@ Car type: ${selectedCar}`
         setPickupLocateMessage(msgs.locateUnavailable)
         return
       }
+
+      let permState = null
+      try {
+        permState = await getBookingGeolocationPermissionState()
+      } catch {
+        permState = null
+      }
+
+      if (permState === 'denied') {
+        setPickupLocateMessage(msgs.locateDenied)
+        return
+      }
+
+      if (permState === 'prompt') {
+        const hint = String(msgs.locatePromptHint || '').trim()
+        if (hint) setPickupLocateMessage(hint)
+      }
+
+      const geoOptions =
+        permState === 'granted'
+          ? { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
+          : { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
+
       locating = true
       locatePickupBtn.setAttribute('aria-busy', 'true')
       locatePickupBtn.disabled = true
       locatePickupBtn.innerHTML = `<span class="inline-block h-[18px] w-[18px] animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-600 dark:border-emerald-400/25 dark:border-t-emerald-300" aria-hidden="true"></span>`
       try {
         const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 20000,
-            maximumAge: 60000,
-          })
+          navigator.geolocation.getCurrentPosition(resolve, reject, geoOptions)
         })
         const rawLat = pos.coords.latitude
         const rawLng = pos.coords.longitude
@@ -963,6 +995,7 @@ Car type: ${selectedCar}`
           placeId: result.place_id,
           onUpdate: onAddressFieldsUpdated,
         })
+        setPickupLocateMessage('')
         if (pickupSuggestEl) {
           pickupSuggestEl.classList.add('hidden')
           pickupSuggestEl.innerHTML = ''
