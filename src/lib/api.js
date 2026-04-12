@@ -326,6 +326,7 @@ const ADMIN_EDITABLE_COMPANY_FIELDS = [
   'slogan',
   'availability_status',
   'pricing',
+  'logo_url',
 ]
 
 const AVAILABILITY_STATUSES = ['available', 'busy', 'offline']
@@ -432,13 +433,93 @@ export async function updateCompanyByOwner(companyId, patch) {
     'slogan',
     'availability_status',
     'pricing',
+    'logo_url',
   ]
   const data = {}
   for (const k of allowed) {
-    if (k in patch) data[k] = patch[k]
+    if (!(k in patch)) continue
+    if (k === 'logo_url') {
+      const v = patch[k]
+      data[k] = v == null || v === '' ? null : String(v).trim()
+      continue
+    }
+    data[k] = patch[k]
   }
   if (Object.keys(data).length === 0) return { error: null }
   const { error } = await supabase.from('companies').update(data).eq('id', companyId)
+  return { error }
+}
+
+const COMPANY_LOGOS_BUCKET = 'company-logos'
+const MAX_LOGO_UPLOAD_BYTES = 2 * 1024 * 1024
+const MAX_LOGO_EDGE_PX = 640
+
+async function downscaleImageFileToJpegBlob(file, maxEdge) {
+  const bmp = await createImageBitmap(file)
+  try {
+    let w = bmp.width
+    let h = bmp.height
+    const scale = Math.min(1, maxEdge / Math.max(w, h, 1))
+    w = Math.max(1, Math.round(w * scale))
+    h = Math.max(1, Math.round(h * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Canvas not supported.')
+    ctx.drawImage(bmp, 0, 0, w, h)
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('Could not encode image.'))),
+        'image/jpeg',
+        0.88
+      )
+    })
+  } finally {
+    bmp.close?.()
+  }
+}
+
+/**
+ * Upload company logo to Supabase Storage (`company-logos/{companyId}/logo.jpg`)
+ * and save public URL on `companies.logo_url`.
+ */
+export async function uploadCompanyLogo(companyId, file) {
+  if (!companyId || !file) return { error: new Error('Missing file or company.') }
+  const okTypes = ['image/jpeg', 'image/png', 'image/webp']
+  if (!okTypes.includes(file.type)) {
+    return { error: new Error('Please choose a JPEG, PNG, or WebP image.') }
+  }
+  if (file.size > MAX_LOGO_UPLOAD_BYTES) {
+    return { error: new Error('Image must be 2 MB or smaller.') }
+  }
+  try {
+    const blob = await downscaleImageFileToJpegBlob(file, MAX_LOGO_EDGE_PX)
+    const path = `${companyId}/logo.jpg`
+    const { error: upErr } = await supabase.storage
+      .from(COMPANY_LOGOS_BUCKET)
+      .upload(path, blob, { contentType: 'image/jpeg', upsert: true, cacheControl: '86400' })
+    if (upErr) return { error: new Error(upErr.message || 'Upload failed.') }
+    const { data } = supabase.storage.from(COMPANY_LOGOS_BUCKET).getPublicUrl(path)
+    const base = data?.publicUrl
+    if (!base) return { error: new Error('Could not resolve image URL.') }
+    const u = new URL(base)
+    u.searchParams.set('v', String(Date.now()))
+    const publicUrl = u.toString()
+    const { error: dbErr } = await updateCompanyByOwner(companyId, { logo_url: publicUrl })
+    if (dbErr) return { error: new Error(dbErr.message || 'Could not save logo URL.') }
+    return { publicUrl, error: null }
+  } catch (err) {
+    return { error: new Error(err?.message || 'Could not process image.') }
+  }
+}
+
+/** Remove stored logo file (best effort) and clear `companies.logo_url`. */
+export async function removeCompanyLogo(companyId) {
+  if (!companyId) return { error: new Error('Missing company.') }
+  const path = `${companyId}/logo.jpg`
+  await supabase.storage.from(COMPANY_LOGOS_BUCKET).remove([path])
+  const { error } = await updateCompanyByOwner(companyId, { logo_url: null })
   return { error }
 }
 

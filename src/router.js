@@ -27,6 +27,7 @@ function mountNotFound(root) {
 function route() {
   const root = document.getElementById('app')
   if (!root) return
+  document.title = 'TAXIO'
   syncDocumentLang(getLocale())
 
   const path = window.location.pathname

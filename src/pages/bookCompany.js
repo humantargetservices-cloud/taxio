@@ -61,6 +61,34 @@ function isBookingAddressConfirmedIdle(input, state) {
 }
 
 /**
+ * Commit a resolved address (Places details or Geocoder) so value, coords, and `committed`
+ * stay in sync — required for trip estimate and “confirmed pick” rules.
+ */
+function commitBookingFieldPlace({ inputEl, state, formattedAddress, lat, lng, placeId, onUpdate }) {
+  const addr = String(formattedAddress || '').trim()
+  if (!addr || !inputEl || !state) return false
+  state.__applyingCommit = true
+  try {
+    inputEl.value = addr
+    state.committed = addr
+    state.placeId = placeId != null && String(placeId).length ? String(placeId) : null
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      state.lat = lat
+      state.lng = lng
+    } else {
+      state.lat = null
+      state.lng = null
+    }
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }))
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }))
+  } finally {
+    state.__applyingCommit = false
+  }
+  onUpdate?.()
+  return true
+}
+
+/**
  * One booking address field: own DOM suggestion panel + AutocompleteService + PlacesService.getDetails.
  * No shared Google `.pac-container` (root cause of pickup/drop-off cross-talk).
  */
@@ -149,25 +177,16 @@ function attachBookingAddressController({ inputEl, panelEl, state, onUpdate, pow
       lng = typeof loc.lng === 'function' ? loc.lng() : Number(loc.lng)
     }
     if (!addr) return
-    state.__applyingCommit = true
-    try {
-      inputEl.value = addr
-      state.committed = addr
-      state.placeId = place.place_id || null
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        state.lat = lat
-        state.lng = lng
-      } else {
-        state.lat = null
-        state.lng = null
-      }
-      inputEl.dispatchEvent(new Event('input', { bubbles: true }))
-      inputEl.dispatchEvent(new Event('change', { bubbles: true }))
-    } finally {
-      state.__applyingCommit = false
-    }
+    commitBookingFieldPlace({
+      inputEl,
+      state,
+      formattedAddress: addr,
+      lat,
+      lng,
+      placeId: place?.place_id,
+      onUpdate,
+    })
     hidePanel()
-    onUpdate()
   }
 
   function selectPlaceId(placeId) {
@@ -286,6 +305,24 @@ function loadGoogleMapsPlaces() {
   return googleMapsPlacesPromise
 }
 
+function reverseGeocodeLatLng(lat, lng) {
+  return new Promise((resolve, reject) => {
+    const g = window.google?.maps
+    if (!g?.Geocoder) {
+      reject(new Error('no_geocoder'))
+      return
+    }
+    const geocoder = new g.Geocoder()
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      if (status === g.GeocoderStatus.OK && results?.[0]) {
+        resolve(results[0])
+      } else {
+        reject(new Error('geocode_failed'))
+      }
+    })
+  })
+}
+
 function digitsOnly(phone) {
   return String(phone || '').replace(/\D/g, '')
 }
@@ -376,6 +413,10 @@ export async function mountBookCompany(root, slug) {
   const bkCarOptOn = 'bg-amber-50 ring-1 ring-inset ring-amber-400/25 dark:bg-amber-400/15 dark:ring-amber-400/20'
   const bkCarOptOff =
     'bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80'
+
+  const pickupLocateBtnHtml = GOOGLE_API_KEY
+    ? `<button type="button" id="bk-locate-pickup" class="absolute right-1 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-emerald-600 transition hover:bg-emerald-50 active:bg-emerald-100/90 dark:text-emerald-400 dark:hover:bg-emerald-400/10 dark:active:bg-emerald-400/15" title="${escapeHtml(tb.locateMeTitle)}" aria-label="${escapeHtml(tb.locateMeAria)}">${icon.crosshair('h-[19px] w-[19px]')}</button>`
+    : ''
 
   const bkCarOptsHtml = !showVehicleSection
     ? ''
@@ -476,9 +517,11 @@ export async function mountBookCompany(root, slug) {
               <label class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.pickupLabel)}</label>
               <div class="relative mt-2">
                 <span class="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-emerald-500 dark:text-emerald-400">${icon.mapPin('h-[18px] w-[18px]')}</span>
-                <input id="bk-pickup" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="${escapeHtml(tb.pickupPh)}" class="h-12 w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:bg-slate-800 dark:focus:ring-amber-400/25" />
+                <input id="bk-pickup" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="${escapeHtml(tb.pickupPh)}" class="h-12 w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-12 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:bg-slate-800 dark:focus:ring-amber-400/25" />
+                ${pickupLocateBtnHtml}
                 <div id="bk-pickup-suggest" class="taxio-booking-field-suggest pointer-events-auto absolute left-0 right-0 top-full z-[130] mt-1.5 hidden max-h-56 overflow-x-hidden overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/[0.06] dark:border-slate-600 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/10" role="listbox" aria-label="Pick-up suggestions"></div>
               </div>
+              <p id="bk-pickup-locate-msg" class="hidden mt-1.5 px-0.5 text-xs font-medium leading-snug text-slate-600 dark:text-slate-400" role="status" aria-live="polite"></p>
             </div>
             <div class="taxio-ac-field relative z-50 focus-within:z-[120]">
               <label class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.dropLabel)}</label>
@@ -509,6 +552,7 @@ export async function mountBookCompany(root, slug) {
                 <p><span class="text-slate-500">${escapeHtml(tb.distance)}</span> <span id="bk-estimate-distance" class="font-semibold text-slate-900 dark:text-white"></span></p>
                 <p><span class="text-slate-500">${escapeHtml(tb.duration)}</span> <span id="bk-estimate-duration" class="font-semibold text-slate-900 dark:text-white"></span></p>
                 <p class="pt-1 text-base"><span class="text-slate-500">${escapeHtml(tb.estPrice)}</span> <span id="bk-estimate-price" class="font-bold text-amber-700 dark:text-amber-300"></span></p>
+                <p class="mt-1.5 text-[0.6875rem] leading-snug text-slate-500 dark:text-slate-400">${escapeHtml(tb.taximeterNote)}</p>
               </div>
             </div>
 
@@ -837,6 +881,111 @@ Car type: ${selectedCar}`
     closeCarPanel()
     detachPickupCtrl.detach()
     detachDropoffCtrl.detach()
+  }
+
+  function setPickupLocateMessage(text) {
+    const el = root.querySelector('#bk-pickup-locate-msg')
+    if (!el) return
+    const t = String(text || '').trim()
+    if (!t) {
+      el.textContent = ''
+      el.classList.add('hidden')
+      return
+    }
+    el.textContent = t
+    el.classList.remove('hidden')
+  }
+
+  pickupEl.addEventListener('input', () => {
+    const m = root.querySelector('#bk-pickup-locate-msg')
+    if (m?.textContent) {
+      m.textContent = ''
+      m.classList.add('hidden')
+    }
+  })
+
+  const locatePickupBtn = root.querySelector('#bk-locate-pickup')
+  if (locatePickupBtn && GOOGLE_API_KEY) {
+    const locateIconHtml = icon.crosshair('h-[19px] w-[19px]')
+    let locating = false
+    locatePickupBtn.addEventListener('click', async (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (locating) return
+      const msgs = tBooking(getLocale())
+      setPickupLocateMessage('')
+      if (!window.isSecureContext) {
+        setPickupLocateMessage(msgs.locateUnavailable)
+        return
+      }
+      if (!navigator.geolocation) {
+        setPickupLocateMessage(msgs.locateUnavailable)
+        return
+      }
+      locating = true
+      locatePickupBtn.setAttribute('aria-busy', 'true')
+      locatePickupBtn.disabled = true
+      locatePickupBtn.innerHTML = `<span class="inline-block h-[18px] w-[18px] animate-spin rounded-full border-2 border-emerald-500/30 border-t-emerald-600 dark:border-emerald-400/25 dark:border-t-emerald-300" aria-hidden="true"></span>`
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 60000,
+          })
+        })
+        const rawLat = pos.coords.latitude
+        const rawLng = pos.coords.longitude
+        await loadGoogleMapsPlaces()
+        const result = await reverseGeocodeLatLng(rawLat, rawLng)
+        const addr = String(result.formatted_address || '').trim()
+        const loc = result.geometry?.location
+        let lat = rawLat
+        let lng = rawLng
+        if (loc) {
+          const glat = typeof loc.lat === 'function' ? loc.lat() : Number(loc.lat)
+          const glng = typeof loc.lng === 'function' ? loc.lng() : Number(loc.lng)
+          if (Number.isFinite(glat) && Number.isFinite(glng)) {
+            lat = glat
+            lng = glng
+          }
+        }
+        if (!addr) {
+          setPickupLocateMessage(msgs.locateAddressFailed)
+          return
+        }
+        commitBookingFieldPlace({
+          inputEl: pickupEl,
+          state: pickupPlacesState,
+          formattedAddress: addr,
+          lat,
+          lng,
+          placeId: result.place_id,
+          onUpdate: onAddressFieldsUpdated,
+        })
+        if (pickupSuggestEl) {
+          pickupSuggestEl.classList.add('hidden')
+          pickupSuggestEl.innerHTML = ''
+        }
+      } catch (err) {
+        const msg = String(err?.message || '')
+        const geoCode = err && typeof err === 'object' && 'code' in err ? Number(err.code) : NaN
+        if (geoCode === 1) {
+          setPickupLocateMessage(msgs.locateDenied)
+        } else if (geoCode === 2 || geoCode === 3) {
+          setPickupLocateMessage(msgs.locateFailed)
+        } else if (msg.includes('geocode_failed') || msg.includes('no_geocoder')) {
+          setPickupLocateMessage(msgs.locateAddressFailed)
+        } else {
+          setPickupLocateMessage(msgs.locateFailed)
+        }
+      } finally {
+        locating = false
+        locatePickupBtn.removeAttribute('aria-busy')
+        locatePickupBtn.disabled = false
+        locatePickupBtn.innerHTML = locateIconHtml
+      }
+    })
   }
 
   root.querySelectorAll('.bk-company-photo-img').forEach((img) => {

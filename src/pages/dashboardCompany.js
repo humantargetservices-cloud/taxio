@@ -10,6 +10,8 @@ import {
   updateCar,
   deleteCar,
   updateCompanyByOwner,
+  uploadCompanyLogo,
+  removeCompanyLogo,
   DEFAULT_PRICING,
 } from '../lib/api.js'
 import { signOutEverywhere } from '../lib/auth.js'
@@ -110,6 +112,9 @@ export async function mountDashboardCompany(root) {
   const bookingQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(bookPublicUrl)}`
   const pricing = pricingOf(company)
   const avail = company.availability_status || 'available'
+  const logoRaw = String(company.logo_url || '').trim()
+  const logoOk = /^https?:\/\//i.test(logoRaw)
+  const logoSrcEsc = logoOk ? escapeHtml(logoRaw) : ''
 
   const tabsR1 = [
     { id: 'overview', label: td.tabOverview },
@@ -232,11 +237,37 @@ export async function mountDashboardCompany(root) {
       </div>`
   } else if (t === 'essential') {
     const slogan = company.slogan || 'Fast & Reliable Service'
+    const logoPreviewInner = logoOk
+      ? `<img id="dash-logo-preview-img" src="${logoSrcEsc}" alt="" class="h-full w-full object-cover" decoding="async" />`
+      : `<div class="flex h-full w-full items-center justify-center bg-yellow-400 text-gray-900">${icon.car('h-10 w-10')}</div>`
     bodyHtml = `
       <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
         <h2 class="text-lg font-bold text-gray-900">${td.essentialHead}</h2>
         <p class="text-sm text-gray-500">${td.essentialSub}</p>
         <div class="mt-6 space-y-4">
+          <div class="rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <div class="flex shrink-0 justify-center sm:justify-start">
+                <div id="dash-logo-preview-wrap" class="relative flex h-24 w-24 shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-inner">
+                  ${logoPreviewInner}
+                </div>
+              </div>
+              <div class="min-w-0 flex-1 space-y-2">
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">${escapeHtml(td.logoHead)}</p>
+                <p class="text-sm leading-relaxed text-gray-600">${escapeHtml(td.logoSub)}</p>
+                <div class="flex flex-wrap items-center gap-2 pt-1">
+                  <input type="file" id="dash-logo-input" accept="image/jpeg,image/png,image/webp" class="sr-only" />
+                  <label for="dash-logo-input" class="inline-flex min-h-[44px] cursor-pointer items-center justify-center rounded-xl bg-yellow-400 px-4 py-2.5 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">${escapeHtml(td.logoChoose)}</label>
+                  ${
+                    logoOk
+                      ? `<button type="button" id="dash-logo-remove" class="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50">${escapeHtml(td.logoRemove)}</button>`
+                      : ''
+                  }
+                </div>
+                <p class="text-xs text-gray-400">${escapeHtml(td.logoHint)}</p>
+              </div>
+            </div>
+          </div>
           <div class="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div class="flex items-start gap-3">
               <span class="text-emerald-600">${icon.helpCircle('h-5 w-5')}</span>
@@ -368,9 +399,16 @@ export async function mountDashboardCompany(root) {
       <header class="border-b border-gray-200 bg-white shadow-sm">
         <div class="mx-auto flex max-w-6xl flex-wrap items-start justify-between gap-4 px-4 py-4">
           <div class="flex gap-3">
-            <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-yellow-400 shadow-sm">
+            ${
+              logoOk
+                ? `<div class="relative flex h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-gray-100 shadow-sm ring-1 ring-gray-200/80">
+              <img src="${logoSrcEsc}" alt="" class="dash-header-logo-img h-full w-full object-cover" decoding="async" />
+              <div class="dash-header-logo-fallback absolute inset-0 hidden items-center justify-center bg-yellow-400">${icon.car('h-8 w-8 text-gray-900')}</div>
+            </div>`
+                : `<div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-yellow-400 shadow-sm">
               ${icon.car('h-8 w-8 text-gray-900')}
-            </div>
+            </div>`
+            }
             <div>
               <h1 class="text-xl font-bold text-gray-900">${escapeHtml(company.name)}</h1>
               <p class="text-xs text-gray-500">${td.dashBadge}</p>
@@ -492,7 +530,9 @@ export async function mountDashboardCompany(root) {
         return
       }
       if (id === 'customize') {
-        window.alert('Customize page — coming soon.')
+        dashState.tab = 'essential'
+        dashState.modal = null
+        mountDashboardCompany(root)
       }
     })
   })
@@ -553,6 +593,74 @@ export async function mountDashboardCompany(root) {
         const hay = tr.getAttribute('data-search') || ''
         tr.style.display = !q || hay.includes(q) ? '' : 'none'
       })
+    })
+  }
+
+  root.querySelector('.dash-header-logo-img')?.addEventListener('error', (e) => {
+    const img = e.target
+    img.classList.add('hidden')
+    const fb = img.nextElementSibling
+    if (fb?.classList.contains('dash-header-logo-fallback')) {
+      fb.classList.remove('hidden')
+      fb.classList.add('flex')
+    }
+  })
+
+  if (t === 'essential') {
+    const logoInput = root.querySelector('#dash-logo-input')
+    const logoRemove = root.querySelector('#dash-logo-remove')
+    logoInput?.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0]
+      e.target.value = ''
+      if (!file) return
+      let objUrl = null
+      const msgEl = root.querySelector('#dash-msg')
+      try {
+        objUrl = URL.createObjectURL(file)
+        const wrap = root.querySelector('#dash-logo-preview-wrap')
+        if (wrap) {
+          wrap.innerHTML =
+            '<img id="dash-logo-preview-img" alt="" class="h-full w-full object-cover" decoding="async" />'
+          const im = wrap.querySelector('#dash-logo-preview-img')
+          if (im) im.src = objUrl
+        }
+        const { error } = await uploadCompanyLogo(company.id, file)
+        if (objUrl) URL.revokeObjectURL(objUrl)
+        if (error) {
+          if (msgEl) {
+            msgEl.textContent = error.message
+            msgEl.className =
+              'mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'
+            msgEl.classList.remove('hidden')
+          }
+          mountDashboardCompany(root)
+          return
+        }
+        mountDashboardCompany(root)
+      } catch (err) {
+        if (objUrl) URL.revokeObjectURL(objUrl)
+        if (msgEl) {
+          msgEl.textContent = err?.message || 'Upload failed.'
+          msgEl.className =
+            'mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'
+          msgEl.classList.remove('hidden')
+        }
+        mountDashboardCompany(root)
+      }
+    })
+    logoRemove?.addEventListener('click', async () => {
+      const msgEl = root.querySelector('#dash-msg')
+      const { error } = await removeCompanyLogo(company.id)
+      if (error) {
+        if (msgEl) {
+          msgEl.textContent = error.message
+          msgEl.className =
+            'mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'
+          msgEl.classList.remove('hidden')
+        }
+        return
+      }
+      mountDashboardCompany(root)
     })
   }
 

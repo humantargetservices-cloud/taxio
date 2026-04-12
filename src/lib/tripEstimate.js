@@ -8,7 +8,7 @@ function normalizeCarTypeName(name) {
 }
 
 export function getPricingForCarType(pricing, carType) {
-  const fallback = { baseFare: 5, perKm: 2 }
+  const fallback = { baseFare: 5, perKm: 2, initialKm: 3 }
   if (!pricing || typeof pricing !== 'object') return fallback
 
   const wanted = normalizeCarTypeName(carType)
@@ -20,6 +20,7 @@ export function getPricingForCarType(pricing, carType) {
   return {
     baseFare: normalizePricingValue(row.start, fallback.baseFare),
     perKm: normalizePricingValue(row.per_km, fallback.perKm),
+    initialKm: normalizePricingValue(row.initial_km, fallback.initialKm),
   }
 }
 
@@ -119,7 +120,9 @@ export async function estimateTrip({ pickupAddress, dropoffAddress, pricing, car
   }
 
   const rate = getPricingForCarType(pricing, carType)
-  const estimatedPrice = round2(rate.baseFare + rate.perKm * trip.distanceKm)
+  // Dashboard model: round2(start + max(0, distanceKm - initial_km) * per_km) — no surge/time extras.
+  const billableKm = Math.max(0, trip.distanceKm - rate.initialKm)
+  const estimatedPrice = round2(rate.baseFare + rate.perKm * billableKm)
 
   return {
     ...trip,
