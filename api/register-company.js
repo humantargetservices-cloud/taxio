@@ -1,10 +1,13 @@
 import {
   escapeHtmlEmail,
+  getClientIp,
   getOriginFromReq,
+  getUserAgent,
   json,
   makeSupabaseServiceClient,
   safeSendEmail,
   slugFromCompanyName,
+  verifyTurnstileToken,
   validateSupabaseServiceEnv,
   normalizeCompanyLocale,
 } from './_utils.js'
@@ -23,18 +26,31 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase()
 }
 
-/**
- * Belgian phone: treat +32... and 0... (national) as the same for duplicate checks.
- * Strips non-digits, then normalizes leading 0 to 32 for typical mobile/landline lengths.
- */
-function normalizePhoneForCompare(phone) {
-  let d = String(phone || '').trim().replace(/\D/g, '')
-  if (!d) return ''
-  // National format: 0XXXXXXXXX (9–10 digits after 0) → 32 + rest
-  if (d.startsWith('0') && d.length >= 9 && d.length <= 11) {
-    d = `32${d.slice(1)}`
+function cleanPhoneInput(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/[\s().-]/g, '')
+}
+
+function normalizePhoneToE164(rawPhone) {
+  const clean = cleanPhoneInput(rawPhone)
+  if (!clean) return ''
+  if (clean.startsWith('+')) return `+${clean.slice(1).replace(/\D/g, '')}`
+  if (clean.startsWith('00')) {
+    const converted = `+${clean.slice(2).replace(/\D/g, '')}`
+    if (converted.startsWith('+320')) return `+32${converted.slice(4)}`
+    return converted
   }
-  return d
+  const digits = clean.replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.startsWith('04')) return `+324${digits.slice(2)}`
+  if (digits.startsWith('32')) return `+${digits}`
+  if (digits.startsWith('0')) return `+32${digits.slice(1)}`
+  return `+${digits}`
+}
+
+function normalizePhoneForCompare(phone) {
+  return normalizePhoneToE164(phone).replace(/\D/g, '')
 }
 
 /**
@@ -62,10 +78,7 @@ function isValidEmail(email) {
 }
 
 function isValidPhone(phone) {
-  const raw = String(phone || '').trim()
-  if (!/^[+\d()\-.\s]+$/.test(raw)) return false
-  const digits = raw.replace(/\D/g, '')
-  return digits.length >= 8 && digits.length <= 15
+  return /^\+[1-9]\d{7,14}$/.test(normalizePhoneToE164(phone))
 }
 
 function isValidBelgianVat(vatRaw) {
@@ -97,6 +110,46 @@ function isValidCity(city) {
   return /^[A-Za-zÀ-ÖØ-öø-ÿ'’\-\s.]+$/.test(value)
 }
 
+function hasObviousFakeCompanyName(name) {
+  const n = String(name || '')
+    .trim()
+    .toLowerCase()
+  if (!n) return true
+  if (['test', 'testing', 'aaa', 'qwerty', 'asdf', 'random'].includes(n)) return true
+  if (/^(.)\1{2,}$/.test(n.replace(/\s+/g, ''))) return true
+  if (/^[a-z]{1,3}$/.test(n)) return true
+  return false
+}
+
+async function countAbuseEvents(supabase, { action, sinceIso, ipAddress }) {
+  let q = supabase
+    .from('abuse_rate_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('action', action)
+    .gte('created_at', sinceIso)
+  if (ipAddress) q = q.eq('ip_address', ipAddress)
+  const { count, error } = await q
+  if (error) throw error
+  return count || 0
+}
+
+async function logAbuseEvent(supabase, row) {
+  const { error } = await supabase.from('abuse_rate_events').insert(row)
+  if (error) throw error
+}
+
+async function logBlockedRegistration(supabase, { ipAddress, reason, extra = {} }) {
+  try {
+    await logAbuseEvent(supabase, {
+      action: 'company_registration_blocked',
+      ip_address: ipAddress || null,
+      metadata: { reason, ...extra },
+    })
+  } catch (err) {
+    console.error('[register-company:blocked-log]', err)
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' })
 
@@ -119,14 +172,23 @@ export default async function handler(req, res) {
     }
     const companyTermsVersion = String(body.termsVersion || '').trim() || null
     const preferred_locale = normalizeCompanyLocale(body.locale || body.preferred_locale)
+    const turnstileToken = String(body.turnstileToken || '').trim()
     const normalizedVat = normalizeVatForCompare(vatNumberInput)
+    const normalizedPhoneE164 = normalizePhoneToE164(phoneInput)
     const normalizedPhone = normalizePhoneForCompare(phoneInput)
+    const ipAddress = getClientIp(req)
+    const userAgent = getUserAgent(req)
 
     if (!companyName || !vatNumberInput || !phoneInput || !email || !city) {
       return json(res, 400, { error: 'Missing required fields.' })
     }
     if (!termsAccepted) {
       return json(res, 400, { error: 'Terms must be accepted.' })
+    }
+    if (hasObviousFakeCompanyName(companyName)) {
+      return json(res, 400, {
+        error: 'Company name looks invalid. Please enter your real legal company name.',
+      })
     }
 
     const slug = slugFromCompanyName(companyName)
@@ -142,7 +204,10 @@ export default async function handler(req, res) {
       return json(res, 400, { error: 'Please enter a valid email address.' })
     }
     if (!isValidPhone(phoneInput)) {
-      return json(res, 400, { error: 'Please enter a valid phone number.' })
+      return json(res, 400, {
+        error:
+          'Please enter a valid phone number in international format (e.g. +32470123456).',
+      })
     }
     if (!isValidBelgianVat(vatNumberInput)) {
       return json(res, 400, { error: 'Please enter a valid Belgian VAT number.' })
@@ -153,6 +218,51 @@ export default async function handler(req, res) {
 
     const supabase = makeSupabaseServiceClient()
     const origin = getOriginFromReq(req)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+
+    if (ipAddress !== 'unknown') {
+      let perIpCount = 0
+      try {
+        perIpCount = await countAbuseEvents(supabase, {
+          action: 'company_registration_submit',
+          sinceIso: oneHourAgo,
+          ipAddress,
+        })
+      } catch (ipCountErr) {
+        console.error('[register-company:rate-limit-ip]', ipCountErr)
+      }
+      if (perIpCount >= 3) {
+        await logBlockedRegistration(supabase, {
+          ipAddress,
+          reason: 'rate_limit_ip_3_per_hour',
+        })
+        return json(res, 429, {
+          error: 'Too many registration attempts from this IP. Please try again in about one hour.',
+        })
+      }
+    }
+    try {
+      await logAbuseEvent(supabase, {
+        action: 'company_registration_submit',
+        ip_address: ipAddress,
+        metadata: { ua: userAgent ? 'present' : 'missing' },
+      })
+    } catch (rateLogErr) {
+      console.error('[register-company:abuse-log]', rateLogErr)
+    }
+
+    const turnstile = await verifyTurnstileToken(turnstileToken, ipAddress)
+    if (turnstile.enabled && !turnstile.passed) {
+      await logBlockedRegistration(supabase, {
+        ipAddress,
+        reason: 'turnstile_failed',
+        extra: { turnstile_reason: turnstile.reason || null },
+      })
+      return json(res, 400, {
+        error: 'Security verification failed. Please retry the form.',
+        code: 'TURNSTILE_FAILED',
+      })
+    }
 
     const { data: existingBySlug } = await supabase
       .from('companies')
@@ -208,7 +318,7 @@ export default async function handler(req, res) {
       slug,
       vat_number: normalizedVat,
       email,
-      phone: phoneInput.trim(),
+      phone: normalizedPhoneE164,
       city,
       country: null,
       status: 'pending',
@@ -218,6 +328,10 @@ export default async function handler(req, res) {
       subscription_plan: 'basic',
       pricing: DEFAULT_PRICING,
       preferred_locale,
+      ip_address: ipAddress,
+      user_agent: userAgent,
+      turnstile_passed: turnstile.enabled ? !!turnstile.passed : null,
+      turnstile_error: turnstile.enabled && !turnstile.passed ? String(turnstile.reason || '') : null,
     }
 
     const legalCompanyRow = {
@@ -238,6 +352,15 @@ export default async function handler(req, res) {
     function preferredLocaleColumnMissing(err) {
       const m = String(err?.message || '').toLowerCase()
       return m.includes('preferred_locale')
+    }
+    function abuseMetaColumnsMissing(err) {
+      const m = String(err?.message || '').toLowerCase()
+      return (
+        m.includes('ip_address') ||
+        m.includes('user_agent') ||
+        m.includes('turnstile_passed') ||
+        m.includes('turnstile_error')
+      )
     }
 
     let { data: company, error: cErr } = await supabase
@@ -271,6 +394,30 @@ export default async function handler(req, res) {
         ;({ data: company, error: cErr } = await supabase
           .from('companies')
           .insert(withoutLocale)
+          .select('id, name, slug, email, vat_number, phone, city, status, created_at')
+          .single())
+      }
+    }
+    if (cErr && abuseMetaColumnsMissing(cErr)) {
+      console.warn(
+        '[register-company] Abuse metadata columns missing; retry without metadata. Apply supabase/migration_abuse_protection_metadata.sql.'
+      )
+      const {
+        ip_address: _ip,
+        user_agent: _ua,
+        turnstile_passed: _tp,
+        turnstile_error: _te,
+        ...withoutAbuseMeta
+      } = baseCompanyRow
+      ;({ data: company, error: cErr } = await supabase
+        .from('companies')
+        .insert({ ...withoutAbuseMeta, ...legalCompanyRow })
+        .select('id, name, slug, email, vat_number, phone, city, status, created_at')
+        .single())
+      if (cErr && companyTermsColumnsMissing(cErr)) {
+        ;({ data: company, error: cErr } = await supabase
+          .from('companies')
+          .insert(withoutAbuseMeta)
           .select('id, name, slug, email, vat_number, phone, city, status, created_at')
           .single())
       }
@@ -313,7 +460,7 @@ export default async function handler(req, res) {
           <li><strong>Name:</strong> ${escapeHtmlEmail(companyName)}</li>
           <li><strong>VAT:</strong> ${escapeHtmlEmail(normalizedVat)}</li>
           <li><strong>Email:</strong> ${escapeHtmlEmail(email)}</li>
-          <li><strong>Phone:</strong> ${escapeHtmlEmail(phoneInput.trim())}</li>
+          <li><strong>Phone:</strong> ${escapeHtmlEmail(normalizedPhoneE164)}</li>
           <li><strong>City:</strong> ${escapeHtmlEmail(city)}</li>
           <li><strong>Request date (UTC):</strong> ${escapeHtmlEmail(requestedAt)}</li>
           <li><strong>Slug:</strong> ${escapeHtmlEmail(slug)}</li>
@@ -324,6 +471,12 @@ export default async function handler(req, res) {
       })
       if (mail?.skipped || mail?.ok === false) {
         console.warn('[register-company:admin-notify] Admin email was not sent:', mail)
+        return json(res, 500, {
+          error:
+            'Registration saved, but admin notification email failed. Please verify RESEND_API_KEY, MAIL_FROM, ADMIN_NOTIFY_EMAIL, and your verified Resend sender domain.',
+          code: 'ADMIN_NOTIFY_EMAIL_FAILED',
+          data: { company, slug },
+        })
       }
     } else {
       console.warn(

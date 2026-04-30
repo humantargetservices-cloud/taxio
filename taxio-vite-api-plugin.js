@@ -72,6 +72,7 @@ export function taxioApiPlugin() {
 
         const routes = {
           '/api/register-company': 'api/register-company.js',
+          '/api/public-booking': 'api/public-booking.js',
           '/api/admin-approve-company': 'api/admin-approve-company.js',
           '/api/admin-delete-company': 'api/admin-delete-company.js',
         }

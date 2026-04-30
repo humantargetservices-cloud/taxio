@@ -7,6 +7,8 @@ import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { icon } from '../lib/icons.js'
 import { slugFromCompanyName } from '../lib/slug.js'
 
+const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
+
 function tr() {
   const lang = getLocale()
   return translations[lang]?.registerPage || translations.nl.registerPage
@@ -20,6 +22,33 @@ function inputCls(dark) {
 
 function isDark() {
   return document.documentElement.classList.contains('dark')
+}
+
+function cleanPhoneInput(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/[\s().-]/g, '')
+}
+
+function normalizePhoneToE164(rawPhone, countryPrefix = '+32') {
+  const clean = cleanPhoneInput(rawPhone)
+  if (!clean) return ''
+  if (clean.startsWith('+')) return `+${clean.slice(1).replace(/\D/g, '')}`
+  if (clean.startsWith('00')) {
+    const converted = `+${clean.slice(2).replace(/\D/g, '')}`
+    if (converted.startsWith('+320')) return `+32${converted.slice(4)}`
+    return converted
+  }
+  const digits = clean.replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.startsWith('04')) return `+324${digits.slice(2)}`
+  if (digits.startsWith('32')) return `+${digits}`
+  if (digits.startsWith('0') && countryPrefix === '+32') return `+32${digits.slice(1)}`
+  return `${countryPrefix}${digits}`
+}
+
+function isValidInternationalE164(phone) {
+  return /^\+[1-9]\d{7,14}$/.test(String(phone || '').trim())
 }
 
 export function mountRegister(root) {
@@ -73,7 +102,18 @@ export function mountRegister(root) {
           </div>
           <div class="space-y-2">
             <label for="phone" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.phone} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
-            <input id="phone" name="phone" type="tel" required placeholder="${R.phPhone}" class="${ic}" />
+            <div class="grid grid-cols-[7.5rem_1fr] gap-2">
+              <select id="phonePrefix" name="phonePrefix" class="${ic}">
+                <option value="+32" selected>+32 (BE)</option>
+                <option value="+31">+31 (NL)</option>
+                <option value="+33">+33 (FR)</option>
+                <option value="+49">+49 (DE)</option>
+                <option value="+352">+352 (LU)</option>
+                <option value="+44">+44 (UK)</option>
+              </select>
+              <input id="phone" name="phone" type="tel" required placeholder="${R.phPhone}" class="${ic}" />
+            </div>
+            <p class="text-xs ${dark ? 'text-gray-400' : 'text-slate-500'}">Stored format: international E.164 (example: +32470123456).</p>
           </div>
           <div class="space-y-2">
             <label for="email" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.email} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
@@ -110,6 +150,9 @@ export function mountRegister(root) {
           </div>
 
           <p id="reg-err" class="hidden rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800 ring-1 ring-red-100 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900/30"></p>
+          <div id="reg-turnstile-wrap" class="hidden">
+            <div id="reg-turnstile-widget"></div>
+          </div>
 
           <div class="flex flex-col gap-3 pt-1 sm:flex-row sm:gap-4">
             <button type="button" id="btn-preview" class="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-300/90 px-4 py-3.5 text-sm font-semibold shadow-sm transition ${dark ? 'border-slate-600 text-white hover:bg-slate-700/80' : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300 hover:bg-slate-50'}">
@@ -174,6 +217,9 @@ export function mountRegister(root) {
   const termsWrap = root.querySelector('#terms-wrap')
   const termsCb = root.querySelector('#terms')
   const overlay = root.querySelector('#reg-success-overlay')
+  const phoneInput = root.querySelector('#phone')
+  const phonePrefixSelect = root.querySelector('#phonePrefix')
+  let turnstileToken = ''
 
   function refreshPreviewText() {
     const fd = new FormData(form)
@@ -240,16 +286,32 @@ export function mountRegister(root) {
       return
     }
     const fd = new FormData(form)
+    const normalizedPhone = normalizePhoneToE164(
+      fd.get('phone'),
+      String(fd.get('phonePrefix') || '+32')
+    )
+    if (!isValidInternationalE164(normalizedPhone)) {
+      errEl.textContent =
+        'Please enter a valid international phone number (example: +32470123456).'
+      errEl.classList.remove('hidden')
+      return
+    }
+    if (TURNSTILE_SITE_KEY && !turnstileToken) {
+      errEl.textContent = 'Please complete the security check before submitting.'
+      errEl.classList.remove('hidden')
+      return
+    }
     const payload = {
       companyName: fd.get('companyName'),
       vatNumber: fd.get('vatNumber'),
-      phone: fd.get('phone'),
+      phone: normalizedPhone,
       email: fd.get('email'),
       city: fd.get('city'),
       country: null,
       termsAcceptedAt: new Date().toISOString(),
       termsVersion: REGISTRATION_TERMS_BUNDLE,
       locale: getLocale(),
+      turnstileToken: turnstileToken || null,
     }
     const btn = root.querySelector('#btn-submit')
     btn.disabled = true
@@ -278,6 +340,11 @@ export function mountRegister(root) {
     overlay.setAttribute('aria-hidden', 'false')
   })
 
+  phoneInput?.addEventListener('blur', () => {
+    const normalized = normalizePhoneToE164(phoneInput.value, phonePrefixSelect?.value || '+32')
+    if (normalized) phoneInput.value = normalized
+  })
+
   function closeSuccess() {
     overlay.classList.add('hidden')
     overlay.classList.remove('flex')
@@ -291,4 +358,40 @@ export function mountRegister(root) {
   root.querySelector('#succ-close').addEventListener('click', () => {
     closeSuccess()
   })
+
+  if (TURNSTILE_SITE_KEY) {
+    const wrap = root.querySelector('#reg-turnstile-wrap')
+    const widgetEl = root.querySelector('#reg-turnstile-widget')
+    wrap?.classList.remove('hidden')
+    if (!document.querySelector('script[data-taxio-turnstile]')) {
+      const s = document.createElement('script')
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+      s.async = true
+      s.defer = true
+      s.setAttribute('data-taxio-turnstile', 'true')
+      document.head.appendChild(s)
+    }
+    const render = () => {
+      if (!window.turnstile || !widgetEl || widgetEl.dataset.ready === '1') return
+      window.turnstile.render(widgetEl, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token) => {
+          turnstileToken = String(token || '')
+        },
+        'expired-callback': () => {
+          turnstileToken = ''
+        },
+        'error-callback': () => {
+          turnstileToken = ''
+        },
+      })
+      widgetEl.dataset.ready = '1'
+    }
+    let tries = 0
+    const timer = window.setInterval(() => {
+      tries += 1
+      render()
+      if (widgetEl?.dataset.ready === '1' || tries > 25) window.clearInterval(timer)
+    }, 200)
+  }
 }

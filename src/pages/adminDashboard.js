@@ -8,6 +8,8 @@ import {
   reactivateCompany,
   countAllCarsAdmin,
   countCarsByCompanyIdsAdmin,
+  listBookingRequestsForAdmin,
+  listAbuseRateEventsForAdmin,
   setCompanySubscriptionPlan,
   updateCompanyAsAdmin,
   deleteCompanyAsAdmin,
@@ -19,6 +21,7 @@ import { icon } from '../lib/icons.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 
 const adminState = { tab: 'requests', editBaseline: null }
+const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 
 function monthlyRevenueEuro(companies, carMap) {
   let total = 0
@@ -61,6 +64,8 @@ export async function mountAdminDashboard(root) {
   let companies = []
   let totalCars = 0
   let carMap = {}
+  let recentBookings = []
+  let abuseEvents = []
   try {
     companies = await listAllCompaniesForAdmin()
   } catch {
@@ -76,11 +81,93 @@ export async function mountAdminDashboard(root) {
   } catch {
     carMap = {}
   }
+  try {
+    recentBookings = await listBookingRequestsForAdmin()
+  } catch {
+    recentBookings = []
+  }
+  try {
+    abuseEvents = await listAbuseRateEventsForAdmin(24)
+  } catch {
+    abuseEvents = []
+  }
 
   const pending = companies.filter((c) => c.status === 'pending')
   const active = companies.filter((c) => c.status === 'approved')
   const suspended = companies.filter((c) => c.status === 'suspended')
   const revenue = monthlyRevenueEuro(companies, carMap)
+  const regIpCounts = {}
+  const bookingIpCounts = {}
+  const bookingContactCounts = {}
+  let turnstileFailCount = 0
+  let turnstileMissingCount = 0
+  for (const c of pending) {
+    const ip = String(c.ip_address || '').trim()
+    if (ip) regIpCounts[ip] = (regIpCounts[ip] || 0) + 1
+    if (c.turnstile_passed === false) turnstileFailCount += 1
+    if (TURNSTILE_SITE_KEY && c.turnstile_passed == null) turnstileMissingCount += 1
+  }
+  for (const b of recentBookings) {
+    const ip = String(b.ip_address || '').trim()
+    if (ip) bookingIpCounts[ip] = (bookingIpCounts[ip] || 0) + 1
+    const key =
+      String(b.customer_phone || '').trim() || String(b.customer_email || '').trim().toLowerCase()
+    if (key) bookingContactCounts[key] = (bookingContactCounts[key] || 0) + 1
+    if (b.turnstile_passed === false) turnstileFailCount += 1
+    if (TURNSTILE_SITE_KEY && b.turnstile_passed == null) turnstileMissingCount += 1
+  }
+  const riskyRegistrationIps = Object.values(regIpCounts).filter((n) => n >= 3).length
+  const riskyBookingIps = Object.values(bookingIpCounts).filter((n) => n >= 10).length
+  const riskyBookingContacts = Object.values(bookingContactCounts).filter((n) => n >= 5).length
+  const warningBadge = (label, tone = 'amber') =>
+    `<span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+      tone === 'red'
+        ? 'bg-red-100 text-red-800'
+        : tone === 'blue'
+          ? 'bg-blue-100 text-blue-800'
+          : 'bg-amber-100 text-amber-800'
+    }">${escapeHtml(label)}</span>`
+  const warningBadges = [
+    riskyRegistrationIps > 0
+      ? warningBadge(`${riskyRegistrationIps} registration IP(s) hit abuse threshold`, 'amber')
+      : '',
+    riskyBookingIps > 0
+      ? warningBadge(`${riskyBookingIps} booking IP(s) hit abuse threshold`, 'amber')
+      : '',
+    riskyBookingContacts > 0
+      ? warningBadge(`${riskyBookingContacts} rider contact(s) hit abuse threshold`, 'blue')
+      : '',
+    turnstileFailCount > 0
+      ? warningBadge(`${turnstileFailCount} Turnstile failed/missing`, 'red')
+      : '',
+    turnstileMissingCount > 0
+      ? warningBadge(`${turnstileMissingCount} Turnstile token missing`, 'red')
+      : '',
+  ]
+    .filter(Boolean)
+    .join('')
+  const registrationsBlocked24h = abuseEvents.filter(
+    (e) => e.action === 'company_registration_blocked'
+  ).length
+  const bookingsBlocked24h = abuseEvents.filter((e) => e.action === 'rider_booking_blocked').length
+  const topIpMap = {}
+  const topCompanyMap = {}
+  for (const e of abuseEvents) {
+    const ip = String(e.ip_address || '').trim()
+    if (ip) topIpMap[ip] = (topIpMap[ip] || 0) + 1
+    const cid = String(e.company_id || '').trim()
+    if (cid) topCompanyMap[cid] = (topCompanyMap[cid] || 0) + 1
+  }
+  const topIps = Object.entries(topIpMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+  const topCompanies = Object.entries(topCompanyMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([id, count]) => {
+      const c = companies.find((x) => x.id === id)
+      return { name: c?.name || id.slice(0, 8), count }
+    })
 
   const tab = adminState.tab
   const tabBtn = (id, label) =>
@@ -300,6 +387,52 @@ export async function mountAdminDashboard(root) {
       </header>
 
       <div class="mx-auto max-w-6xl px-4 -mt-4">
+        ${
+          warningBadges
+            ? `<div class="mb-4 flex flex-wrap gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">${warningBadges}</div>`
+            : ''
+        }
+        <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h3 class="text-sm font-bold text-gray-900">Abuse stats (last 24h)</h3>
+            <div class="flex flex-wrap gap-2">
+              <span class="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">Registrations blocked: ${registrationsBlocked24h}</span>
+              <span class="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">Bookings blocked: ${bookingsBlocked24h}</span>
+            </div>
+          </div>
+          <div class="mt-3 grid gap-3 md:grid-cols-2">
+            <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Top IPs</p>
+              <div class="mt-2 text-xs text-gray-800">
+                ${
+                  topIps.length
+                    ? topIps
+                        .map(
+                          ([ip, count]) =>
+                            `<p class="flex items-center justify-between gap-2"><span class="font-mono">${escapeHtml(ip)}</span><span class="rounded-full bg-gray-200 px-2 py-0.5 font-semibold">${count}</span></p>`
+                        )
+                        .join('')
+                    : '<p class="text-gray-500">No abuse events in last 24h.</p>'
+                }
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Top targeted companies</p>
+              <div class="mt-2 text-xs text-gray-800">
+                ${
+                  topCompanies.length
+                    ? topCompanies
+                        .map(
+                          (row) =>
+                            `<p class="flex items-center justify-between gap-2"><span>${escapeHtml(row.name)}</span><span class="rounded-full bg-gray-200 px-2 py-0.5 font-semibold">${row.count}</span></p>`
+                        )
+                        .join('')
+                    : '<p class="text-gray-500">No company-targeted abuse events in last 24h.</p>'
+                }
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-5 shadow-md">
             <div>
@@ -507,7 +640,7 @@ export async function mountAdminDashboard(root) {
 
       if (action === 'approve') {
         btn.disabled = true
-        const { error } = await approveCompany(id)
+        const { error, data } = await approveCompany(id)
         btn.disabled = false
         if (error) {
           showMsg(error.message)
@@ -515,7 +648,12 @@ export async function mountAdminDashboard(root) {
         }
         adminState.tab = 'active'
         await mountAdminDashboard(root)
-        showMsg('Company approved — open Active Companies to see the green Approved badge.')
+        if (data?.emailWarning) {
+          showMsg('Company approved but email failed to send.')
+          console.warn('[adminDashboard:approve]', data.emailWarning)
+        } else {
+          showMsg('Company approved — open Active Companies to see the green Approved badge.')
+        }
         return
       }
       if (action === 'reject') {

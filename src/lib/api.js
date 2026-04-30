@@ -29,6 +29,7 @@ export async function registerCompanyOwner(payload) {
     termsAcceptedAt,
     termsVersion,
     locale,
+    turnstileToken,
   } = payload
 
   const slug = slugFromCompanyName(companyName)
@@ -56,6 +57,7 @@ export async function registerCompanyOwner(payload) {
         termsAcceptedAt: termsAcceptedAt || null,
         termsVersion: termsVersion || null,
         locale: locale || null,
+        turnstileToken: turnstileToken || null,
       }),
     })
     const body = await response.json().catch(() => ({}))
@@ -162,8 +164,22 @@ export async function fetchApprovedCompanyBySlug(slug) {
 }
 
 export async function createBookingRequest(row) {
-  const { error } = await supabase.from('booking_requests').insert(row)
-  return { error }
+  try {
+    const response = await fetch(apiUrl('/api/public-booking'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(row),
+    })
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      return { error: new Error(body.error || `Booking request failed (${response.status}).`) }
+    }
+    return { error: null, data: body.data || null }
+  } catch (err) {
+    return {
+      error: new Error(err?.message || 'Booking request could not be submitted.'),
+    }
+  }
 }
 
 function riderTermsColumnsMissing(err) {
@@ -184,45 +200,10 @@ function bookingLegalNotesFallback(row, baseNote) {
 
 /** Log a quick-book intent (e.g. after WhatsApp) with minimal fields. */
 export async function createQuickBookingLog(row) {
-  const baseNote = row.notes || ''
-  const a = row.termsAcceptance && typeof row.termsAcceptance === 'object' ? row.termsAcceptance : null
-  const acceptedAt = a?.accepted_at || new Date().toISOString()
-  const version = a?.terms_version != null ? String(a.terms_version) : null
-
-  const basePayload = {
-    company_id: row.company_id,
-    pickup_address: row.pickup_address,
-    dropoff_address: row.dropoff_address,
-    car_type: row.car_type || null,
-    customer_name: row.customer_name ?? 'WhatsApp request',
-    customer_phone: row.customer_phone ?? '',
-    customer_email: null,
-    ride_datetime: row.ride_datetime ?? new Date().toISOString(),
-    notes: baseNote || null,
-    status: 'new',
-  }
-
-  const legalPayload =
-    a && a.terms_accepted === true
-      ? {
-          rider_terms_accepted: true,
-          rider_terms_accepted_at: acceptedAt,
-          rider_terms_version: version,
-        }
-      : {}
-
-  let payload = { ...basePayload, ...legalPayload }
-  let { error } = await supabase.from('booking_requests').insert(payload)
-
-  if (error && riderTermsColumnsMissing(error)) {
-    payload = {
-      ...basePayload,
-      notes: bookingLegalNotesFallback(row, baseNote),
-    }
-    ;({ error } = await supabase.from('booking_requests').insert(payload))
-  }
-
-  return { error }
+  return createBookingRequest({
+    ...row,
+    notes: bookingLegalNotesFallback(row, row.notes || ''),
+  })
 }
 
 export async function listBookingRequestsForCompany(companyId) {
@@ -254,6 +235,26 @@ export async function listAllCompaniesForAdmin() {
   return data || []
 }
 
+export async function listBookingRequestsForAdmin() {
+  const { data, error } = await supabase
+    .from('booking_requests')
+    .select('id, company_id, customer_phone, customer_email, ip_address, turnstile_passed, created_at')
+    .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+  if (error) throw error
+  return data || []
+}
+
+export async function listAbuseRateEventsForAdmin(hours = 24) {
+  const sinceIso = new Date(Date.now() - Math.max(1, Number(hours) || 24) * 60 * 60 * 1000).toISOString()
+  const { data, error } = await supabase
+    .from('abuse_rate_events')
+    .select('id, action, ip_address, company_id, contact_key, metadata, created_at')
+    .gte('created_at', sinceIso)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
 export async function approveCompany(companyId) {
   const { data: sessionData } = await supabase.auth.getSession()
   const token = sessionData?.session?.access_token
@@ -269,7 +270,7 @@ export async function approveCompany(companyId) {
   })
   const json = await res.json().catch(() => ({}))
   if (!res.ok) return { error: new Error(json.error || 'Approval failed.') }
-  return { error: null }
+  return { error: null, data: json.data || null }
 }
 
 export async function rejectCompany(companyId) {

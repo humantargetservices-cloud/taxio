@@ -75,22 +75,46 @@ export function escapeHtmlEmail(s) {
 }
 
 export async function safeSendEmail({ to, subject, html }) {
-  const from = process.env.MAIL_FROM
+  const from = String(process.env.MAIL_FROM || '').trim()
   if (!to || !from) {
-    console.warn('[mail:skip] Missing recipient or MAIL_FROM')
-    return { skipped: true, reason: 'missing_from_or_to' }
+    const reason = !from ? 'missing_mail_from' : 'missing_recipient'
+    console.warn('[mail:skip] Missing recipient or MAIL_FROM', { toPresent: !!to, fromPresent: !!from })
+    return {
+      skipped: true,
+      reason,
+      error: 'Email skipped because MAIL_FROM or recipient is missing.',
+    }
   }
   const resend = makeResendClient()
   if (!resend) {
     console.warn('[mail:skip] RESEND_API_KEY not set')
-    return { skipped: true, reason: 'no_resend' }
+    return {
+      skipped: true,
+      reason: 'no_resend',
+      error: 'Email skipped because RESEND_API_KEY is not set.',
+    }
   }
   try {
-    await resend.emails.send({ from, to, subject, html })
-    return { ok: true }
+    const result = await resend.emails.send({ from, to, subject, html })
+    if (result?.error) {
+      console.error('[mail:error:resend-response]', result.error)
+      return {
+        ok: false,
+        error:
+          result.error?.message ||
+          'Resend returned an error. Verify sender domain and MAIL_FROM.',
+        provider: 'resend',
+      }
+    }
+    return { ok: true, provider: 'resend', id: result?.data?.id || null }
   } catch (err) {
-    console.error('[mail:error]', err?.message || err)
-    return { ok: false, error: err?.message || String(err) }
+    const detail = err?.message || String(err)
+    console.error('[mail:error]', detail, err)
+    return {
+      ok: false,
+      error: detail,
+      provider: 'resend',
+    }
   }
 }
 
@@ -98,4 +122,57 @@ export function makeTempPassword() {
   const seed = Math.random().toString(36).slice(2, 8)
   const n = Math.floor(100 + Math.random() * 900)
   return `Txio!${seed}${n}`
+}
+
+export function getClientIp(req) {
+  const vercelFwd = String(req?.headers?.['x-vercel-forwarded-for'] || '').trim()
+  if (vercelFwd) return vercelFwd.split(',')[0].trim()
+  const cfIp = String(req?.headers?.['cf-connecting-ip'] || '').trim()
+  if (cfIp) return cfIp
+  const trueClientIp = String(req?.headers?.['true-client-ip'] || '').trim()
+  if (trueClientIp) return trueClientIp
+  const xfwd = String(req?.headers?.['x-forwarded-for'] || '').trim()
+  // Fallback only; this header is easier to spoof when not behind trusted proxy.
+  if (xfwd) return xfwd.split(',')[0].trim()
+  const realIp = String(req?.headers?.['x-real-ip'] || '').trim()
+  if (realIp) return realIp
+  return 'unknown'
+}
+
+export function getUserAgent(req) {
+  return String(req?.headers?.['user-agent'] || '').trim().slice(0, 512) || null
+}
+
+export function isTurnstileEnabled() {
+  return String(process.env.TURNSTILE_ENABLED || '')
+    .trim()
+    .toLowerCase() === 'true'
+}
+
+export async function verifyTurnstileToken(token, remoteIp) {
+  const secret = String(process.env.TURNSTILE_SECRET_KEY || '').trim()
+  if (!isTurnstileEnabled()) return { enabled: false, passed: null, reason: 'disabled' }
+  if (!secret) return { enabled: true, passed: false, reason: 'missing_secret' }
+  const t = String(token || '').trim()
+  if (!t) return { enabled: true, passed: false, reason: 'missing_token' }
+  try {
+    const body = new URLSearchParams()
+    body.set('secret', secret)
+    body.set('response', t)
+    if (remoteIp && remoteIp !== 'unknown') body.set('remoteip', remoteIp)
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      return { enabled: true, passed: false, reason: `http_${response.status}` }
+    }
+    if (data?.success === true) return { enabled: true, passed: true, reason: null }
+    const errs = Array.isArray(data?.['error-codes']) ? data['error-codes'].join(',') : 'verify_failed'
+    return { enabled: true, passed: false, reason: errs }
+  } catch (err) {
+    return { enabled: true, passed: false, reason: err?.message || 'verify_exception' }
+  }
 }

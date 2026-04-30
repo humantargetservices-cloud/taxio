@@ -18,6 +18,7 @@ import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../li
 import { getDemoBookingCompany, isDemoBookingSlug } from '../lib/demoBookingCompany.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
+const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 
 /** Same ordering as `resolveBookingCarTypes` (fleet / display sort). */
 const BOOKING_CAR_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
@@ -340,8 +341,23 @@ function digitsOnly(phone) {
   return String(phone || '').replace(/\D/g, '')
 }
 
+function normalizeContactPhone(phone) {
+  const clean = String(phone || '').trim()
+  if (!clean) return ''
+  const withoutJunk = clean.replace(/[\s().-]/g, '')
+  if (withoutJunk.startsWith('+')) {
+    return `+${withoutJunk.slice(1).replace(/\D/g, '')}`
+  }
+  if (withoutJunk.startsWith('00')) {
+    return `+${withoutJunk.slice(2).replace(/\D/g, '')}`
+  }
+  const digits = withoutJunk.replace(/\D/g, '')
+  if (digits.startsWith('0')) return `+32${digits.slice(1)}`
+  return `+${digits}`
+}
+
 function waLink(phone, body) {
-  const n = digitsOnly(phone)
+  const n = digitsOnly(normalizeContactPhone(phone))
   if (!n) return null
   return `https://wa.me/${n}?text=${encodeURIComponent(body)}`
 }
@@ -577,11 +593,20 @@ export async function mountBookCompany(root, slug) {
             </div>
 
             <p id="bk-err" class="hidden rounded-xl bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800 ring-1 ring-red-200 dark:bg-red-950/60 dark:text-red-200 dark:ring-red-500/30"></p>
+            <div id="bk-turnstile-wrap" class="hidden">
+              <div id="bk-turnstile-widget"></div>
+            </div>
 
-            <button type="button" id="bk-wa" disabled class="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-200 text-sm font-bold text-slate-500 shadow-md ring-1 ring-slate-300 transition disabled:cursor-not-allowed dark:bg-slate-800 dark:shadow-lg dark:shadow-black/20 dark:ring-slate-700 enabled:bg-[#25D366] enabled:text-white enabled:ring-[#1fb855]/50 enabled:shadow-[0_12px_40px_rgba(37,211,102,0.25)] enabled:hover:bg-[#20bd5a]">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <input id="bk-rider-name" type="text" autocomplete="name" placeholder="${escapeHtml(tb.name || 'Your name (optional)')}" class="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              <input id="bk-rider-phone" type="tel" autocomplete="tel" placeholder="${escapeHtml(tb.phone || 'Your phone (optional)')}" class="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              <input id="bk-rider-email" type="email" autocomplete="email" placeholder="${escapeHtml(tb.email || 'Your email (optional)')}" class="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+            </div>
+
+            <a id="bk-wa" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true" class="pointer-events-none flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-200 text-sm font-bold text-slate-500 shadow-md ring-1 ring-slate-300 transition dark:bg-slate-800 dark:shadow-lg dark:shadow-black/20 dark:ring-slate-700">
               ${icon.messageCircle('h-5 w-5')}
               ${escapeHtml(tb.bookWhatsapp)}
-            </button>
+            </a>
 
             <div class="grid grid-cols-2 gap-3">
               <a id="bk-mail" href="#" class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:shadow-md dark:shadow-black/15 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
@@ -660,20 +685,15 @@ export async function mountBookCompany(root, slug) {
   const rideScheduleBtn = root.querySelector('#bk-ride-schedule')
   const scheduleWrap = root.querySelector('#bk-schedule-wrap')
   const scheduleInput = root.querySelector('#bk-schedule-at')
+  const riderNameEl = root.querySelector('#bk-rider-name')
+  const riderPhoneEl = root.querySelector('#bk-rider-phone')
+  const riderEmailEl = root.querySelector('#bk-rider-email')
   let latestEstimate = null
 
   const mailA = root.querySelector('#bk-mail')
   const callA = root.querySelector('#bk-call')
-  if (company.email) {
-    mailA.href = `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(tBooking(getLocale()).mailSubject)}`
-  } else {
-    mailA.classList.add('pointer-events-none', 'opacity-40')
-  }
-  if (phone) {
-    callA.href = `tel:${digitsOnly(phone)}`
-  } else {
-    callA.classList.add('pointer-events-none', 'opacity-40')
-  }
+  const normalizedCompanyPhone = normalizeContactPhone(phone)
+  let turnstileToken = ''
 
   const carWrapEl = showVehicleSection ? root.querySelector('#bk-car-wrap') : null
   const carTriggerEl = showVehicleSection ? root.querySelector('#bk-car-trigger') : null
@@ -736,11 +756,80 @@ export async function mountBookCompany(root, slug) {
   function buildMessage() {
     const pu = pickupEl.value.trim()
     const doff = dropEl.value.trim()
+    const riderName = riderNameEl?.value?.trim() || ''
+    const riderPhone = riderPhoneEl?.value?.trim() || ''
+    const riderEmail = riderEmailEl?.value?.trim() || ''
+    const whenLine =
+      rideMode === 'schedule'
+        ? scheduleInput?.value
+          ? `When: Scheduled at ${scheduleInput.value}`
+          : 'When: Scheduled'
+        : 'When: Ride now'
+    const estimateLine = latestEstimate
+      ? `Estimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+      : 'Estimate: Not available yet'
     return `Hello ${company.name}, I would like to book a ride.
 
 Pick-up: ${pu}
 Drop-off: ${doff}
-Car type: ${selectedCar}`
+${whenLine}
+Car type: ${selectedCar}
+${estimateLine}
+Rider name: ${riderName || 'Not provided'}
+Rider phone: ${riderPhone || 'Not provided'}
+Rider email: ${riderEmail || 'Not provided'}`
+  }
+
+  function buildMailtoHref() {
+    if (!company.email) return '#'
+    const pu = pickupEl.value.trim() || 'Not provided'
+    const doff = dropEl.value.trim() || 'Not provided'
+    const riderName = riderNameEl?.value?.trim() || 'Not provided'
+    const riderPhone = riderPhoneEl?.value?.trim() || 'Not provided'
+    const riderEmail = riderEmailEl?.value?.trim() || 'Not provided'
+    const whenLine =
+      rideMode === 'schedule'
+        ? scheduleInput?.value
+          ? `Scheduled at ${scheduleInput.value}`
+          : 'Scheduled'
+        : 'Ride now'
+    const estimateDistance = latestEstimate ? `${latestEstimate.distanceKm} km` : 'N/A'
+    const estimateDuration = latestEstimate ? `${latestEstimate.durationMin} min` : 'N/A'
+    const estimatePrice = latestEstimate ? `€${latestEstimate.estimatedPrice}` : 'N/A'
+    const subject = `Taxi booking request - ${company.name}`
+    const body = `Hello ${company.name},
+
+I would like to request a taxi booking.
+
+Company: ${company.name}
+Pickup: ${pu}
+Drop-off: ${doff}
+Date/Time: ${whenLine}
+Car type: ${selectedCar}
+Estimate distance: ${estimateDistance}
+Estimate duration: ${estimateDuration}
+Estimate price: ${estimatePrice}
+Rider name: ${riderName}
+Rider phone: ${riderPhone}
+Rider email: ${riderEmail}`
+    return `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  }
+
+  function refreshContactLinks() {
+    if (company.email) {
+      mailA.href = buildMailtoHref()
+      mailA.classList.remove('pointer-events-none', 'opacity-40')
+    } else {
+      mailA.href = '#'
+      mailA.classList.add('pointer-events-none', 'opacity-40')
+    }
+    if (normalizedCompanyPhone) {
+      callA.href = `tel:${normalizedCompanyPhone}`
+      callA.classList.remove('pointer-events-none', 'opacity-40')
+    } else {
+      callA.href = '#'
+      callA.classList.add('pointer-events-none', 'opacity-40')
+    }
   }
 
   function refreshWaState() {
@@ -748,9 +837,16 @@ Car type: ${selectedCar}`
       termsEl.checked &&
       pickupEl.value.trim() &&
       dropEl.value.trim() &&
-      digitsOnly(phone).length > 0
-    waBtn.disabled = !ok
+      digitsOnly(normalizedCompanyPhone).length > 0
+    waBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
+    waBtn.classList.toggle('pointer-events-none', !ok)
+    waBtn.classList.toggle('bg-[#25D366]', ok)
+    waBtn.classList.toggle('text-white', ok)
+    waBtn.classList.toggle('ring-[#1fb855]/50', ok)
+    waBtn.classList.toggle('shadow-[0_12px_40px_rgba(37,211,102,0.25)]', ok)
+    waBtn.classList.toggle('hover:bg-[#20bd5a]', ok)
     errEl.classList.add('hidden')
+    refreshContactLinks()
   }
 
   function syncRideTimingUi() {
@@ -859,11 +955,48 @@ Car type: ${selectedCar}`
     syncRideTimingUi()
   })
 
-  ;[pickupEl, dropEl, termsEl].forEach((el) => {
+  ;[pickupEl, dropEl, termsEl, riderNameEl, riderPhoneEl, riderEmailEl, scheduleInput].forEach((el) => {
+    if (!el) return
     el.addEventListener('input', refreshWaState)
     el.addEventListener('change', refreshWaState)
   })
   refreshWaState()
+
+  if (TURNSTILE_SITE_KEY) {
+    const wrap = root.querySelector('#bk-turnstile-wrap')
+    const widgetEl = root.querySelector('#bk-turnstile-widget')
+    wrap?.classList.remove('hidden')
+    if (!document.querySelector('script[data-taxio-turnstile]')) {
+      const s = document.createElement('script')
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+      s.async = true
+      s.defer = true
+      s.setAttribute('data-taxio-turnstile', 'true')
+      document.head.appendChild(s)
+    }
+    const render = () => {
+      if (!window.turnstile || !widgetEl || widgetEl.dataset.ready === '1') return
+      window.turnstile.render(widgetEl, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token) => {
+          turnstileToken = String(token || '')
+        },
+        'expired-callback': () => {
+          turnstileToken = ''
+        },
+        'error-callback': () => {
+          turnstileToken = ''
+        },
+      })
+      widgetEl.dataset.ready = '1'
+    }
+    let tries = 0
+    const timer = window.setInterval(() => {
+      tries += 1
+      render()
+      if (widgetEl?.dataset.ready === '1' || tries > 25) window.clearInterval(timer)
+    }, 200)
+  }
 
   const pickupPlacesState = { committed: null, lat: null, lng: null, placeId: null }
   const dropoffPlacesState = { committed: null, lat: null, lng: null, placeId: null }
@@ -1092,15 +1225,23 @@ Car type: ${selectedCar}`
     w.document.close()
   })
 
-  waBtn.addEventListener('click', async () => {
+  waBtn.addEventListener('click', async (e) => {
+    e.preventDefault()
     const msgs = tBooking(getLocale())
     errEl.classList.add('hidden')
+    const waDisabled = waBtn.getAttribute('aria-disabled') === 'true'
+    if (waDisabled) {
+      e.preventDefault()
+      return
+    }
     if (isDemo) {
+      e.preventDefault()
       errEl.textContent = msgs.demoNoWhatsapp
       errEl.classList.remove('hidden')
       return
     }
     if (!termsEl.checked) {
+      e.preventDefault()
       errEl.textContent = msgs.errTerms
       errEl.classList.remove('hidden')
       return
@@ -1108,12 +1249,14 @@ Car type: ${selectedCar}`
     const pu = pickupEl.value.trim()
     const doff = dropEl.value.trim()
     if (!pu || !doff) {
+      e.preventDefault()
       errEl.textContent = msgs.errAddresses
       errEl.classList.remove('hidden')
       return
     }
-    const n = digitsOnly(phone)
+    const n = digitsOnly(normalizedCompanyPhone)
     if (!n) {
+      e.preventDefault()
       errEl.textContent = msgs.errNoPhone
       errEl.classList.remove('hidden')
       return
@@ -1123,12 +1266,14 @@ Car type: ${selectedCar}`
     if (rideMode === 'schedule') {
       const raw = scheduleInput?.value || ''
       if (!raw) {
+        e.preventDefault()
         errEl.textContent = msgs.errSchedule
         errEl.classList.remove('hidden')
         return
       }
       const d = new Date(raw)
       if (Number.isNaN(d.getTime())) {
+        e.preventDefault()
         errEl.textContent = msgs.errScheduleBad
         errEl.classList.remove('hidden')
         return
@@ -1139,14 +1284,49 @@ Car type: ${selectedCar}`
     const estimateLine = latestEstimate
       ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
       : ''
+    if (TURNSTILE_SITE_KEY && !turnstileToken) {
+      e.preventDefault()
+      errEl.textContent = 'Please complete the security check before booking.'
+      errEl.classList.remove('hidden')
+      return
+    }
     const text = `${buildMessage()}\n${whenLine}${estimateLine}`
-    const url = waLink(phone, text)
-    await createQuickBookingLog({
+    const url = waLink(normalizedCompanyPhone, text)
+    if (!url) {
+      e.preventDefault()
+      errEl.textContent = 'WhatsApp link could not be created. Please use the phone call button.'
+      errEl.classList.remove('hidden')
+      return
+    }
+    waBtn.href = url
+    const popup = window.open('', '_blank', 'noopener,noreferrer')
+    if (!popup) {
+      errEl.textContent = 'Please allow pop-ups to continue to WhatsApp.'
+      errEl.classList.remove('hidden')
+      return
+    }
+    const fallbackText = `${text}\n\nCompany phone: ${normalizedCompanyPhone}`
+    window.setTimeout(async () => {
+      // On iOS/Safari, failed deep-link launches often keep the page visible.
+      if (document.visibilityState === 'visible') {
+        try {
+          await navigator.clipboard?.writeText?.(fallbackText)
+          errEl.textContent = `WhatsApp did not open. Message copied to clipboard. Call ${normalizedCompanyPhone}.`
+        } catch {
+          errEl.textContent = `WhatsApp did not open. Please copy this message manually and call ${normalizedCompanyPhone}.`
+        }
+        errEl.classList.remove('hidden')
+      }
+    }, 1200)
+
+    const { error: bookingErr } = await createQuickBookingLog({
       company_id: company.id,
       pickup_address: pu,
       dropoff_address: doff,
       car_type: selectedCar,
-      customer_phone: phone,
+      customer_name: riderNameEl?.value?.trim() || 'WhatsApp request',
+      customer_phone: riderPhoneEl?.value?.trim() || normalizedCompanyPhone,
+      customer_email: riderEmailEl?.value?.trim() || null,
       ride_datetime: rideDateIso,
       notes: `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLine}`,
       termsAcceptance: {
@@ -1154,7 +1334,14 @@ Car type: ${selectedCar}`
         accepted_at: new Date().toISOString(),
         terms_version: TERMS_VERSION_BOOKING_RIDER,
       },
+      turnstileToken,
     })
-    window.open(url, '_blank', 'noopener,noreferrer')
+    if (bookingErr) {
+      popup.close()
+      errEl.textContent = bookingErr.message || 'Booking validation failed. Please check your details.'
+      errEl.classList.remove('hidden')
+      return
+    }
+    popup.location.href = url
   })
 }

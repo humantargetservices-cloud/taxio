@@ -71,6 +71,7 @@ function approvalEmailForLocale(locale, ctx) {
       cityL: 'City',
       booking: 'Public booking page',
       qrHint: 'Share this link or QR with customers.',
+      qrLinkLabel: 'QR code link',
       login: 'Dashboard login',
       user: 'Email (login)',
       pass: 'Temporary password',
@@ -87,6 +88,7 @@ function approvalEmailForLocale(locale, ctx) {
       cityL: 'Ville',
       booking: 'Page de réservation publique',
       qrHint: 'Partagez ce lien ou ce QR code avec vos clients.',
+      qrLinkLabel: 'Lien du QR code',
       login: 'Connexion tableau de bord',
       user: 'E-mail (connexion)',
       pass: 'Mot de passe temporaire',
@@ -103,6 +105,7 @@ function approvalEmailForLocale(locale, ctx) {
       cityL: 'Stad',
       booking: 'Openbare boekingspagina',
       qrHint: 'Deel deze link of QR-code met klanten.',
+      qrLinkLabel: 'QR-code link',
       login: 'Dashboardlogin',
       user: 'E-mail (login)',
       pass: 'Tijdelijk wachtwoord',
@@ -124,6 +127,7 @@ function approvalEmailForLocale(locale, ctx) {
         <h2 style="font-size:15px;margin:1.2em 0 0.4em;">${esc(t.booking)}</h2>
         <p><a href="${esc(bookingUrl)}">${esc(bookingUrl)}</a></p>
         <p style="margin-top:0.5em;color:#444;">${esc(t.qrHint)}</p>
+        <p><strong>${esc(t.qrLinkLabel)}:</strong> <a href="${esc(qrSrc)}">${esc(qrSrc)}</a></p>
         <p style="margin-top:0.5em;"><img src="${esc(qrSrc)}" alt="QR" width="180" height="180" style="border:1px solid #e5e7eb;border-radius:8px;" /></p>
         <h2 style="font-size:15px;margin:1.2em 0 0.4em;">${esc(t.login)}</h2>
         <p><strong>${esc(t.user)}:</strong> ${em}</p>
@@ -340,6 +344,15 @@ export default async function handler(req, res) {
     })
     if (mail?.skipped || mail?.ok === false) {
       console.warn('[admin-approve:company-email] Approval credentials email was not sent:', mail)
+      return json(res, 200, {
+        data: {
+          approved: true,
+          companyId: company.id,
+          userId,
+          emailWarning:
+            'Company approved but email failed to send. Verify RESEND_API_KEY, MAIL_FROM, and verified sender domain in Resend.',
+        },
+      })
     }
 
     return json(res, 200, { data: { approved: true, companyId: company.id, userId } })
