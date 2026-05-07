@@ -94,6 +94,11 @@ Login: {login_url}
 — TAXIO`,
 }
 
+const COMM_PREVIEW_EMPTY_HTML = `<div class="flex min-h-[12rem] flex-col items-center justify-center rounded-xl border border-dashed border-slate-600/80 bg-slate-900/40 px-5 py-10 text-center">
+  <p class="text-sm font-medium text-slate-300">No recipient selected</p>
+  <p class="mt-1 max-w-sm text-xs leading-relaxed text-slate-500">Choose one or more companies from the list to preview merged variables and prepare your WhatsApp messages.</p>
+</div>`
+
 function statusLabel(status) {
   const s = String(status || '').toLowerCase()
   if (s === 'approved') return 'Approved'
@@ -101,6 +106,15 @@ function statusLabel(status) {
   if (s === 'suspended') return 'Suspended'
   if (s === 'rejected') return 'Rejected'
   return status || '—'
+}
+
+function commStatusBadgeClass(status) {
+  const s = String(status || '').toLowerCase()
+  if (s === 'approved') return 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/20'
+  if (s === 'pending') return 'bg-sky-500/15 text-sky-300 ring-sky-500/20'
+  if (s === 'suspended') return 'bg-amber-500/15 text-amber-300 ring-amber-500/20'
+  if (s === 'rejected') return 'bg-rose-500/15 text-rose-300 ring-rose-500/20'
+  return 'bg-slate-600/40 text-slate-300 ring-slate-500/25'
 }
 
 /** Digits-only for https://wa.me/<digits> (no +), minimum viable length. */
@@ -521,33 +535,41 @@ export async function mountAdminDashboard(root) {
     const selectedSet = new Set(adminState.commSelected)
     const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
+    const commListEmptyHtml = `<div class="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-600/70 bg-slate-800/25 px-5 py-12 text-center">
+          <p class="text-sm font-medium text-slate-300">No companies match this view</p>
+          <p class="mt-1 max-w-xs text-xs leading-relaxed text-slate-500">Try another audience segment or clear your search to see more results.</p>
+        </div>`
+
     const commRows =
       visible.length === 0
-        ? `<tr><td colspan="7" class="px-4 py-10 text-center text-slate-400">No companies match this audience or search.</td></tr>`
+        ? commListEmptyHtml
         : visible
             .map((c) => {
               const st = escapeHtml(statusLabel(c.status))
               const booking =
                 c.status === 'approved' && c.slug ? absolutePublicBookingUrl(c.slug) : ''
-              const bookingCell = booking
-                ? `<a href="${escapeHtml(booking)}" target="_blank" rel="noopener noreferrer" class="break-all font-mono text-xs text-amber-400 underline decoration-amber-400/40 hover:text-amber-300">${escapeHtml(booking)}</a>`
-                : '<span class="text-slate-500">—</span>'
+              const badgeCls = commStatusBadgeClass(c.status)
               const noWa = !waMeDigits(c.phone)
               const waHint = noWa
-                ? '<span class="ml-1 text-amber-400" title="Not usable for WhatsApp">●</span>'
+                ? '<span class="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 ring-2 ring-amber-400/30" title="Phone not usable for WhatsApp"></span>'
                 : ''
+              const bookingLink = booking
+                ? `<a href="${escapeHtml(booking)}" target="_blank" rel="noopener noreferrer" class="text-xs font-medium text-slate-500 underline decoration-slate-600 underline-offset-2 hover:text-amber-400/90 hover:decoration-amber-400/40">Booking page</a>`
+                : '<span class="text-xs text-slate-600">No public booking link</span>'
               return `
-          <tr class="border-b border-slate-700/50 transition hover:bg-slate-800/50">
-            <td class="px-2 py-2.5 align-top sm:px-3">
-              <input type="checkbox" data-adm-comm-row="${escapeHtml(c.id)}" class="adm-comm-cb mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-800 text-amber-500 focus:ring-amber-500/40" ${selectedSet.has(c.id) ? 'checked' : ''} />
-            </td>
-            <td class="px-2 py-2.5 text-sm font-semibold text-slate-100 sm:px-3">${escapeHtml(c.name || '')}</td>
-            <td class="px-2 py-2.5 sm:px-3"><span class="inline-flex rounded-full bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-200">${st}</span></td>
-            <td class="px-2 py-2.5 text-xs text-slate-300 break-all sm:px-3 sm:text-sm">${escapeHtml(c.email || '—')}</td>
-            <td class="px-2 py-2.5 text-xs text-slate-300 sm:px-3 sm:text-sm">${escapeHtml(c.phone || '—')}${waHint}</td>
-            <td class="px-2 py-2.5 text-xs text-slate-300 sm:px-3 sm:text-sm">${escapeHtml(c.city || '—')}</td>
-            <td class="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">${bookingCell}</td>
-          </tr>`
+        <label class="flex cursor-pointer gap-3 rounded-2xl border border-slate-700/55 bg-slate-800/35 p-3.5 shadow-sm shadow-black/10 transition hover:border-amber-500/25 hover:bg-slate-800/65">
+          <input type="checkbox" data-adm-comm-row="${escapeHtml(c.id)}" class="adm-comm-cb mt-0.5 h-4 w-4 shrink-0 rounded border-slate-500 bg-slate-900 text-amber-500 focus:ring-amber-500/40" ${selectedSet.has(c.id) ? 'checked' : ''} />
+          <div class="min-w-0 flex-1 space-y-1.5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-semibold text-white">${escapeHtml(c.name || '')}</span>
+              <span class="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${badgeCls}">${st}</span>
+              ${waHint}
+            </div>
+            <p class="text-xs text-slate-400">${escapeHtml(c.city || '—')}</p>
+            <p class="text-[11px] leading-relaxed text-slate-500"><span class="text-slate-600">Phone</span> ${escapeHtml(c.phone || '—')} · <span class="text-slate-600">Email</span> ${escapeHtml(c.email || '—')}</p>
+            <div>${bookingLink}</div>
+          </div>
+        </label>`
             })
             .join('')
 
@@ -561,113 +583,157 @@ export async function mountAdminDashboard(root) {
       : ''
     const previewHtml = firstPreview
       ? escapeHtml(previewRaw).replace(/\n/g, '<br />')
-      : '<span class="italic text-slate-500">Select companies to preview a filled message.</span>'
+      : COMM_PREVIEW_EMPTY_HTML
 
     const selCount = (adminState.commSelected || []).length
     const aud = adminState.commAudience
+    const totalCompanies = companies.length
+    const approvedCount = active.length
+    const pendingCount = pending.length
+
+    const audienceSeg = (value, checked, label, title = '') =>
+      `<label class="relative min-w-0 flex-1 cursor-pointer sm:min-w-[4.5rem]"${title ? ` title="${escapeHtml(title)}"` : ''}>
+          <input type="radio" name="adm-comm-audience" value="${escapeHtml(value)}" class="peer sr-only" ${checked ? 'checked' : ''} />
+          <span class="flex w-full items-center justify-center rounded-xl px-2 py-2 text-center text-[11px] font-semibold text-slate-400 transition hover:text-slate-200 peer-checked:bg-amber-400 peer-checked:text-slate-900 peer-checked:shadow-md peer-focus-visible:ring-2 peer-focus-visible:ring-amber-400/50 sm:text-xs">${escapeHtml(label)}</span>
+        </label>`
 
     mainHtml = `
-      <div class="rounded-2xl border border-slate-600/90 bg-slate-900 p-4 shadow-xl ring-1 ring-slate-700/60 sm:p-6">
-        <div class="flex flex-col gap-2 border-b border-slate-700/80 pb-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h2 class="text-lg font-bold tracking-tight text-white sm:text-xl">B2B Communication</h2>
-            <p class="mt-1 text-sm text-slate-400">Contact companies using templates. WhatsApp opens manually — no bulk auto-send.</p>
+      <div class="overflow-hidden rounded-2xl border border-slate-600/75 bg-slate-900 shadow-2xl ring-1 ring-slate-700/55">
+        <div class="border-b border-slate-700/60 bg-slate-900/90 px-4 py-5 sm:px-6">
+          <h2 class="text-lg font-semibold tracking-tight text-white sm:text-xl">Communication center</h2>
+          <p class="mt-1 text-sm text-slate-400">Templates, audience filters, and manual WhatsApp sends for your partner companies.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 border-b border-slate-800/90 bg-slate-950/35 px-4 py-4 sm:grid-cols-4 sm:px-6">
+          <div class="rounded-2xl border border-slate-700/55 bg-slate-900/55 px-3 py-3 shadow-sm">
+            <p class="text-[11px] font-medium text-slate-500">Total companies</p>
+            <p class="mt-0.5 text-lg font-semibold tabular-nums text-white">${totalCompanies}</p>
+          </div>
+          <div class="rounded-2xl border border-slate-700/55 bg-slate-800/35 px-3 py-3 shadow-sm">
+            <p class="text-[11px] font-medium text-slate-500">Approved</p>
+            <p class="mt-0.5 text-lg font-semibold tabular-nums text-emerald-300/95">${approvedCount}</p>
+          </div>
+          <div class="rounded-2xl border border-slate-700/55 bg-slate-800/40 px-3 py-3 shadow-sm">
+            <p class="text-[11px] font-medium text-slate-500">Pending</p>
+            <p class="mt-0.5 text-lg font-semibold tabular-nums text-sky-300/95">${pendingCount}</p>
+          </div>
+          <div class="rounded-2xl border border-amber-500/20 bg-slate-800/45 px-3 py-3 shadow-sm ring-1 ring-amber-500/10">
+            <p class="text-[11px] font-medium text-slate-500">Selected recipients</p>
+            <p class="mt-0.5 text-lg font-semibold tabular-nums text-amber-200">${selCount}</p>
           </div>
         </div>
 
-        <div class="mt-4 rounded-xl border border-amber-400/30 bg-amber-950/40 px-3 py-2.5 text-xs leading-relaxed text-amber-100/95 sm:text-sm">
-          <strong class="text-amber-200">Safety:</strong> WhatsApp requires manual confirmation. TAXIO will open each message, but you must press Send yourself.
-        </div>
-
-        <div class="mt-5">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Audience</p>
-          <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${aud === 'approved' ? 'border-amber-400/50 bg-slate-800' : 'border-slate-600 bg-slate-800/60'}">
-              <input type="radio" name="adm-comm-audience" value="approved" class="text-amber-500" ${aud === 'approved' ? 'checked' : ''} />
-              Approved companies
-            </label>
-            <label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${aud === 'pending' ? 'border-amber-400/50 bg-slate-800' : 'border-slate-600 bg-slate-800/60'}">
-              <input type="radio" name="adm-comm-audience" value="pending" class="text-amber-500" ${aud === 'pending' ? 'checked' : ''} />
-              Pending requests
-            </label>
-            <label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${aud === 'inactive' ? 'border-amber-400/50 bg-slate-800' : 'border-slate-600 bg-slate-800/60'}">
-              <input type="radio" name="adm-comm-audience" value="inactive" class="text-amber-500" ${aud === 'inactive' ? 'checked' : ''} />
-              Suspended / rejected
-            </label>
-            <label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${aud === 'all' ? 'border-amber-400/50 bg-slate-800' : 'border-slate-600 bg-slate-800/60'}">
-              <input type="radio" name="adm-comm-audience" value="all" class="text-amber-500" ${aud === 'all' ? 'checked' : ''} />
-              All companies
-            </label>
+        <div class="px-4 py-5 sm:px-6">
+          <div class="mb-4 rounded-2xl border border-amber-400/25 bg-amber-950/35 px-3 py-2.5 text-xs leading-relaxed text-amber-100/95 sm:text-sm">
+            <span class="font-semibold text-amber-200">Safety:</span> WhatsApp requires manual confirmation. TAXIO opens each draft; you tap Send on your device.
           </div>
-        </div>
 
-        <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label class="min-w-0 flex-1 text-xs font-semibold text-slate-400">Search
-            <input id="adm-comm-search" type="search" value="${escapeHtml(adminState.commSearch || '')}" placeholder="Name, email, phone, city, status…" class="mt-1 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20" />
-          </label>
-          <div class="flex flex-wrap gap-2">
-            <button type="button" id="adm-comm-select-visible" class="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-700">Select all visible</button>
-            <button type="button" id="adm-comm-unselect-all" class="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-700">Unselect all</button>
-          </div>
-        </div>
+          <div class="grid gap-6 lg:grid-cols-12 lg:gap-8">
+            <div class="space-y-4 lg:col-span-5">
+              <section class="rounded-2xl border border-slate-700/60 bg-slate-800/30 p-4 sm:p-5">
+                <h3 class="text-sm font-semibold text-white">Audience</h3>
+                <p class="mt-0.5 text-xs text-slate-500">Choose which companies appear in the recipient list.</p>
+                <div class="mt-3 flex w-full flex-wrap gap-1 rounded-2xl bg-slate-950/55 p-1 ring-1 ring-slate-600/55 sm:flex-nowrap" role="group" aria-label="Audience">
+                  ${audienceSeg('approved', aud === 'approved', 'Approved')}
+                  ${audienceSeg('pending', aud === 'pending', 'Pending')}
+                  ${audienceSeg('inactive', aud === 'inactive', 'Suspended', 'Suspended and rejected accounts')}
+                  ${audienceSeg('all', aud === 'all', 'All')}
+                </div>
+              </section>
 
-        <p class="mt-2 text-xs text-slate-500">${visible.length} shown · ${selCount} selected</p>
+              <section class="rounded-2xl border border-slate-700/55 bg-slate-900/45 p-4 sm:p-5">
+                <h3 class="text-sm font-semibold text-white">Search &amp; selection</h3>
+                <p class="mt-0.5 text-xs text-slate-500">Find by name, email, phone, city, or status.</p>
+                <div class="relative mt-3">
+                  <span class="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-slate-500">${icon.search('h-4 w-4 shrink-0')}</span>
+                  <input id="adm-comm-search" type="search" value="${escapeHtml(adminState.commSearch || '')}" placeholder="Search companies…" autocomplete="off" class="w-full rounded-xl border border-slate-600 bg-slate-900 py-2.5 pl-10 pr-3 text-sm text-white placeholder:text-slate-500 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/25" />
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button type="button" id="adm-comm-select-visible" class="rounded-lg border border-slate-600/90 bg-slate-800/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-700">Select all</button>
+                  <button type="button" id="adm-comm-unselect-all" class="rounded-lg border border-slate-600/90 bg-slate-800/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-700">Unselect all</button>
+                </div>
+                <p class="mt-2 text-xs text-slate-500"><span class="tabular-nums">${visible.length}</span> in list · <span class="tabular-nums">${selCount}</span> selected</p>
+              </section>
 
-        <div class="mt-3 overflow-x-auto rounded-xl border border-slate-700/80">
-          <table class="w-full min-w-[720px] text-left text-sm">
-            <thead>
-              <tr class="border-b border-slate-700 bg-slate-800/90 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                <th class="w-10 py-3 pl-2 pr-1 sm:pl-3"></th>
-                <th class="py-3 pr-2">Company</th>
-                <th class="py-3 pr-2">Status</th>
-                <th class="py-3 pr-2">Email</th>
-                <th class="py-3 pr-2">Phone</th>
-                <th class="py-3 pr-2">City</th>
-                <th class="py-3 pr-3">Booking URL</th>
-              </tr>
-            </thead>
-            <tbody>${commRows}</tbody>
-          </table>
-        </div>
-
-        <div class="mt-6 grid gap-5 lg:grid-cols-2">
-          <div class="rounded-xl border border-slate-700 bg-slate-800/50 p-4">
-            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Channel</p>
-            <div class="mt-3 flex flex-col gap-2 sm:flex-row">
-              <label class="flex flex-1 cursor-pointer items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm ${adminState.commChannel === 'whatsapp' ? 'border-amber-400/40 bg-slate-800' : ''}">
-                <input type="radio" name="adm-comm-channel" value="whatsapp" class="text-amber-500" ${adminState.commChannel === 'whatsapp' ? 'checked' : ''} />
-                WhatsApp
-              </label>
-              <label class="flex flex-1 cursor-pointer items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-500 ${adminState.commChannel === 'email' ? 'border-amber-400/40 bg-slate-800 text-slate-300' : ''}">
-                <input type="radio" name="adm-comm-channel" value="email" class="text-amber-500" ${adminState.commChannel === 'email' ? 'checked' : ''} />
-                Email <span class="text-xs font-normal">(coming soon)</span>
-              </label>
+              <section class="rounded-2xl border border-slate-700/55 bg-slate-800/25 p-4 sm:p-5">
+                <h3 class="text-sm font-semibold text-white">Companies</h3>
+                <p class="mt-0.5 text-xs text-slate-500">Click a row or checkbox to include in this send.</p>
+                <div class="mt-3 max-h-[min(28rem,52vh)] space-y-2 overflow-y-auto overscroll-contain pr-0.5">${commRows}</div>
+              </section>
             </div>
 
-            <label class="mt-4 block text-xs font-semibold text-slate-400">Ready templates</label>
-            <select id="adm-comm-preset" class="mt-1 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20">
-              <option value="">— Choose a template —</option>
-              <option value="welcome">Welcome / onboarding</option>
-              <option value="payment">Payment reminder</option>
-              <option value="feature">New feature announcement</option>
-              <option value="trial_end">Trial ending reminder</option>
-              <option value="missing_info">Missing information request</option>
-              <option value="general">General update</option>
-            </select>
+            <div class="flex flex-col gap-4 max-lg:pb-28 lg:col-span-7">
+              <section class="rounded-2xl border border-amber-500/25 bg-gradient-to-b from-slate-800/65 via-slate-900/75 to-slate-900/90 p-4 shadow-xl shadow-black/25 ring-1 ring-slate-700/45 sm:p-5">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 class="text-base font-semibold text-white">Message composer</h3>
+                    <p class="mt-0.5 text-xs text-slate-500">Edit your template; preview updates when recipients change.</p>
+                  </div>
+                  <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-400/10 px-2.5 py-1 text-[11px] font-semibold text-amber-200/95 ring-1 ring-amber-500/15" title="Recipients in current send">
+                    <span class="text-slate-400">To</span>
+                    <strong id="adm-comm-selected-count" class="tabular-nums text-amber-100">${selCount}</strong>
+                  </span>
+                </div>
 
-            <label class="mt-4 block text-xs font-semibold text-slate-400">Message template</label>
-            <textarea id="adm-comm-template" rows="10" class="mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20">${escapeHtml(
-              adminState.commTemplate || ''
-            )}</textarea>
-            <p class="mt-2 text-xs text-slate-500">Variables: <code class="text-amber-400/90">{company_name}</code> <code class="text-amber-400/90">{status}</code> <code class="text-amber-400/90">{booking_url}</code> <code class="text-amber-400/90">{login_url}</code> <code class="text-amber-400/90">{city}</code></p>
-          </div>
-          <div class="flex flex-col rounded-xl border border-slate-700 bg-slate-800/50 p-4">
-            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Preview</p>
-            <p class="mt-2 text-sm text-slate-300">Selected: <strong id="adm-comm-selected-count" class="text-white">${selCount}</strong></p>
-            <div id="adm-comm-preview-body" class="mt-3 flex min-h-[12rem] flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-900/80 p-3 text-sm leading-relaxed text-slate-200">${previewHtml}</div>
-            <p id="adm-comm-skipped" class="mt-3 hidden text-xs text-amber-200/90"></p>
-            <button type="button" id="adm-comm-open-wa" ${adminState.commChannel !== 'whatsapp' ? 'disabled' : ''} class="mt-4 w-full rounded-xl bg-[#25D366] py-3 text-sm font-bold text-white shadow-lg shadow-emerald-900/20 hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:opacity-40">Open WhatsApp messages</button>
-            <p class="mt-2 text-center text-xs text-slate-500">Opens <code class="text-slate-400">https://wa.me/&lt;number&gt;?text=…</code> one company at a time.</p>
+                <p class="mt-4 text-[11px] font-medium text-slate-500">Channel</p>
+                <div class="mt-1.5 flex flex-col gap-2 sm:flex-row">
+                  <label class="flex flex-1 cursor-pointer items-center gap-2 rounded-xl border border-slate-600/80 bg-slate-900/50 px-3 py-2 text-sm text-slate-200 transition hover:border-slate-500 ${adminState.commChannel === 'whatsapp' ? 'border-amber-400/45 bg-slate-800/70 ring-1 ring-amber-400/20' : ''}">
+                    <input type="radio" name="adm-comm-channel" value="whatsapp" class="text-amber-500 focus:ring-amber-400/40" ${adminState.commChannel === 'whatsapp' ? 'checked' : ''} />
+                    WhatsApp
+                  </label>
+                  <label class="flex flex-1 cursor-pointer items-center gap-2 rounded-xl border border-slate-600/80 bg-slate-900/40 px-3 py-2 text-sm text-slate-500 transition hover:border-slate-500 ${adminState.commChannel === 'email' ? 'border-amber-400/45 bg-slate-800/70 text-slate-300 ring-1 ring-amber-400/20' : ''}">
+                    <input type="radio" name="adm-comm-channel" value="email" class="text-amber-500 focus:ring-amber-400/40" ${adminState.commChannel === 'email' ? 'checked' : ''} />
+                    Email <span class="text-xs font-normal text-slate-500">(soon)</span>
+                  </label>
+                </div>
+
+                <label class="mt-4 block">
+                  <span class="text-[11px] font-medium text-slate-500">Template preset</span>
+                  <select id="adm-comm-preset" class="mt-1.5 w-full cursor-pointer rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-white shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20">
+                    <option value="">Choose a starter template…</option>
+                    <option value="welcome">Welcome / onboarding</option>
+                    <option value="payment">Payment reminder</option>
+                    <option value="feature">New feature announcement</option>
+                    <option value="trial_end">Trial ending reminder</option>
+                    <option value="missing_info">Missing information request</option>
+                    <option value="general">General update</option>
+                  </select>
+                </label>
+
+                <label class="mt-4 block">
+                  <span class="text-[11px] font-medium text-slate-500">Message body</span>
+                  <textarea id="adm-comm-template" rows="14" class="mt-1.5 w-full resize-y rounded-xl border border-slate-600 bg-slate-950 px-3 py-3 font-mono text-sm leading-relaxed text-slate-100 shadow-inner focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20">${escapeHtml(
+                    adminState.commTemplate || ''
+                  )}</textarea>
+                </label>
+
+                <div class="mt-3">
+                  <p class="text-[11px] font-medium text-slate-500">Variables</p>
+                  <div class="mt-1.5 flex flex-wrap gap-1.5">
+                    <span class="inline-flex items-center rounded-lg bg-slate-800/90 px-2 py-1 font-mono text-[10px] text-amber-200/90 ring-1 ring-slate-600/60">{company_name}</span>
+                    <span class="inline-flex items-center rounded-lg bg-slate-800/90 px-2 py-1 font-mono text-[10px] text-amber-200/90 ring-1 ring-slate-600/60">{status}</span>
+                    <span class="inline-flex items-center rounded-lg bg-slate-800/90 px-2 py-1 font-mono text-[10px] text-amber-200/90 ring-1 ring-slate-600/60">{booking_url}</span>
+                    <span class="inline-flex items-center rounded-lg bg-slate-800/90 px-2 py-1 font-mono text-[10px] text-amber-200/90 ring-1 ring-slate-600/60">{login_url}</span>
+                    <span class="inline-flex items-center rounded-lg bg-slate-800/90 px-2 py-1 font-mono text-[10px] text-amber-200/90 ring-1 ring-slate-600/60">{city}</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-700/55 bg-slate-800/30 p-4 sm:p-5">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <h3 class="text-sm font-semibold text-white">Live preview</h3>
+                  <span class="text-[11px] text-slate-500">First selected company</span>
+                </div>
+                <div id="adm-comm-preview-body" class="mt-3 min-h-[12rem] flex-1 rounded-xl border border-slate-700/70 bg-slate-950/50 p-4 text-sm leading-relaxed text-slate-200 shadow-inner">${previewHtml}</div>
+                <p id="adm-comm-skipped" class="mt-3 hidden text-xs text-amber-200/90"></p>
+              </section>
+
+              <div class="max-lg:fixed max-lg:bottom-0 max-lg:left-0 max-lg:right-0 max-lg:z-40 max-lg:border-t max-lg:border-slate-700/80 max-lg:bg-slate-900/95 max-lg:px-4 max-lg:py-3 max-lg:pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-lg:backdrop-blur-md lg:static lg:border-0 lg:bg-transparent lg:p-0">
+                <button type="button" id="adm-comm-open-wa" ${adminState.commChannel !== 'whatsapp' ? 'disabled' : ''} class="w-full rounded-2xl bg-amber-400 py-3.5 text-base font-bold tracking-tight text-slate-900 shadow-lg shadow-amber-900/30 transition hover:bg-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-45">Open WhatsApp Messages</button>
+                <p class="mt-2 hidden text-center text-[11px] text-slate-500 max-lg:block">Opens <span class="font-mono text-slate-400">wa.me</span> one company at a time.</p>
+                <p class="mt-2 text-center text-[11px] text-slate-500 max-lg:hidden">Opens <code class="rounded bg-slate-800 px-1 py-0.5 font-mono text-slate-400">https://wa.me/&lt;number&gt;?text=…</code> sequentially.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>`
@@ -917,8 +983,7 @@ export async function mountAdminDashboard(root) {
       if (row) break
     }
     if (!row) {
-      bodyEl.innerHTML =
-        '<span class="italic text-slate-500">Select companies to preview a filled message.</span>'
+      bodyEl.innerHTML = COMM_PREVIEW_EMPTY_HTML
       return
     }
     const text = fillCommTemplate(row, adminState.commTemplate, origin)
