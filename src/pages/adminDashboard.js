@@ -20,15 +20,8 @@ import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 
-const adminState = {
-  tab: 'requests',
-  editBaseline: null,
-  broadcastSelected: [],
-  broadcastMessage:
-    'Hello {company_name},\n\nWe have an update for your TAXIO account.\nBooking page: {booking_url}\nLogin: {login_url}',
-}
+const adminState = { tab: 'requests', editBaseline: null }
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
-const LOGIN_ACTION_URL = '/login/company'
 
 function monthlyRevenueEuro(companies, carMap) {
   let total = 0
@@ -48,19 +41,6 @@ function planBadge(plan) {
       ? 'bg-gray-900 text-white'
       : 'bg-gray-200 text-gray-800'
   return `<span class="rounded-full px-3 py-0.5 text-xs font-bold ${cls}">${p}</span>`
-}
-
-function normalizePhoneForWhatsApp(phone) {
-  const clean = String(phone || '')
-    .trim()
-    .replace(/[\s().-]/g, '')
-  if (!clean) return ''
-  if (clean.startsWith('+')) return clean.slice(1).replace(/\D/g, '')
-  if (clean.startsWith('00')) return clean.slice(2).replace(/\D/g, '')
-  const digits = clean.replace(/\D/g, '')
-  if (!digits) return ''
-  if (digits.startsWith('0')) return `32${digits.slice(1)}`
-  return digits
 }
 
 export async function mountAdminDashboard(root) {
@@ -388,56 +368,6 @@ export async function mountAdminDashboard(root) {
       </div>`
   }
 
-  const approvedForBroadcast = active
-    .filter((c) => String(c.phone || '').trim())
-    .map((c) => ({
-      ...c,
-      waPhone: normalizePhoneForWhatsApp(c.phone),
-    }))
-    .filter((c) => c.waPhone)
-  const approvedIds = new Set(approvedForBroadcast.map((c) => c.id))
-  adminState.broadcastSelected = (adminState.broadcastSelected || []).filter((id) => approvedIds.has(id))
-  const selectedSet = new Set(adminState.broadcastSelected)
-  const allApprovedSelected =
-    approvedForBroadcast.length > 0 && approvedForBroadcast.every((c) => selectedSet.has(c.id))
-  const broadcastRows = approvedForBroadcast.length
-    ? approvedForBroadcast
-        .map(
-          (c) => `<label class="flex items-start gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
-            <input type="checkbox" data-adm-broadcast-company="${escapeHtml(c.id)}" ${
-              selectedSet.has(c.id) ? 'checked' : ''
-            } class="mt-0.5 h-4 w-4 rounded border-gray-300" />
-            <span class="min-w-0">
-              <span class="block text-sm font-semibold text-gray-900">${escapeHtml(c.name)}</span>
-              <span class="block text-xs text-gray-500">${escapeHtml(c.phone || '')} · ${escapeHtml(c.slug)}</span>
-            </span>
-          </label>`
-        )
-        .join('')
-    : `<p class="text-sm text-gray-500">No approved companies with valid WhatsApp phone numbers.</p>`
-  const broadcastHtml = `
-    <div class="mt-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-lg">
-      <h2 class="text-lg font-bold text-gray-900">Broadcast WhatsApp</h2>
-      <p class="mt-1 text-sm text-gray-600">Select approved companies, write one template, then manually confirm each message.</p>
-      <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
-        Safety: TAXIO opens WhatsApp one-by-one. You must confirm each company message before it opens.
-      </div>
-      <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
-          <input type="checkbox" id="adm-broadcast-select-all" ${allApprovedSelected ? 'checked' : ''} class="h-4 w-4 rounded border-gray-300" />
-          Select all approved companies
-        </label>
-        <span class="text-xs text-gray-500">${adminState.broadcastSelected.length} selected</span>
-      </div>
-      <div class="mt-3 grid max-h-56 gap-2 overflow-y-auto rounded-xl bg-gray-50 p-2.5">${broadcastRows}</div>
-      <label class="mt-4 block text-sm font-semibold text-gray-800">Message template</label>
-      <textarea id="adm-broadcast-message" rows="6" class="mt-2 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900">${escapeHtml(adminState.broadcastMessage || '')}</textarea>
-      <p class="mt-2 text-xs text-gray-500">Variables: <code>{company_name}</code> <code>{booking_url}</code> <code>{login_url}</code></p>
-      <div class="mt-4 flex flex-wrap gap-2">
-        <button type="button" id="adm-broadcast-send" class="rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-500">Open WhatsApp one-by-one</button>
-      </div>
-    </div>`
-
   root.innerHTML = `
     <div class="min-h-screen bg-[#e8e4f0] pb-16">
       <header class="bg-gradient-to-r from-violet-600 via-purple-600 to-violet-700 px-4 py-6 shadow-lg">
@@ -597,7 +527,6 @@ export async function mountAdminDashboard(root) {
         </dialog>
 
         <div class="mt-6">${mainHtml}</div>
-        ${broadcastHtml}
       </div>
     </div>`
 
@@ -662,70 +591,6 @@ export async function mountAdminDashboard(root) {
 
   root.querySelector('#adm-qr')?.addEventListener('click', () => {
     window.alert('QR batch tools — connect to your operational workflow when ready.')
-  })
-
-  root.querySelector('#adm-broadcast-select-all')?.addEventListener('change', (e) => {
-    const checked = !!e.target.checked
-    const boxes = [...root.querySelectorAll('[data-adm-broadcast-company]')]
-    boxes.forEach((box) => {
-      box.checked = checked
-    })
-    adminState.broadcastSelected = checked
-      ? boxes.map((box) => box.getAttribute('data-adm-broadcast-company')).filter(Boolean)
-      : []
-    mountAdminDashboard(root)
-  })
-
-  root.querySelectorAll('[data-adm-broadcast-company]').forEach((box) => {
-    box.addEventListener('change', () => {
-      const id = box.getAttribute('data-adm-broadcast-company')
-      if (!id) return
-      const next = new Set(adminState.broadcastSelected || [])
-      if (box.checked) next.add(id)
-      else next.delete(id)
-      adminState.broadcastSelected = [...next]
-      mountAdminDashboard(root)
-    })
-  })
-
-  root.querySelector('#adm-broadcast-message')?.addEventListener('input', (e) => {
-    adminState.broadcastMessage = String(e.target.value || '')
-  })
-
-  root.querySelector('#adm-broadcast-send')?.addEventListener('click', async () => {
-    const selected = (adminState.broadcastSelected || [])
-      .map((id) => active.find((c) => c.id === id))
-      .filter(Boolean)
-    if (!selected.length) {
-      showMsg('Select at least one approved company first.')
-      return
-    }
-    const template = String(adminState.broadcastMessage || '').trim()
-    if (!template) {
-      showMsg('Message template cannot be empty.')
-      return
-    }
-    let opened = 0
-    for (const company of selected) {
-      const phoneDigits = normalizePhoneForWhatsApp(company.phone)
-      if (!phoneDigits) continue
-      const bookingUrl = absolutePublicBookingUrl(company.slug)
-      const loginUrl = `${window.location.origin}${LOGIN_ACTION_URL}`
-      const message = template
-        .replaceAll('{company_name}', company.name || '')
-        .replaceAll('{booking_url}', bookingUrl)
-        .replaceAll('{login_url}', loginUrl)
-      const ok = window.confirm(
-        `Send WhatsApp to ${company.name}?\n\nPhone: ${company.phone}\nBooking URL: ${bookingUrl}\n\nMessage preview:\n${message}`
-      )
-      if (!ok) continue
-      const waUrl = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}`
-      window.open(waUrl, '_blank', 'noopener,noreferrer')
-      opened += 1
-      await new Promise((resolve) => window.setTimeout(resolve, 250))
-    }
-    if (opened > 0) showMsg(`Opened ${opened} WhatsApp message tab(s).`)
-    else showMsg('No WhatsApp messages were opened.')
   })
 
   root.querySelectorAll('[data-adm]').forEach((btn) => {

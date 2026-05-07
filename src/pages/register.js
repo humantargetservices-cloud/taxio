@@ -8,13 +8,6 @@ import { icon } from '../lib/icons.js'
 import { slugFromCompanyName } from '../lib/slug.js'
 
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
-const TURNSTILE_FRONT_ENABLED =
-  String(import.meta.env.VITE_TURNSTILE_ENABLED || '')
-    .trim()
-    .toLowerCase() === 'true'
-const REG_MIN_SUBMIT_MS = 3000
-const REG_REPEAT_BLOCK_MS = 10 * 60 * 1000
-const REG_REPEAT_KEY = 'taxio_reg_last_sig_v1'
 
 function tr() {
   const lang = getLocale()
@@ -37,47 +30,25 @@ function cleanPhoneInput(raw) {
     .replace(/[\s().-]/g, '')
 }
 
-function normalizeBelgianPhoneToE164(rawPhone) {
+function normalizePhoneToE164(rawPhone, countryPrefix = '+32') {
   const clean = cleanPhoneInput(rawPhone)
   if (!clean) return ''
-  if (clean.startsWith('+')) {
-    const digits = clean.slice(1).replace(/\D/g, '')
-    if (!digits.startsWith('32')) return ''
-    const nsn = digits.slice(2).replace(/^0+/, '')
-    if (!isValidBelgianNationalNumber(nsn)) return ''
-    return `+32${nsn}`
+  if (clean.startsWith('+')) return `+${clean.slice(1).replace(/\D/g, '')}`
+  if (clean.startsWith('00')) {
+    const converted = `+${clean.slice(2).replace(/\D/g, '')}`
+    if (converted.startsWith('+320')) return `+32${converted.slice(4)}`
+    return converted
   }
-  if (clean.startsWith('00')) return normalizeBelgianPhoneToE164(`+${clean.slice(2)}`)
   const digits = clean.replace(/\D/g, '')
   if (!digits) return ''
-  if (digits.startsWith('32')) return normalizeBelgianPhoneToE164(`+${digits}`)
-  if (!digits.startsWith('0')) return ''
-  const nsn = digits.slice(1)
-  if (!isValidBelgianNationalNumber(nsn)) return ''
-  return `+32${nsn}`
+  if (digits.startsWith('04')) return `+324${digits.slice(2)}`
+  if (digits.startsWith('32')) return `+${digits}`
+  if (digits.startsWith('0') && countryPrefix === '+32') return `+32${digits.slice(1)}`
+  return `${countryPrefix}${digits}`
 }
 
-function isValidBelgianNationalNumber(nsn) {
-  return /^[1-9]\d{7,8}$/.test(String(nsn || ''))
-}
-
-function isValidBelgianE164(phone) {
-  const s = String(phone || '').trim()
-  if (!/^\+32\d{8,9}$/.test(s)) return false
-  const nsn = s.slice(3)
-  return isValidBelgianNationalNumber(nsn)
-}
-
-function readRepeatGuard() {
-  try {
-    const raw = localStorage.getItem(REG_REPEAT_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return null
-    return parsed
-  } catch {
-    return null
-  }
+function isValidInternationalE164(phone) {
+  return /^\+[1-9]\d{7,14}$/.test(String(phone || '').trim())
 }
 
 export function mountRegister(root) {
@@ -131,10 +102,18 @@ export function mountRegister(root) {
           </div>
           <div class="space-y-2">
             <label for="phone" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.phone} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
-            <div class="relative">
-              <span class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold ${dark ? 'text-slate-200' : 'text-slate-600'}">+32</span>
-              <input id="phone" name="phone" type="tel" required inputmode="tel" autocomplete="tel" placeholder="470 12 34 56" class="${ic} pl-14" />
+            <div class="grid grid-cols-[7.5rem_1fr] gap-2">
+              <select id="phonePrefix" name="phonePrefix" class="${ic}">
+                <option value="+32" selected>+32 (BE)</option>
+                <option value="+31">+31 (NL)</option>
+                <option value="+33">+33 (FR)</option>
+                <option value="+49">+49 (DE)</option>
+                <option value="+352">+352 (LU)</option>
+                <option value="+44">+44 (UK)</option>
+              </select>
+              <input id="phone" name="phone" type="tel" required placeholder="${R.phPhone}" class="${ic}" />
             </div>
+            <p class="text-xs ${dark ? 'text-gray-400' : 'text-slate-500'}">Stored format: international E.164 (example: +32470123456).</p>
           </div>
           <div class="space-y-2">
             <label for="email" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.email} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
@@ -171,7 +150,6 @@ export function mountRegister(root) {
           </div>
 
           <p id="reg-err" class="hidden rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800 ring-1 ring-red-100 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900/30"></p>
-          <input type="text" id="reg-hp" name="companyWebsite" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
           <div id="reg-turnstile-wrap" class="hidden">
             <div id="reg-turnstile-widget"></div>
           </div>
@@ -240,7 +218,7 @@ export function mountRegister(root) {
   const termsCb = root.querySelector('#terms')
   const overlay = root.querySelector('#reg-success-overlay')
   const phoneInput = root.querySelector('#phone')
-  const minSubmitAt = Date.now() + REG_MIN_SUBMIT_MS
+  const phonePrefixSelect = root.querySelector('#phonePrefix')
   let turnstileToken = ''
 
   function refreshPreviewText() {
@@ -308,37 +286,17 @@ export function mountRegister(root) {
       return
     }
     const fd = new FormData(form)
-    if (Date.now() < minSubmitAt) {
-      errEl.textContent = 'Please wait a few seconds before submitting.'
-      errEl.classList.remove('hidden')
-      return
-    }
-    const normalizedPhone = normalizeBelgianPhoneToE164(fd.get('phone'))
-    if (!isValidBelgianE164(normalizedPhone)) {
+    const normalizedPhone = normalizePhoneToE164(
+      fd.get('phone'),
+      String(fd.get('phonePrefix') || '+32')
+    )
+    if (!isValidInternationalE164(normalizedPhone)) {
       errEl.textContent =
-        'Please enter a valid Belgian phone number (e.g. 0470 12 34 56 or 02 123 45 67).'
+        'Please enter a valid international phone number (example: +32470123456).'
       errEl.classList.remove('hidden')
       return
     }
-    const companyName = String(fd.get('companyName') || '').trim().toLowerCase()
-    const vatNumber = String(fd.get('vatNumber') || '')
-      .trim()
-      .toUpperCase()
-      .replace(/\s+/g, '')
-    const email = String(fd.get('email') || '').trim().toLowerCase()
-    const repeatSig = `${companyName}|${vatNumber}|${normalizedPhone}|${email}`
-    const repeatState = readRepeatGuard()
-    if (
-      repeatState &&
-      repeatState.sig === repeatSig &&
-      Number.isFinite(repeatState.ts) &&
-      Date.now() - repeatState.ts < REG_REPEAT_BLOCK_MS
-    ) {
-      errEl.textContent = 'This registration was already submitted recently. Please wait and retry.'
-      errEl.classList.remove('hidden')
-      return
-    }
-    if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY && !turnstileToken) {
+    if (TURNSTILE_SITE_KEY && !turnstileToken) {
       errEl.textContent = 'Please complete the security check before submitting.'
       errEl.classList.remove('hidden')
       return
@@ -354,9 +312,6 @@ export function mountRegister(root) {
       termsVersion: REGISTRATION_TERMS_BUNDLE,
       locale: getLocale(),
       turnstileToken: turnstileToken || null,
-      companyWebsite: String(fd.get('companyWebsite') || ''),
-      formStartedAt: minSubmitAt - REG_MIN_SUBMIT_MS,
-      submissionFingerprint: repeatSig,
     }
     const btn = root.querySelector('#btn-submit')
     btn.disabled = true
@@ -370,7 +325,6 @@ export function mountRegister(root) {
       return
     }
     const slug = data.slug
-    localStorage.setItem(REG_REPEAT_KEY, JSON.stringify({ sig: repeatSig, ts: Date.now() }))
     // Registration is request submission only; ensure no stale auth session can
     // route user into authenticated flows (dashboard/change-password).
     try {
@@ -387,7 +341,7 @@ export function mountRegister(root) {
   })
 
   phoneInput?.addEventListener('blur', () => {
-    const normalized = normalizeBelgianPhoneToE164(phoneInput.value)
+    const normalized = normalizePhoneToE164(phoneInput.value, phonePrefixSelect?.value || '+32')
     if (normalized) phoneInput.value = normalized
   })
 
@@ -405,7 +359,7 @@ export function mountRegister(root) {
     closeSuccess()
   })
 
-  if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY) {
+  if (TURNSTILE_SITE_KEY) {
     const wrap = root.querySelector('#reg-turnstile-wrap')
     const widgetEl = root.querySelector('#reg-turnstile-widget')
     wrap?.classList.remove('hidden')

@@ -30,9 +30,6 @@ export async function registerCompanyOwner(payload) {
     termsVersion,
     locale,
     turnstileToken,
-    companyWebsite,
-    formStartedAt,
-    submissionFingerprint,
   } = payload
 
   const slug = slugFromCompanyName(companyName)
@@ -61,9 +58,6 @@ export async function registerCompanyOwner(payload) {
         termsVersion: termsVersion || null,
         locale: locale || null,
         turnstileToken: turnstileToken || null,
-        companyWebsite: companyWebsite || '',
-        formStartedAt: Number(formStartedAt || 0),
-        submissionFingerprint: submissionFingerprint || null,
       }),
     })
     const body = await response.json().catch(() => ({}))

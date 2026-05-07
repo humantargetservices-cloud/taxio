@@ -1,6 +1,7 @@
 import {
   getClientIp,
   getUserAgent,
+  isTurnstileEnabled,
   json,
   makeSupabaseServiceClient,
   verifyTurnstileToken,
@@ -79,9 +80,6 @@ export default async function handler(req, res) {
     const carType = String(body.car_type || '').trim().slice(0, 40) || null
     const status = 'new'
     const turnstileToken = String(body.turnstileToken || '').trim()
-    const honeypot = String(body.website || '').trim()
-    const formStartedAt = Number(body.formStartedAt || 0)
-    const submissionFingerprint = String(body.submissionFingerprint || '').trim().slice(0, 220)
     const requestedRideDate =
       body.ride_datetime && !Number.isNaN(new Date(body.ride_datetime).getTime())
         ? new Date(body.ride_datetime).toISOString()
@@ -93,12 +91,6 @@ export default async function handler(req, res) {
 
     if (!companyId || !pickup || !dropoff) {
       return json(res, 400, { error: 'Missing booking fields.' })
-    }
-    if (honeypot) {
-      return json(res, 400, { error: 'Security verification failed. Please retry the booking form.' })
-    }
-    if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < 3000) {
-      return json(res, 400, { error: 'Please wait a few seconds before submitting.' })
     }
     if (pickup.length < 5 || dropoff.length < 5) {
       return json(res, 400, {
@@ -115,13 +107,7 @@ export default async function handler(req, res) {
     const supabase = makeSupabaseServiceClient()
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString()
-    const dedupeKey =
-      submissionFingerprint ||
-      `booking:${companyId}:${pickup.toLowerCase()}:${dropoff.toLowerCase()}:${String(carType || '')}:${String(requestedRideDate || 'now')}`.slice(
-        0,
-        220
-      )
-    const contactKey = dedupeKey
+    const contactKey = riderPhoneDigits ? `phone:${riderPhoneDigits}` : riderEmail ? `email:${riderEmail}` : null
 
     const turnstile = await verifyTurnstileToken(turnstileToken, ipAddress)
     if (turnstile.enabled && !turnstile.passed) {
@@ -209,29 +195,6 @@ export default async function handler(req, res) {
         })
       }
     }
-    {
-      let identicalRecentCount = 0
-      try {
-        identicalRecentCount = await countAbuseEvents(supabase, {
-          action: 'rider_booking_submit',
-          sinceIso: fifteenMinutesAgo,
-          contactKey: dedupeKey,
-        })
-      } catch (sigErr) {
-        console.error('[public-booking:repeat-signature]', sigErr)
-      }
-      if (identicalRecentCount >= 1) {
-        await logBlockedBooking(supabase, {
-          ipAddress,
-          companyId,
-          contactKey,
-          reason: 'duplicate_identical_signature_within_15m',
-        })
-        return json(res, 429, {
-          error: 'This booking request was already submitted recently. Please wait 15 minutes before retrying.',
-        })
-      }
-    }
     try {
       await logAbuseEvent(supabase, {
         action: 'rider_booking_submit',
@@ -247,16 +210,16 @@ export default async function handler(req, res) {
       console.error('[public-booking:abuse-log]', rateLogErr)
     }
 
-    let duplicateQuery = supabase
+    const { data: duplicateRecent, error: dupErr } = await supabase
       .from('booking_requests')
       .select('id')
       .eq('company_id', companyId)
       .eq('pickup_address', pickup)
       .eq('dropoff_address', dropoff)
+      .eq('customer_phone', riderPhoneDigits || '')
       .gte('created_at', fifteenMinutesAgo)
       .limit(1)
-    duplicateQuery = carType ? duplicateQuery.eq('car_type', carType) : duplicateQuery.is('car_type', null)
-    const { data: duplicateRecent, error: dupErr } = await duplicateQuery.maybeSingle()
+      .maybeSingle()
     if (dupErr) console.error('[public-booking:duplicate-check]', dupErr)
     if (duplicateRecent) {
       await logBlockedBooking(supabase, {
