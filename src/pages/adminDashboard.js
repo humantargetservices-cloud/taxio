@@ -23,12 +23,107 @@ import { absolutePublicBookingUrl } from '../lib/tenant.js'
 const adminState = {
   tab: 'requests',
   editBaseline: null,
-  broadcastSelected: [],
-  broadcastMessage:
-    'Hello {company_name},\n\nWe have an update for your TAXIO account.\nBooking page: {booking_url}\nLogin: {login_url}',
+  /** approved | pending | inactive | all */
+  commAudience: 'approved',
+  commSelected: [],
+  commSearch: '',
+  commTemplate:
+    'Hello {company_name},\n\nWe have an update for your TAXIO account.\nStatus: {status}\nCity: {city}\nBooking page: {booking_url}\nLogin: {login_url}',
+  /** whatsapp | email */
+  commChannel: 'whatsapp',
 }
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const LOGIN_ACTION_URL = '/login/company'
+
+const COMM_TEMPLATE_PRESETS = {
+  welcome: `Hello {company_name},
+
+Welcome to TAXIO — your partner platform is ready.
+
+Company login: {login_url}
+Public booking page: {booking_url}
+
+If anything is unclear, reply to this message.
+
+— TAXIO`,
+  payment: `Hi {company_name},
+
+This is a friendly reminder regarding your TAXIO subscription or invoice.
+
+Status on file: {status}
+Account login: {login_url}
+
+Please let us know if you need an updated statement.
+
+— TAXIO`,
+  feature: `Hello {company_name},
+
+We have a new feature on TAXIO we think you will find useful.
+
+Log in to explore: {login_url}
+Your booking link: {booking_url}
+
+— TAXIO`,
+  trial_end: `Hello {company_name},
+
+Your trial or introductory period on TAXIO is ending soon.
+
+Login to review your plan: {login_url}
+
+Reply here if you need help.
+
+— TAXIO`,
+  missing_info: `Hello {company_name},
+
+We need a few details to complete your TAXIO company profile.
+
+Current status: {status}
+City on file: {city}
+
+Please reply with the missing information or use email if you prefer.
+
+— TAXIO`,
+  general: `Hello {company_name},
+
+Quick update from TAXIO regarding your account.
+
+Status: {status}
+Booking page: {booking_url}
+Login: {login_url}
+
+— TAXIO`,
+}
+
+function statusLabel(status) {
+  const s = String(status || '').toLowerCase()
+  if (s === 'approved') return 'Approved'
+  if (s === 'pending') return 'Pending'
+  if (s === 'suspended') return 'Suspended'
+  if (s === 'rejected') return 'Rejected'
+  return status || '—'
+}
+
+/** Digits-only for https://wa.me/<digits> (no +), minimum viable length. */
+function waMeDigits(phone) {
+  const d = normalizePhoneForWhatsApp(phone)
+  if (!d || d.startsWith('0')) return ''
+  if (d.length < 8 || d.length > 15) return ''
+  return d
+}
+
+function fillCommTemplate(company, template, origin) {
+  const loginUrl = `${origin}${LOGIN_ACTION_URL}`
+  const bookingUrl =
+    company.status === 'approved' && company.slug
+      ? absolutePublicBookingUrl(company.slug)
+      : '—'
+  return String(template || '')
+    .replaceAll('{company_name}', company.name || '')
+    .replaceAll('{status}', statusLabel(company.status))
+    .replaceAll('{booking_url}', bookingUrl)
+    .replaceAll('{login_url}', loginUrl)
+    .replaceAll('{city}', company.city || '—')
+}
 
 function monthlyRevenueEuro(companies, carMap) {
   let total = 0
@@ -189,6 +284,15 @@ export async function mountAdminDashboard(root) {
       return { name: c?.name || id.slice(0, 8), count }
     })
 
+  if (!['requests', 'active', 'subscriptions', 'communication'].includes(adminState.tab)) {
+    adminState.tab = 'requests'
+  }
+  if (!['approved', 'pending', 'inactive', 'all'].includes(adminState.commAudience)) {
+    adminState.commAudience = 'approved'
+  }
+  if (adminState.commChannel !== 'whatsapp' && adminState.commChannel !== 'email') {
+    adminState.commChannel = 'whatsapp'
+  }
   const tab = adminState.tab
   const tabBtn = (id, label) =>
     `<button type="button" data-adm-tab="${id}" class="rounded-full px-5 py-2 text-sm font-semibold transition ${
@@ -303,7 +407,7 @@ export async function mountAdminDashboard(root) {
           </table>
         </div>
       </div>`
-  } else {
+  } else if (tab === 'subscriptions') {
     const premiumCount = active.filter((c) => c.subscription_plan === 'premium').length
     const basicCount = active.filter((c) => c.subscription_plan !== 'premium').length
     const rows =
@@ -386,57 +490,190 @@ export async function mountAdminDashboard(root) {
           </ul>
         </div>
       </div>`
-  }
+  } else if (tab === 'communication') {
+    const rejected = companies.filter((c) => c.status === 'rejected')
+    let audienceList = []
+    if (adminState.commAudience === 'approved') audienceList = active
+    else if (adminState.commAudience === 'pending') audienceList = pending
+    else if (adminState.commAudience === 'inactive') audienceList = [...suspended, ...rejected]
+    else audienceList = [...companies]
 
-  const approvedForBroadcast = active
-    .filter((c) => String(c.phone || '').trim())
-    .map((c) => ({
-      ...c,
-      waPhone: normalizePhoneForWhatsApp(c.phone),
-    }))
-    .filter((c) => c.waPhone)
-  const approvedIds = new Set(approvedForBroadcast.map((c) => c.id))
-  adminState.broadcastSelected = (adminState.broadcastSelected || []).filter((id) => approvedIds.has(id))
-  const selectedSet = new Set(adminState.broadcastSelected)
-  const allApprovedSelected =
-    approvedForBroadcast.length > 0 && approvedForBroadcast.every((c) => selectedSet.has(c.id))
-  const broadcastRows = approvedForBroadcast.length
-    ? approvedForBroadcast
-        .map(
-          (c) => `<label class="flex items-start gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
-            <input type="checkbox" data-adm-broadcast-company="${escapeHtml(c.id)}" ${
-              selectedSet.has(c.id) ? 'checked' : ''
-            } class="mt-0.5 h-4 w-4 rounded border-gray-300" />
-            <span class="min-w-0">
-              <span class="block text-sm font-semibold text-gray-900">${escapeHtml(c.name)}</span>
-              <span class="block text-xs text-gray-500">${escapeHtml(c.phone || '')} · ${escapeHtml(c.slug)}</span>
-            </span>
-          </label>`
-        )
-        .join('')
-    : `<p class="text-sm text-gray-500">No approved companies with valid WhatsApp phone numbers.</p>`
-  const broadcastHtml = `
-    <div class="mt-6 rounded-2xl border border-gray-100 bg-white p-6 shadow-lg">
-      <h2 class="text-lg font-bold text-gray-900">Broadcast WhatsApp</h2>
-      <p class="mt-1 text-sm text-gray-600">Select approved companies, write one template, then manually confirm each message.</p>
-      <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
-        Safety: TAXIO opens WhatsApp one-by-one. You must confirm each company message before it opens.
-      </div>
-      <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
-          <input type="checkbox" id="adm-broadcast-select-all" ${allApprovedSelected ? 'checked' : ''} class="h-4 w-4 rounded border-gray-300" />
-          Select all approved companies
-        </label>
-        <span class="text-xs text-gray-500">${adminState.broadcastSelected.length} selected</span>
-      </div>
-      <div class="mt-3 grid max-h-56 gap-2 overflow-y-auto rounded-xl bg-gray-50 p-2.5">${broadcastRows}</div>
-      <label class="mt-4 block text-sm font-semibold text-gray-800">Message template</label>
-      <textarea id="adm-broadcast-message" rows="6" class="mt-2 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900">${escapeHtml(adminState.broadcastMessage || '')}</textarea>
-      <p class="mt-2 text-xs text-gray-500">Variables: <code>{company_name}</code> <code>{booking_url}</code> <code>{login_url}</code></p>
-      <div class="mt-4 flex flex-wrap gap-2">
-        <button type="button" id="adm-broadcast-send" class="rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-500">Open WhatsApp one-by-one</button>
-      </div>
-    </div>`
+    const audienceIds = new Set(audienceList.map((c) => c.id))
+    adminState.commSelected = (adminState.commSelected || []).filter((id) => audienceIds.has(id))
+
+    const q = (adminState.commSearch || '').trim().toLowerCase()
+    const visible = !q
+      ? audienceList
+      : audienceList.filter((c) => {
+          const blob = [
+            c.name,
+            c.email,
+            c.phone,
+            c.city,
+            c.status,
+            statusLabel(c.status),
+          ]
+            .join(' ')
+            .toLowerCase()
+          return blob.includes(q)
+        })
+
+    const selectedSet = new Set(adminState.commSelected)
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+
+    const commRows =
+      visible.length === 0
+        ? `<tr><td colspan="7" class="px-4 py-10 text-center text-slate-400">No companies match this audience or search.</td></tr>`
+        : visible
+            .map((c) => {
+              const st = escapeHtml(statusLabel(c.status))
+              const booking =
+                c.status === 'approved' && c.slug ? absolutePublicBookingUrl(c.slug) : ''
+              const bookingCell = booking
+                ? `<a href="${escapeHtml(booking)}" target="_blank" rel="noopener noreferrer" class="break-all font-mono text-xs text-amber-400 underline decoration-amber-400/40 hover:text-amber-300">${escapeHtml(booking)}</a>`
+                : '<span class="text-slate-500">—</span>'
+              const noWa = !waMeDigits(c.phone)
+              const waHint = noWa
+                ? '<span class="ml-1 text-amber-400" title="Not usable for WhatsApp">●</span>'
+                : ''
+              return `
+          <tr class="border-b border-slate-700/50 transition hover:bg-slate-800/50">
+            <td class="px-2 py-2.5 align-top sm:px-3">
+              <input type="checkbox" data-adm-comm-row="${escapeHtml(c.id)}" class="adm-comm-cb mt-0.5 h-4 w-4 rounded border-slate-500 bg-slate-800 text-amber-500 focus:ring-amber-500/40" ${selectedSet.has(c.id) ? 'checked' : ''} />
+            </td>
+            <td class="px-2 py-2.5 text-sm font-semibold text-slate-100 sm:px-3">${escapeHtml(c.name || '')}</td>
+            <td class="px-2 py-2.5 sm:px-3"><span class="inline-flex rounded-full bg-slate-700 px-2 py-0.5 text-xs font-medium text-slate-200">${st}</span></td>
+            <td class="px-2 py-2.5 text-xs text-slate-300 break-all sm:px-3 sm:text-sm">${escapeHtml(c.email || '—')}</td>
+            <td class="px-2 py-2.5 text-xs text-slate-300 sm:px-3 sm:text-sm">${escapeHtml(c.phone || '—')}${waHint}</td>
+            <td class="px-2 py-2.5 text-xs text-slate-300 sm:px-3 sm:text-sm">${escapeHtml(c.city || '—')}</td>
+            <td class="px-2 py-2.5 text-xs sm:px-3 sm:text-sm">${bookingCell}</td>
+          </tr>`
+            })
+            .join('')
+
+    let firstPreview = null
+    for (const id of adminState.commSelected || []) {
+      firstPreview = companies.find((c) => c.id === id)
+      if (firstPreview) break
+    }
+    const previewRaw = firstPreview
+      ? fillCommTemplate(firstPreview, adminState.commTemplate, origin)
+      : ''
+    const previewHtml = firstPreview
+      ? escapeHtml(previewRaw).replace(/\n/g, '<br />')
+      : '<span class="italic text-slate-500">Select companies to preview a filled message.</span>'
+
+    const selCount = (adminState.commSelected || []).length
+    const aud = adminState.commAudience
+
+    mainHtml = `
+      <div class="rounded-2xl border border-slate-600/90 bg-slate-900 p-4 shadow-xl ring-1 ring-slate-700/60 sm:p-6">
+        <div class="flex flex-col gap-2 border-b border-slate-700/80 pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 class="text-lg font-bold tracking-tight text-white sm:text-xl">B2B Communication</h2>
+            <p class="mt-1 text-sm text-slate-400">Contact companies using templates. WhatsApp opens manually — no bulk auto-send.</p>
+          </div>
+        </div>
+
+        <div class="mt-4 rounded-xl border border-amber-400/30 bg-amber-950/40 px-3 py-2.5 text-xs leading-relaxed text-amber-100/95 sm:text-sm">
+          <strong class="text-amber-200">Safety:</strong> WhatsApp requires manual confirmation. TAXIO will open each message, but you must press Send yourself.
+        </div>
+
+        <div class="mt-5">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Audience</p>
+          <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${aud === 'approved' ? 'border-amber-400/50 bg-slate-800' : 'border-slate-600 bg-slate-800/60'}">
+              <input type="radio" name="adm-comm-audience" value="approved" class="text-amber-500" ${aud === 'approved' ? 'checked' : ''} />
+              Approved companies
+            </label>
+            <label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${aud === 'pending' ? 'border-amber-400/50 bg-slate-800' : 'border-slate-600 bg-slate-800/60'}">
+              <input type="radio" name="adm-comm-audience" value="pending" class="text-amber-500" ${aud === 'pending' ? 'checked' : ''} />
+              Pending requests
+            </label>
+            <label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${aud === 'inactive' ? 'border-amber-400/50 bg-slate-800' : 'border-slate-600 bg-slate-800/60'}">
+              <input type="radio" name="adm-comm-audience" value="inactive" class="text-amber-500" ${aud === 'inactive' ? 'checked' : ''} />
+              Suspended / rejected
+            </label>
+            <label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm ${aud === 'all' ? 'border-amber-400/50 bg-slate-800' : 'border-slate-600 bg-slate-800/60'}">
+              <input type="radio" name="adm-comm-audience" value="all" class="text-amber-500" ${aud === 'all' ? 'checked' : ''} />
+              All companies
+            </label>
+          </div>
+        </div>
+
+        <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label class="min-w-0 flex-1 text-xs font-semibold text-slate-400">Search
+            <input id="adm-comm-search" type="search" value="${escapeHtml(adminState.commSearch || '')}" placeholder="Name, email, phone, city, status…" class="mt-1 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20" />
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" id="adm-comm-select-visible" class="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-700">Select all visible</button>
+            <button type="button" id="adm-comm-unselect-all" class="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-700">Unselect all</button>
+          </div>
+        </div>
+
+        <p class="mt-2 text-xs text-slate-500">${visible.length} shown · ${selCount} selected</p>
+
+        <div class="mt-3 overflow-x-auto rounded-xl border border-slate-700/80">
+          <table class="w-full min-w-[720px] text-left text-sm">
+            <thead>
+              <tr class="border-b border-slate-700 bg-slate-800/90 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <th class="w-10 py-3 pl-2 pr-1 sm:pl-3"></th>
+                <th class="py-3 pr-2">Company</th>
+                <th class="py-3 pr-2">Status</th>
+                <th class="py-3 pr-2">Email</th>
+                <th class="py-3 pr-2">Phone</th>
+                <th class="py-3 pr-2">City</th>
+                <th class="py-3 pr-3">Booking URL</th>
+              </tr>
+            </thead>
+            <tbody>${commRows}</tbody>
+          </table>
+        </div>
+
+        <div class="mt-6 grid gap-5 lg:grid-cols-2">
+          <div class="rounded-xl border border-slate-700 bg-slate-800/50 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Channel</p>
+            <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+              <label class="flex flex-1 cursor-pointer items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm ${adminState.commChannel === 'whatsapp' ? 'border-amber-400/40 bg-slate-800' : ''}">
+                <input type="radio" name="adm-comm-channel" value="whatsapp" class="text-amber-500" ${adminState.commChannel === 'whatsapp' ? 'checked' : ''} />
+                WhatsApp
+              </label>
+              <label class="flex flex-1 cursor-pointer items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-500 ${adminState.commChannel === 'email' ? 'border-amber-400/40 bg-slate-800 text-slate-300' : ''}">
+                <input type="radio" name="adm-comm-channel" value="email" class="text-amber-500" ${adminState.commChannel === 'email' ? 'checked' : ''} />
+                Email <span class="text-xs font-normal">(coming soon)</span>
+              </label>
+            </div>
+
+            <label class="mt-4 block text-xs font-semibold text-slate-400">Ready templates</label>
+            <select id="adm-comm-preset" class="mt-1 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-white focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20">
+              <option value="">— Choose a template —</option>
+              <option value="welcome">Welcome / onboarding</option>
+              <option value="payment">Payment reminder</option>
+              <option value="feature">New feature announcement</option>
+              <option value="trial_end">Trial ending reminder</option>
+              <option value="missing_info">Missing information request</option>
+              <option value="general">General update</option>
+            </select>
+
+            <label class="mt-4 block text-xs font-semibold text-slate-400">Message template</label>
+            <textarea id="adm-comm-template" rows="10" class="mt-1 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20">${escapeHtml(
+              adminState.commTemplate || ''
+            )}</textarea>
+            <p class="mt-2 text-xs text-slate-500">Variables: <code class="text-amber-400/90">{company_name}</code> <code class="text-amber-400/90">{status}</code> <code class="text-amber-400/90">{booking_url}</code> <code class="text-amber-400/90">{login_url}</code> <code class="text-amber-400/90">{city}</code></p>
+          </div>
+          <div class="flex flex-col rounded-xl border border-slate-700 bg-slate-800/50 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Preview</p>
+            <p class="mt-2 text-sm text-slate-300">Selected: <strong id="adm-comm-selected-count" class="text-white">${selCount}</strong></p>
+            <div id="adm-comm-preview-body" class="mt-3 flex min-h-[12rem] flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-900/80 p-3 text-sm leading-relaxed text-slate-200">${previewHtml}</div>
+            <p id="adm-comm-skipped" class="mt-3 hidden text-xs text-amber-200/90"></p>
+            <button type="button" id="adm-comm-open-wa" ${adminState.commChannel !== 'whatsapp' ? 'disabled' : ''} class="mt-4 w-full rounded-xl bg-[#25D366] py-3 text-sm font-bold text-white shadow-lg shadow-emerald-900/20 hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:opacity-40">Open WhatsApp messages</button>
+            <p class="mt-2 text-center text-xs text-slate-500">Opens <code class="text-slate-400">https://wa.me/&lt;number&gt;?text=…</code> one company at a time.</p>
+          </div>
+        </div>
+      </div>`
+  } else {
+    mainHtml = '<div class="rounded-2xl border border-gray-200 bg-white p-6 text-gray-600">Select a tab above.</div>'
+  }
 
   root.innerHTML = `
     <div class="min-h-screen bg-[#e8e4f0] pb-16">
@@ -541,10 +778,13 @@ export async function mountAdminDashboard(root) {
           </div>
         </div>
 
-        <div class="mt-6 flex flex-wrap justify-center gap-1 rounded-full bg-gray-200/80 p-1 shadow-inner">
+        <div class="mt-6 overflow-x-auto pb-1">
+          <div class="flex min-w-max justify-center gap-1 rounded-full bg-gray-200/80 p-1 shadow-inner sm:min-w-0">
           ${tabBtn('requests', 'Company Requests')}
           ${tabBtn('active', 'Active Companies')}
           ${tabBtn('subscriptions', 'Subscriptions & Revenue')}
+          ${tabBtn('communication', 'Communication')}
+          </div>
         </div>
 
         <p id="adm-msg" class="mt-4 hidden rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"></p>
@@ -597,7 +837,6 @@ export async function mountAdminDashboard(root) {
         </dialog>
 
         <div class="mt-6">${mainHtml}</div>
-        ${broadcastHtml}
       </div>
     </div>`
 
@@ -664,68 +903,140 @@ export async function mountAdminDashboard(root) {
     window.alert('QR batch tools — connect to your operational workflow when ready.')
   })
 
-  root.querySelector('#adm-broadcast-select-all')?.addEventListener('change', (e) => {
-    const checked = !!e.target.checked
-    const boxes = [...root.querySelectorAll('[data-adm-broadcast-company]')]
-    boxes.forEach((box) => {
-      box.checked = checked
+  function refreshCommPreview() {
+    if ((adminState.tab || '') !== 'communication') return
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    const selectedIds = adminState.commSelected || []
+    const countEl = root.querySelector('#adm-comm-selected-count')
+    if (countEl) countEl.textContent = String(selectedIds.length)
+    const bodyEl = root.querySelector('#adm-comm-preview-body')
+    if (!bodyEl) return
+    let row = null
+    for (const id of selectedIds) {
+      row = companies.find((c) => c.id === id)
+      if (row) break
+    }
+    if (!row) {
+      bodyEl.innerHTML =
+        '<span class="italic text-slate-500">Select companies to preview a filled message.</span>'
+      return
+    }
+    const text = fillCommTemplate(row, adminState.commTemplate, origin)
+    bodyEl.innerHTML = escapeHtml(text).replace(/\n/g, '<br />')
+  }
+
+  root.querySelectorAll('input[name="adm-comm-audience"]').forEach((r) => {
+    r.addEventListener('change', () => {
+      if (r.checked) {
+        adminState.commAudience = r.value
+        mountAdminDashboard(root)
+      }
     })
-    adminState.broadcastSelected = checked
-      ? boxes.map((box) => box.getAttribute('data-adm-broadcast-company')).filter(Boolean)
-      : []
+  })
+
+  root.querySelectorAll('input[name="adm-comm-channel"]').forEach((r) => {
+    r.addEventListener('change', () => {
+      if (r.checked) {
+        adminState.commChannel = r.value
+        mountAdminDashboard(root)
+      }
+    })
+  })
+
+  let commSearchTimer = null
+  root.querySelector('#adm-comm-search')?.addEventListener('input', (e) => {
+    adminState.commSearch = String(e.target.value || '')
+    window.clearTimeout(commSearchTimer)
+    commSearchTimer = window.setTimeout(() => mountAdminDashboard(root), 220)
+  })
+
+  root.querySelector('#adm-comm-select-visible')?.addEventListener('click', () => {
+    const ids = [...root.querySelectorAll('[data-adm-comm-row]')]
+      .map((el) => el.getAttribute('data-adm-comm-row'))
+      .filter(Boolean)
+    adminState.commSelected = [...new Set([...(adminState.commSelected || []), ...ids])]
     mountAdminDashboard(root)
   })
 
-  root.querySelectorAll('[data-adm-broadcast-company]').forEach((box) => {
-    box.addEventListener('change', () => {
-      const id = box.getAttribute('data-adm-broadcast-company')
+  root.querySelector('#adm-comm-unselect-all')?.addEventListener('click', () => {
+    adminState.commSelected = []
+    mountAdminDashboard(root)
+  })
+
+  root.querySelectorAll('.adm-comm-cb').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const id = cb.getAttribute('data-adm-comm-row')
       if (!id) return
-      const next = new Set(adminState.broadcastSelected || [])
-      if (box.checked) next.add(id)
+      const next = new Set(adminState.commSelected || [])
+      if (cb.checked) next.add(id)
       else next.delete(id)
-      adminState.broadcastSelected = [...next]
+      adminState.commSelected = [...next]
       mountAdminDashboard(root)
     })
   })
 
-  root.querySelector('#adm-broadcast-message')?.addEventListener('input', (e) => {
-    adminState.broadcastMessage = String(e.target.value || '')
+  root.querySelector('#adm-comm-preset')?.addEventListener('change', (e) => {
+    const key = e.target.value
+    if (key && COMM_TEMPLATE_PRESETS[key]) {
+      adminState.commTemplate = COMM_TEMPLATE_PRESETS[key]
+      mountAdminDashboard(root)
+    }
   })
 
-  root.querySelector('#adm-broadcast-send')?.addEventListener('click', async () => {
-    const selected = (adminState.broadcastSelected || [])
-      .map((id) => active.find((c) => c.id === id))
-      .filter(Boolean)
-    if (!selected.length) {
-      showMsg('Select at least one approved company first.')
+  root.querySelector('#adm-comm-template')?.addEventListener('input', (e) => {
+    adminState.commTemplate = String(e.target.value || '')
+    refreshCommPreview()
+  })
+
+  root.querySelector('#adm-comm-open-wa')?.addEventListener('click', async () => {
+    if (adminState.commChannel !== 'whatsapp') {
+      showMsg('Email sending is not available yet. Choose WhatsApp.')
       return
     }
-    const template = String(adminState.broadcastMessage || '').trim()
+    const template = String(adminState.commTemplate || '').trim()
     if (!template) {
       showMsg('Message template cannot be empty.')
       return
     }
+    const selectedIds = [...(adminState.commSelected || [])]
+    if (!selectedIds.length) {
+      showMsg('Select at least one company.')
+      return
+    }
+    const origin = window.location.origin
+    const skipped = []
     let opened = 0
-    for (const company of selected) {
-      const phoneDigits = normalizePhoneForWhatsApp(company.phone)
-      if (!phoneDigits) continue
-      const bookingUrl = absolutePublicBookingUrl(company.slug)
-      const loginUrl = `${window.location.origin}${LOGIN_ACTION_URL}`
-      const message = template
-        .replaceAll('{company_name}', company.name || '')
-        .replaceAll('{booking_url}', bookingUrl)
-        .replaceAll('{login_url}', loginUrl)
+    for (const id of selectedIds) {
+      const company = companies.find((c) => c.id === id)
+      if (!company) continue
+      const digits = waMeDigits(company.phone)
+      if (!digits) {
+        skipped.push(String(company.name || id).trim())
+        continue
+      }
+      const message = fillCommTemplate(company, template, origin)
       const ok = window.confirm(
-        `Send WhatsApp to ${company.name}?\n\nPhone: ${company.phone}\nBooking URL: ${bookingUrl}\n\nMessage preview:\n${message}`
+        `Open WhatsApp for ${company.name}?\n\nPhone: ${company.phone}\n\nMessage:\n${message}`
       )
       if (!ok) continue
-      const waUrl = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}`
+      const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
       window.open(waUrl, '_blank', 'noopener,noreferrer')
       opened += 1
-      await new Promise((resolve) => window.setTimeout(resolve, 250))
+      await new Promise((resolve) => window.setTimeout(resolve, 350))
     }
-    if (opened > 0) showMsg(`Opened ${opened} WhatsApp message tab(s).`)
-    else showMsg('No WhatsApp messages were opened.')
+    const skipEl = root.querySelector('#adm-comm-skipped')
+    if (skipEl) {
+      if (skipped.length) {
+        skipEl.textContent = `Skipped (no valid WhatsApp number): ${skipped.join('; ')}`
+        skipEl.classList.remove('hidden')
+      } else {
+        skipEl.classList.add('hidden')
+        skipEl.textContent = ''
+      }
+    }
+    if (opened > 0) showMsg(`Opened ${opened} WhatsApp draft(s). Remember to press Send in each chat.`)
+    else if (!skipped.length) showMsg('No WhatsApp tabs opened.')
+    else showMsg(`Skipped ${skipped.length} row(s). See list below the preview.`)
   })
 
   root.querySelectorAll('[data-adm]').forEach((btn) => {
