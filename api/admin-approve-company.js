@@ -247,6 +247,7 @@ export default async function handler(req, res) {
         email: company.email,
         role: 'company_owner',
         first_login_required: true,
+        company_onboarding_completed: false,
       },
       { onConflict: 'id' }
     )

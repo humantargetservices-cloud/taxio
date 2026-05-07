@@ -102,6 +102,16 @@ export async function getMyProfile(userId) {
   return data
 }
 
+/** After company onboarding wizard (or skip); persists across devices. */
+export async function markCompanyOnboardingComplete(userId) {
+  if (!userId) return { error: new Error('Missing user.') }
+  const { error } = await supabase
+    .from('profiles')
+    .update({ company_onboarding_completed: true })
+    .eq('id', userId)
+  return { error }
+}
+
 /**
  * Resolve the company context for a logged-in user.
  * Prefer an approved company over pending/suspended; prefer owner over member-only; then newest.

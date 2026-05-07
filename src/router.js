@@ -7,6 +7,7 @@ import { mountResetPasswordCompany } from './pages/resetPasswordCompany.js'
 import { mountPendingApproval } from './pages/pendingApproval.js'
 import { mountDashboardCompany } from './pages/dashboardCompany.js'
 import { mountChangePasswordCompany } from './pages/changePasswordCompany.js'
+import { mountOnboardingCompany } from './pages/onboardingCompany.js'
 import { mountBookCompany } from './pages/bookCompany.js'
 import { mountAdminLogin } from './pages/adminLogin.js'
 import { mountAdminDashboard } from './pages/adminDashboard.js'
@@ -97,6 +98,13 @@ function route() {
   }
   if (path === '/dashboard/company') {
     mountDashboardCompany(root).catch((err) => {
+      console.error(err)
+      mountNotFound(root)
+    })
+    return
+  }
+  if (path === '/onboarding/company') {
+    mountOnboardingCompany(root).catch((err) => {
       console.error(err)
       mountNotFound(root)
     })

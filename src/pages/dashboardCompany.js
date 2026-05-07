@@ -71,6 +71,11 @@ export async function mountDashboardCompany(root) {
     return
   }
 
+  if (profile?.company_onboarding_completed === false) {
+    navigate('/onboarding/company')
+    return
+  }
+
   const company = await getCompanyForUser(session.user.id)
   if (!company) {
     navigate('/register')

@@ -125,6 +125,10 @@ export function mountLoginCompany(root) {
       navigate('/change-password/company')
       return
     }
+    if (profile?.company_onboarding_completed === false) {
+      navigate('/onboarding/company')
+      return
+    }
     navigate('/dashboard/company')
   })
 

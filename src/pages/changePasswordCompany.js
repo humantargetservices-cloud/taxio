@@ -89,6 +89,11 @@ export async function mountChangePasswordCompany(root) {
       errEl.classList.remove('hidden')
       return
     }
-    navigate('/dashboard/company')
+    const nextProfile = await getMyProfile(session.user.id)
+    if (nextProfile?.company_onboarding_completed === false) {
+      navigate('/onboarding/company')
+    } else {
+      navigate('/dashboard/company')
+    }
   })
 }
