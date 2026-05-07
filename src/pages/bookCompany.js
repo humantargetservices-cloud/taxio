@@ -362,10 +362,29 @@ function normalizeContactPhone(phone) {
   return `+${digits}`
 }
 
-function waLink(phone, body) {
-  const n = digitsOnly(normalizeContactPhone(phone))
-  if (!n) return null
-  return `https://wa.me/${n}?text=${encodeURIComponent(body)}`
+const BK_ERR_NO_WA =
+  'This taxi company has no valid WhatsApp number yet. Please call or email them.'
+
+/** Digits-only international number for https://wa.me/<digits> (no +). */
+function whatsappDigitsForWaMe(rawPhone) {
+  const normalized = normalizeContactPhone(rawPhone)
+  const d = digitsOnly(normalized)
+  if (!d || d.startsWith('0')) return null
+  if (d.length < 8 || d.length > 15) return null
+  return d
+}
+
+function waMeBookingUrl(digits, message) {
+  if (!digits || !/^\d{8,15}$/.test(digits)) return null
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
+}
+
+/** Open `https://wa.me/...` in a new tab when allowed; otherwise same-tab (no about:blank). */
+function openWaMeUrl(url) {
+  if (!url) return
+  const win = window.open(url, '_blank', 'noopener,noreferrer')
+  if (win) return
+  window.location.assign(url)
 }
 
 /** Optional company logo (if column / field exists). Safe fallback when missing or broken. */
@@ -606,7 +625,7 @@ export async function mountBookCompany(root, slug) {
 
             <input type="text" id="bk-hp" name="website" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
 
-            <a id="bk-wa" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true" class="pointer-events-none flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-200 text-sm font-bold text-slate-500 shadow-md ring-1 ring-slate-300 transition dark:bg-slate-800 dark:shadow-lg dark:shadow-black/20 dark:ring-slate-700">
+            <a id="bk-wa" href="#" rel="noopener noreferrer" aria-disabled="true" class="pointer-events-none flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-200 text-sm font-bold text-slate-500 shadow-md ring-1 ring-slate-300 transition dark:bg-slate-800 dark:shadow-lg dark:shadow-black/20 dark:ring-slate-700">
               ${icon.messageCircle('h-5 w-5')}
               ${escapeHtml(tb.bookWhatsapp)}
             </a>
@@ -693,6 +712,7 @@ export async function mountBookCompany(root, slug) {
   const mailA = root.querySelector('#bk-mail')
   const callA = root.querySelector('#bk-call')
   const normalizedCompanyPhone = normalizeContactPhone(phone)
+  const companyWhatsAppDigits = whatsappDigitsForWaMe(company.phone || '')
   let turnstileToken = ''
 
   const carWrapEl = showVehicleSection ? root.querySelector('#bk-car-wrap') : null
@@ -753,25 +773,24 @@ export async function mountBookCompany(root, slug) {
     })
   }
 
-  function buildMessage() {
+  function buildWhatsappBookingMessage() {
     const pu = pickupEl.value.trim()
     const doff = dropEl.value.trim()
     const whenLine =
       rideMode === 'schedule'
-        ? scheduleInput?.value
-          ? `When: Scheduled at ${scheduleInput.value}`
-          : 'When: Scheduled'
-        : 'When: Ride now'
-    const estimateLine = latestEstimate
-      ? `Estimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
-      : 'Estimate: Not available yet'
-    return `Hello ${company.name}, I would like to book a ride.
+        ? `Scheduled time: ${scheduleInput?.value || ''}`.trim()
+        : 'Ride: Now'
+    let msg = `Hello, I would like to book a ride.
 
+Company: ${company.name}
 Pick-up: ${pu}
 Drop-off: ${doff}
 ${whenLine}
-Car type: ${selectedCar}
-${estimateLine}`
+Car type: ${selectedCar}`
+    if (latestEstimate) {
+      msg += `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+    }
+    return msg
   }
 
   function buildMailtoHref() {
@@ -825,7 +844,7 @@ Estimate price: ${estimatePrice}`
       termsEl.checked &&
       pickupEl.value.trim() &&
       dropEl.value.trim() &&
-      digitsOnly(normalizedCompanyPhone).length > 0
+      !!companyWhatsAppDigits
     waBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
     waBtn.classList.toggle('pointer-events-none', !ok)
     waBtn.classList.toggle('bg-[#25D366]', ok)
@@ -1255,14 +1274,11 @@ Estimate price: ${estimatePrice}`
       errEl.classList.remove('hidden')
       return
     }
-    const n = digitsOnly(normalizedCompanyPhone)
-    if (!n) {
-      e.preventDefault()
-      errEl.textContent = msgs.errNoPhone
+    if (!companyWhatsAppDigits) {
+      errEl.textContent = BK_ERR_NO_WA
       errEl.classList.remove('hidden')
       return
     }
-    let whenLine = 'When: Ride now'
     let rideDateIso = null
     if (rideMode === 'schedule') {
       const raw = scheduleInput?.value || ''
@@ -1280,9 +1296,8 @@ Estimate price: ${estimatePrice}`
         return
       }
       rideDateIso = d.toISOString()
-      whenLine = `When: Scheduled at ${raw}`
     }
-    const estimateLine = latestEstimate
+    const estimateLineForNotes = latestEstimate
       ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
       : ''
     if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY && !turnstileToken) {
@@ -1316,34 +1331,13 @@ Estimate price: ${estimatePrice}`
     } catch {
       /* ignore guard parsing errors */
     }
-    const text = `${buildMessage()}\n${whenLine}${estimateLine}`
-    const url = waLink(normalizedCompanyPhone, text)
+    const bookingMessageText = buildWhatsappBookingMessage()
+    const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
     if (!url) {
-      e.preventDefault()
-      errEl.textContent = 'WhatsApp link could not be created. Please use the phone call button.'
+      errEl.textContent = BK_ERR_NO_WA
       errEl.classList.remove('hidden')
       return
     }
-    waBtn.href = url
-    const popup = window.open('', '_blank', 'noopener,noreferrer')
-    if (!popup) {
-      errEl.textContent = 'Please allow pop-ups to continue to WhatsApp.'
-      errEl.classList.remove('hidden')
-      return
-    }
-    const fallbackText = `${text}\n\nCompany phone: ${normalizedCompanyPhone}`
-    window.setTimeout(async () => {
-      // On iOS/Safari, failed deep-link launches often keep the page visible.
-      if (document.visibilityState === 'visible') {
-        try {
-          await navigator.clipboard?.writeText?.(fallbackText)
-          errEl.textContent = `WhatsApp did not open. Message copied to clipboard. Call ${normalizedCompanyPhone}.`
-        } catch {
-          errEl.textContent = `WhatsApp did not open. Please copy this message manually and call ${normalizedCompanyPhone}.`
-        }
-        errEl.classList.remove('hidden')
-      }
-    }, 1200)
 
     const { error: bookingErr } = await createQuickBookingLog({
       company_id: company.id,
@@ -1354,7 +1348,7 @@ Estimate price: ${estimatePrice}`
       customer_phone: '',
       customer_email: null,
       ride_datetime: rideDateIso,
-      notes: `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLine}`,
+      notes: `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`,
       termsAcceptance: {
         terms_accepted: true,
         accepted_at: new Date().toISOString(),
@@ -1366,7 +1360,6 @@ Estimate price: ${estimatePrice}`
       submissionFingerprint: fingerprint,
     })
     if (bookingErr) {
-      popup.close()
       errEl.textContent = bookingErr.message || 'Booking validation failed. Please check your details.'
       errEl.classList.remove('hidden')
       return
@@ -1375,6 +1368,6 @@ Estimate price: ${estimatePrice}`
       'taxio_booking_last_sig_v1',
       JSON.stringify({ sig: fingerprint, ts: Date.now() })
     )
-    popup.location.href = url
+    openWaMeUrl(url)
   })
 }
