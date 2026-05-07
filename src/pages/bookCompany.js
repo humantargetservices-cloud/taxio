@@ -19,6 +19,12 @@ import { getDemoBookingCompany, isDemoBookingSlug } from '../lib/demoBookingComp
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
+const TURNSTILE_FRONT_ENABLED =
+  String(import.meta.env.VITE_TURNSTILE_ENABLED || '')
+    .trim()
+    .toLowerCase() === 'true'
+const BOOK_MIN_SUBMIT_MS = 3000
+const BOOK_REPEAT_BLOCK_MS = 5 * 60 * 1000
 
 /** Same ordering as `resolveBookingCarTypes` (fleet / display sort). */
 const BOOKING_CAR_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
@@ -391,6 +397,7 @@ export async function mountBookCompany(root, slug) {
     </div>`
 
   const isDemo = isDemoBookingSlug(slug)
+  const formStartedAt = Date.now()
 
   let company
   try {
@@ -597,11 +604,7 @@ export async function mountBookCompany(root, slug) {
               <div id="bk-turnstile-widget"></div>
             </div>
 
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <input id="bk-rider-name" type="text" autocomplete="name" placeholder="${escapeHtml(tb.name || 'Your name (optional)')}" class="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
-              <input id="bk-rider-phone" type="tel" autocomplete="tel" placeholder="${escapeHtml(tb.phone || 'Your phone (optional)')}" class="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
-              <input id="bk-rider-email" type="email" autocomplete="email" placeholder="${escapeHtml(tb.email || 'Your email (optional)')}" class="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
-            </div>
+            <input type="text" id="bk-hp" name="website" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
 
             <a id="bk-wa" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true" class="pointer-events-none flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-slate-200 text-sm font-bold text-slate-500 shadow-md ring-1 ring-slate-300 transition dark:bg-slate-800 dark:shadow-lg dark:shadow-black/20 dark:ring-slate-700">
               ${icon.messageCircle('h-5 w-5')}
@@ -685,9 +688,6 @@ export async function mountBookCompany(root, slug) {
   const rideScheduleBtn = root.querySelector('#bk-ride-schedule')
   const scheduleWrap = root.querySelector('#bk-schedule-wrap')
   const scheduleInput = root.querySelector('#bk-schedule-at')
-  const riderNameEl = root.querySelector('#bk-rider-name')
-  const riderPhoneEl = root.querySelector('#bk-rider-phone')
-  const riderEmailEl = root.querySelector('#bk-rider-email')
   let latestEstimate = null
 
   const mailA = root.querySelector('#bk-mail')
@@ -756,9 +756,6 @@ export async function mountBookCompany(root, slug) {
   function buildMessage() {
     const pu = pickupEl.value.trim()
     const doff = dropEl.value.trim()
-    const riderName = riderNameEl?.value?.trim() || ''
-    const riderPhone = riderPhoneEl?.value?.trim() || ''
-    const riderEmail = riderEmailEl?.value?.trim() || ''
     const whenLine =
       rideMode === 'schedule'
         ? scheduleInput?.value
@@ -774,19 +771,13 @@ Pick-up: ${pu}
 Drop-off: ${doff}
 ${whenLine}
 Car type: ${selectedCar}
-${estimateLine}
-Rider name: ${riderName || 'Not provided'}
-Rider phone: ${riderPhone || 'Not provided'}
-Rider email: ${riderEmail || 'Not provided'}`
+${estimateLine}`
   }
 
   function buildMailtoHref() {
     if (!company.email) return '#'
     const pu = pickupEl.value.trim() || 'Not provided'
     const doff = dropEl.value.trim() || 'Not provided'
-    const riderName = riderNameEl?.value?.trim() || 'Not provided'
-    const riderPhone = riderPhoneEl?.value?.trim() || 'Not provided'
-    const riderEmail = riderEmailEl?.value?.trim() || 'Not provided'
     const whenLine =
       rideMode === 'schedule'
         ? scheduleInput?.value
@@ -808,10 +799,7 @@ Date/Time: ${whenLine}
 Car type: ${selectedCar}
 Estimate distance: ${estimateDistance}
 Estimate duration: ${estimateDuration}
-Estimate price: ${estimatePrice}
-Rider name: ${riderName}
-Rider phone: ${riderPhone}
-Rider email: ${riderEmail}`
+Estimate price: ${estimatePrice}`
     return `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
   }
 
@@ -955,14 +943,14 @@ Rider email: ${riderEmail}`
     syncRideTimingUi()
   })
 
-  ;[pickupEl, dropEl, termsEl, riderNameEl, riderPhoneEl, riderEmailEl, scheduleInput].forEach((el) => {
+  ;[pickupEl, dropEl, termsEl, scheduleInput].forEach((el) => {
     if (!el) return
     el.addEventListener('input', refreshWaState)
     el.addEventListener('change', refreshWaState)
   })
   refreshWaState()
 
-  if (TURNSTILE_SITE_KEY) {
+  if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY) {
     const wrap = root.querySelector('#bk-turnstile-wrap')
     const widgetEl = root.querySelector('#bk-turnstile-widget')
     wrap?.classList.remove('hidden')
@@ -1248,6 +1236,19 @@ Rider email: ${riderEmail}`
     }
     const pu = pickupEl.value.trim()
     const doff = dropEl.value.trim()
+    if (Date.now() - formStartedAt < BOOK_MIN_SUBMIT_MS) {
+      e.preventDefault()
+      errEl.textContent = 'Please wait a few seconds before submitting.'
+      errEl.classList.remove('hidden')
+      return
+    }
+    const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
+    if (honeypot) {
+      e.preventDefault()
+      errEl.textContent = 'Security verification failed. Please retry.'
+      errEl.classList.remove('hidden')
+      return
+    }
     if (!pu || !doff) {
       e.preventDefault()
       errEl.textContent = msgs.errAddresses
@@ -1284,11 +1285,36 @@ Rider email: ${riderEmail}`
     const estimateLine = latestEstimate
       ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
       : ''
-    if (TURNSTILE_SITE_KEY && !turnstileToken) {
+    if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY && !turnstileToken) {
       e.preventDefault()
       errEl.textContent = 'Please complete the security check before booking.'
       errEl.classList.remove('hidden')
       return
+    }
+    const fingerprint = [
+      company.id,
+      pu.toLowerCase(),
+      doff.toLowerCase(),
+      String(selectedCar || ''),
+      String(rideDateIso || 'ride_now'),
+    ].join('|')
+    try {
+      const raw = localStorage.getItem('taxio_booking_last_sig_v1')
+      if (raw) {
+        const last = JSON.parse(raw)
+        if (
+          last &&
+          last.sig === fingerprint &&
+          Number.isFinite(last.ts) &&
+          Date.now() - last.ts < BOOK_REPEAT_BLOCK_MS
+        ) {
+          errEl.textContent = 'This request was already sent recently. Please wait before retrying.'
+          errEl.classList.remove('hidden')
+          return
+        }
+      }
+    } catch {
+      /* ignore guard parsing errors */
     }
     const text = `${buildMessage()}\n${whenLine}${estimateLine}`
     const url = waLink(normalizedCompanyPhone, text)
@@ -1324,9 +1350,9 @@ Rider email: ${riderEmail}`
       pickup_address: pu,
       dropoff_address: doff,
       car_type: selectedCar,
-      customer_name: riderNameEl?.value?.trim() || 'WhatsApp request',
-      customer_phone: riderPhoneEl?.value?.trim() || normalizedCompanyPhone,
-      customer_email: riderEmailEl?.value?.trim() || null,
+      customer_name: 'Booking request',
+      customer_phone: '',
+      customer_email: null,
       ride_datetime: rideDateIso,
       notes: `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLine}`,
       termsAcceptance: {
@@ -1335,6 +1361,9 @@ Rider email: ${riderEmail}`
         terms_version: TERMS_VERSION_BOOKING_RIDER,
       },
       turnstileToken,
+      website: honeypot,
+      formStartedAt,
+      submissionFingerprint: fingerprint,
     })
     if (bookingErr) {
       popup.close()
@@ -1342,6 +1371,10 @@ Rider email: ${riderEmail}`
       errEl.classList.remove('hidden')
       return
     }
+    localStorage.setItem(
+      'taxio_booking_last_sig_v1',
+      JSON.stringify({ sig: fingerprint, ts: Date.now() })
+    )
     popup.location.href = url
   })
 }

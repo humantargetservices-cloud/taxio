@@ -32,25 +32,28 @@ function cleanPhoneInput(raw) {
     .replace(/[\s().-]/g, '')
 }
 
-function normalizePhoneToE164(rawPhone) {
+function normalizeBelgianPhoneToE164(rawPhone) {
   const clean = cleanPhoneInput(rawPhone)
   if (!clean) return ''
-  if (clean.startsWith('+')) return `+${clean.slice(1).replace(/\D/g, '')}`
-  if (clean.startsWith('00')) {
-    const converted = `+${clean.slice(2).replace(/\D/g, '')}`
-    if (converted.startsWith('+320')) return `+32${converted.slice(4)}`
-    return converted
+  if (clean.startsWith('+')) {
+    const digits = clean.slice(1).replace(/\D/g, '')
+    if (!digits.startsWith('32')) return ''
+    const nsn = digits.slice(2).replace(/^0+/, '')
+    if (!isValidBelgianNationalNumber(nsn)) return ''
+    return `+32${nsn}`
   }
+  if (clean.startsWith('00')) return normalizeBelgianPhoneToE164(`+${clean.slice(2)}`)
   const digits = clean.replace(/\D/g, '')
   if (!digits) return ''
-  if (digits.startsWith('04')) return `+324${digits.slice(2)}`
-  if (digits.startsWith('32')) return `+${digits}`
-  if (digits.startsWith('0')) return `+32${digits.slice(1)}`
-  return `+${digits}`
+  if (digits.startsWith('32')) return normalizeBelgianPhoneToE164(`+${digits}`)
+  if (!digits.startsWith('0')) return ''
+  const nsn = digits.slice(1)
+  if (!isValidBelgianNationalNumber(nsn)) return ''
+  return `+32${nsn}`
 }
 
 function normalizePhoneForCompare(phone) {
-  return normalizePhoneToE164(phone).replace(/\D/g, '')
+  return normalizeBelgianPhoneToE164(phone).replace(/\D/g, '')
 }
 
 /**
@@ -78,7 +81,17 @@ function isValidEmail(email) {
 }
 
 function isValidPhone(phone) {
-  return /^\+[1-9]\d{7,14}$/.test(normalizePhoneToE164(phone))
+  return isValidBelgianE164(normalizeBelgianPhoneToE164(phone))
+}
+
+function isValidBelgianNationalNumber(nsn) {
+  return /^[1-9]\d{7,8}$/.test(String(nsn || ''))
+}
+
+function isValidBelgianE164(phone) {
+  const s = String(phone || '').trim()
+  if (!/^\+32\d{8,9}$/.test(s)) return false
+  return isValidBelgianNationalNumber(s.slice(3))
 }
 
 function isValidBelgianVat(vatRaw) {
@@ -173,14 +186,26 @@ export default async function handler(req, res) {
     const companyTermsVersion = String(body.termsVersion || '').trim() || null
     const preferred_locale = normalizeCompanyLocale(body.locale || body.preferred_locale)
     const turnstileToken = String(body.turnstileToken || '').trim()
+    const honeypot = String(body.companyWebsite || '').trim()
+    const formStartedAt = Number(body.formStartedAt || 0)
+    const submissionFingerprint = String(body.submissionFingerprint || '').trim().slice(0, 220)
     const normalizedVat = normalizeVatForCompare(vatNumberInput)
-    const normalizedPhoneE164 = normalizePhoneToE164(phoneInput)
+    const normalizedPhoneE164 = normalizeBelgianPhoneToE164(phoneInput)
     const normalizedPhone = normalizePhoneForCompare(phoneInput)
     const ipAddress = getClientIp(req)
     const userAgent = getUserAgent(req)
+    const contactKey =
+      submissionFingerprint ||
+      `reg:${normalizedVat}:${normalizedPhone}:${email}`.slice(0, 220)
 
     if (!companyName || !vatNumberInput || !phoneInput || !email || !city) {
       return json(res, 400, { error: 'Missing required fields.' })
+    }
+    if (honeypot) {
+      return json(res, 400, { error: 'Security verification failed. Please retry the form.' })
+    }
+    if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < 3000) {
+      return json(res, 400, { error: 'Please wait a few seconds before submitting.' })
     }
     if (!termsAccepted) {
       return json(res, 400, { error: 'Terms must be accepted.' })
@@ -205,8 +230,7 @@ export default async function handler(req, res) {
     }
     if (!isValidPhone(phoneInput)) {
       return json(res, 400, {
-        error:
-          'Please enter a valid phone number in international format (e.g. +32470123456).',
+        error: 'Please enter a valid Belgian phone number.',
       })
     }
     if (!isValidBelgianVat(vatNumberInput)) {
@@ -219,6 +243,30 @@ export default async function handler(req, res) {
     const supabase = makeSupabaseServiceClient()
     const origin = getOriginFromReq(req)
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+
+    {
+      let repeatCount = 0
+      try {
+        repeatCount = await countAbuseEvents(supabase, {
+          action: 'company_registration_submit',
+          sinceIso: tenMinutesAgo,
+          contactKey,
+        })
+      } catch (sigErr) {
+        console.error('[register-company:repeat-signature]', sigErr)
+      }
+      if (repeatCount >= 1) {
+        await logBlockedRegistration(supabase, {
+          ipAddress,
+          reason: 'duplicate_identical_within_10m',
+          extra: { signature: contactKey },
+        })
+        return json(res, 429, {
+          error: 'This registration was already submitted recently. Please wait before retrying.',
+        })
+      }
+    }
 
     if (ipAddress !== 'unknown') {
       let perIpCount = 0
@@ -246,6 +294,7 @@ export default async function handler(req, res) {
         action: 'company_registration_submit',
         ip_address: ipAddress,
         metadata: { ua: userAgent ? 'present' : 'missing' },
+        contact_key: contactKey,
       })
     } catch (rateLogErr) {
       console.error('[register-company:abuse-log]', rateLogErr)
