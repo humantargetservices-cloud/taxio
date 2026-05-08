@@ -1282,9 +1282,10 @@ export async function mountAdminDashboard(root) {
     const sent = Number(data?.sent || 0)
     const failed = Array.isArray(data?.failed) ? data.failed : []
     const skipped = Array.isArray(data?.skipped) ? data.skipped : []
+    const retried = Number(data?.retried || 0)
     const totalSkipped = preSkipped.length + skipped.length
     showMsg(
-      `Email sent: ${sent}. Skipped: ${totalSkipped}. Failed: ${failed.length}.`
+      `Sent: ${sent}. Skipped: ${totalSkipped}. Failed: ${failed.length}. Retried (rate limit): ${retried}.`
     )
 
     const skipEl = root.querySelector('#adm-comm-skipped')

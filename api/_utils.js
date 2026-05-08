@@ -141,22 +141,32 @@ export async function safeSendEmail({ to, subject, html, from, replyTo }) {
     })
     if (result?.error) {
       console.error('[mail:error:resend-response]', result.error)
+      const errObj = result.error
+      const statusRaw =
+        errObj?.statusCode ?? errObj?.status ?? errObj?.response?.status ?? errObj?.status_code
+      const statusCode =
+        typeof statusRaw === 'number' && Number.isFinite(statusRaw) ? statusRaw : undefined
       return {
         ok: false,
         error:
-          result.error?.message ||
+          errObj?.message ||
           'Resend returned an error. Verify sender domain and Resend configuration.',
         provider: 'resend',
+        statusCode,
       }
     }
     return { ok: true, provider: 'resend', id: result?.data?.id || null }
   } catch (err) {
     const detail = err?.message || String(err)
     console.error('[mail:error]', detail, err)
+    const statusRaw = err?.statusCode ?? err?.status ?? err?.response?.status
+    const statusCode =
+      typeof statusRaw === 'number' && Number.isFinite(statusRaw) ? statusRaw : undefined
     return {
       ok: false,
       error: detail,
       provider: 'resend',
+      statusCode,
     }
   }
 }

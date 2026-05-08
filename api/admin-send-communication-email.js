@@ -9,8 +9,37 @@ import {
 
 const MAX_RECIPIENTS = 50
 
+/** Wait between outbound sends to stay under Resend (~5 req/s). */
+const DELAY_MS_MIN = 300
+const DELAY_MS_MAX = 500
+
+/** Extra wait before a single retry after rate limiting. */
+const RATE_LIMIT_RETRY_DELAY_MS = 850
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function delayBetweenRecipientsMs() {
+  return DELAY_MS_MIN + Math.floor(Math.random() * (DELAY_MS_MAX - DELAY_MS_MIN + 1))
+}
+
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())
+}
+
+/** Detect Resend rate limit without leaking secrets (uses status + message heuristics). */
+function isResendRateLimited(mail) {
+  if (!mail || mail.ok === true || mail.skipped) return false
+  if (mail.statusCode === 429) return true
+  const msg = String(mail.error || '').toLowerCase()
+  return msg.includes('too many requests') || msg.includes('rate limit')
+}
+
+function safeRecipientFailureMessage(mail) {
+  const e = String(mail?.error || 'send_failed')
+  if (/^(re_|sk_|pk_|rz_|Bearer\s+)/i.test(e.trim())) return 'send_failed'
+  return e.length > 300 ? `${e.slice(0, 297)}...` : e
 }
 
 /**
@@ -68,10 +97,11 @@ export default async function handler(req, res) {
     const skipped = []
     const failed = []
     let sent = 0
+    let retried = 0
     const commFrom = resolveAdminCommunicationMailFrom()
 
+    let firstOutboundSend = true
     for (const row of normalized) {
-      const key = row.email || `recipient_${row.idx + 1}`
       if (!row.email || !isValidEmail(row.email)) {
         skipped.push({ email: row.email || null, reason: 'invalid_email' })
         continue
@@ -90,12 +120,23 @@ export default async function handler(req, res) {
         .map((line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'))
         .join('<br />')
 
-      const mail = await safeSendEmail({
+      const payload = {
         from: commFrom,
         to: row.email,
         subject: row.subject,
         html: `<div>${html}</div>`,
-      })
+      }
+
+      if (!firstOutboundSend) await sleep(delayBetweenRecipientsMs())
+      firstOutboundSend = false
+
+      let mail = await safeSendEmail(payload)
+      if (!mail?.ok && !mail?.skipped && isResendRateLimited(mail)) {
+        await sleep(RATE_LIMIT_RETRY_DELAY_MS)
+        retried += 1
+        mail = await safeSendEmail(payload)
+      }
+
       if (mail?.ok) {
         sent += 1
         continue
@@ -104,7 +145,7 @@ export default async function handler(req, res) {
         skipped.push({ email: row.email, reason: mail.reason || 'mail_skipped' })
         continue
       }
-      failed.push({ email: row.email, error: mail?.error || 'send_failed' })
+      failed.push({ email: row.email, error: safeRecipientFailureMessage(mail) })
     }
 
     return json(res, 200, {
@@ -112,6 +153,7 @@ export default async function handler(req, res) {
       sent,
       skipped,
       failed,
+      retried,
       maxRecipients: MAX_RECIPIENTS,
     })
   } catch (e) {
