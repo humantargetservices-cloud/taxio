@@ -75,6 +75,7 @@ export function taxioApiPlugin() {
           '/api/public-booking': 'api/public-booking.js',
           '/api/admin-approve-company': 'api/admin-approve-company.js',
           '/api/admin-delete-company': 'api/admin-delete-company.js',
+          '/api/admin-dev-cleanup-test-companies': 'api/admin-dev-cleanup-test-companies.js',
         }
         const file = routes[pathname]
         if (!file || req.method !== 'POST') return next()

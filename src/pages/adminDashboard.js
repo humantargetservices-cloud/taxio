@@ -13,6 +13,7 @@ import {
   setCompanySubscriptionPlan,
   updateCompanyAsAdmin,
   deleteCompanyAsAdmin,
+  devCleanupTestCompanies,
 } from '../lib/api.js'
 import { slugFromCompanyName } from '../lib/slug.js'
 import { isPlatformAdmin, signOutEverywhere } from '../lib/auth.js'
@@ -741,6 +742,26 @@ export async function mountAdminDashboard(root) {
     mainHtml = '<div class="rounded-2xl border border-gray-200 bg-white p-6 text-gray-600">Select a tab above.</div>'
   }
 
+  const showDevCleanupPanel =
+    import.meta.env.DEV || String(import.meta.env.VITE_ENABLE_DEV_CLEANUP || '').trim() === 'true'
+  const devCleanupPanelHtml = showDevCleanupPanel
+    ? `<div id="adm-dev-cleanup-wrap" class="mt-10 rounded-2xl border-2 border-dashed border-amber-400/90 bg-amber-50/95 p-5 text-gray-900 shadow-sm">
+          <h3 class="text-sm font-bold uppercase tracking-wide text-amber-900">Development — test company cleanup</h3>
+          <p class="mt-2 text-xs leading-relaxed text-amber-950/85">Requires <code class="rounded bg-white px-1 py-0.5 text-[11px]">TAXIO_DEV_CLEANUP_ENABLED=true</code> on the server. Deletes only slug prefix <strong>test</strong> or <strong>dev_fixture</strong> rows (see <code class="text-[11px]">migration_companies_dev_fixture.sql</code>). Cascades members, cars, booking requests. Best-effort storage logo removal. Orphan owners: resets onboarding profile flags unless <code class="text-[11px]">TAXIO_DEV_CLEANUP_DELETE_AUTH=true</code>.</p>
+          <p class="mt-2 text-xs font-semibold text-red-800">Does not appear to public users. Run Preview before delete.</p>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" id="adm-dev-cleanup-preview" class="rounded-lg border border-amber-800/40 bg-white px-4 py-2 text-sm font-semibold text-amber-950 shadow-sm hover:bg-amber-100">Preview eligible rows</button>
+          </div>
+          <div id="adm-dev-cleanup-list" class="mt-3 max-h-48 overflow-y-auto rounded-lg border border-amber-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-gray-800">Click Preview to load candidates.</div>
+          <div class="mt-4 flex flex-col gap-3 sm:max-w-lg">
+            <label class="text-xs font-semibold text-amber-950">Confirmation phrase
+              <input id="adm-dev-cleanup-phrase" type="text" autocomplete="off" placeholder="DELETE TEST COMPANIES" class="mt-1 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm" />
+            </label>
+            <button type="button" id="adm-dev-cleanup-run" class="rounded-lg bg-red-700 px-4 py-2.5 text-sm font-bold text-white shadow hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50" disabled>Delete listed companies</button>
+          </div>
+        </div>`
+    : ''
+
   root.innerHTML = `
     <div class="min-h-screen bg-[#e8e4f0] pb-16">
       <header class="bg-gradient-to-r from-violet-600 via-purple-600 to-violet-700 px-4 py-6 shadow-lg">
@@ -903,6 +924,7 @@ export async function mountAdminDashboard(root) {
         </dialog>
 
         <div class="mt-6">${mainHtml}</div>
+        ${devCleanupPanelHtml}
       </div>
     </div>`
 
@@ -912,6 +934,8 @@ export async function mountAdminDashboard(root) {
     el.classList.remove('hidden')
     setTimeout(() => el.classList.add('hidden'), 4000)
   }
+
+  let devCleanupCandidateIds = []
 
   function normalizePricingTextForCompare(s) {
     const t = String(s || '').trim()
@@ -967,6 +991,69 @@ export async function mountAdminDashboard(root) {
 
   root.querySelector('#adm-qr')?.addEventListener('click', () => {
     window.alert('QR batch tools — connect to your operational workflow when ready.')
+  })
+
+  root.querySelector('#adm-dev-cleanup-preview')?.addEventListener('click', async () => {
+    const listEl = root.querySelector('#adm-dev-cleanup-list')
+    const runBtn = root.querySelector('#adm-dev-cleanup-run')
+    if (listEl) listEl.textContent = 'Loading…'
+    devCleanupCandidateIds = []
+    if (runBtn) runBtn.disabled = true
+    const { data, error } = await devCleanupTestCompanies({ action: 'preview' })
+    if (error) {
+      showMsg(error.message)
+      if (listEl) listEl.textContent = error.message
+      return
+    }
+    const rows = data?.companies || []
+    devCleanupCandidateIds = rows.map((c) => c.id)
+    if (listEl) {
+      listEl.innerHTML =
+        rows.length === 0
+          ? '<p class="text-gray-600">No eligible test companies found.</p>'
+          : `<ul class="list-inside list-disc space-y-1">${rows
+              .map(
+                (c) =>
+                  `<li>${escapeHtml(c.name || '')} · ${escapeHtml(c.slug || '')} · <span class="text-gray-500">${escapeHtml(c.id)}</span></li>`
+              )
+              .join('')}</ul>`
+    }
+    if (runBtn) runBtn.disabled = rows.length === 0
+  })
+
+  root.querySelector('#adm-dev-cleanup-run')?.addEventListener('click', async () => {
+    const phrase = String(root.querySelector('#adm-dev-cleanup-phrase')?.value || '').trim()
+    if (phrase !== 'DELETE TEST COMPANIES') {
+      showMsg('Type exactly: DELETE TEST COMPANIES')
+      return
+    }
+    if (!devCleanupCandidateIds.length) {
+      showMsg('Run Preview first.')
+      return
+    }
+    if (
+      !window.confirm(
+        `Permanently delete ${devCleanupCandidateIds.length} test company row(s) and related members, cars, and bookings?`
+      )
+    )
+      return
+    const runBtn = root.querySelector('#adm-dev-cleanup-run')
+    if (runBtn) runBtn.disabled = true
+    const { data, error } = await devCleanupTestCompanies({
+      action: 'delete',
+      confirmation: phrase,
+      companyIds: devCleanupCandidateIds,
+    })
+    if (runBtn) runBtn.disabled = false
+    if (error) {
+      showMsg(error.message)
+      return
+    }
+    const n = data?.deletedIds?.length ?? 0
+    const au = (data?.authUsersDeleted || []).length
+    showMsg(`Deleted ${n} test companies.${au ? ` Removed ${au} auth user(s).` : ''}`)
+    devCleanupCandidateIds = []
+    await mountAdminDashboard(root)
   })
 
   function refreshCommPreview() {

@@ -336,7 +336,8 @@ export const translations = {
       btnSubmitting: 'Submitting...',
       successTitle: 'Registration Request Submitted!',
       successThanks: 'Thank you for registering with',
-      successP1: 'Pending approval. No login yet.',
+      successP1:
+        'Your registration has been received successfully. Our team will review it and contact you shortly.',
       successAddrLabel: 'Reserved address (preview):',
       successReservedNote: 'Booking page and dashboard unlock after approval.',
       successBookingLabel: 'Public booking link (this app):',
@@ -694,7 +695,8 @@ export const translations = {
       btnSubmitting: 'Envoi...',
       successTitle: 'Demande envoyée !',
       successThanks: 'Merci de vous être inscrit sur',
-      successP1: 'En attente d’approbation. Pas de connexion pour l’instant.',
+      successP1:
+        'Votre inscription a bien été enregistrée. Notre équipe l’examinera et vous contactera sous peu.',
       successAddrLabel: 'Adresse réservée (aperçu) :',
       successReservedNote: 'Page publique et tableau de bord après validation.',
       successBookingLabel: 'Lien de réservation (cette app) :',
@@ -1052,7 +1054,8 @@ export const translations = {
       btnSubmitting: 'Bezig met verzenden...',
       successTitle: 'Registratie ontvangen!',
       successThanks: 'Bedankt voor uw registratie bij',
-      successP1: 'In afwachting van goedkeuring. Nog geen login.',
+      successP1:
+        'Uw registratie is succesvol ontvangen. Ons team bekijkt ze en neemt spoedig contact met u op.',
       successAddrLabel: 'Gereserveerd adres (voorbeeld):',
       successReservedNote: 'Boekingspagina en dashboard na goedkeuring.',
       successBookingLabel: 'Openbare boekingslink (deze app):',

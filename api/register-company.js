@@ -519,13 +519,16 @@ export default async function handler(req, res) {
       `,
       })
       if (mail?.skipped || mail?.ok === false) {
-        console.warn('[register-company:admin-notify] Admin email was not sent:', mail)
-        return json(res, 500, {
-          error:
-            'Registration saved, but admin notification email failed. Please verify RESEND_API_KEY, MAIL_FROM, ADMIN_NOTIFY_EMAIL, and your verified Resend sender domain.',
-          code: 'ADMIN_NOTIFY_EMAIL_FAILED',
-          data: { company, slug },
+        console.error('[register-company:admin-notify] Admin notification email failed; registration row already saved.', {
+          companyId: company?.id,
+          slug,
+          skipped: !!mail?.skipped,
+          reason: mail?.reason || null,
+          provider: mail?.provider || null,
+          error: mail?.error || null,
         })
+        // Never return 500 or technical hints to the browser — operators must see a normal success flow.
+        return json(res, 200, { data: { company, slug } })
       }
     } else {
       console.warn(

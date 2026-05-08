@@ -1,22 +1,5 @@
+import { ensurePlatformAdminFromBearer } from './_adminAuth.js'
 import { json, makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'
-
-async function ensureAdminFromBearer(supabase, authHeader) {
-  const token = String(authHeader || '').replace(/^Bearer\s+/i, '').trim()
-  if (!token) return { ok: false, error: 'Missing bearer token.' }
-
-  const { data: userData, error: userErr } = await supabase.auth.getUser(token)
-  if (userErr || !userData?.user) return { ok: false, error: 'Invalid auth token.' }
-
-  const { data: profile, error: pErr } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', userData.user.id)
-    .maybeSingle()
-  if (pErr || profile?.role !== 'platform_admin') {
-    return { ok: false, error: 'Not authorized.' }
-  }
-  return { ok: true }
-}
 
 /**
  * Hard-delete a company row. FKs cascade to company_members, booking_requests, cars.
@@ -30,7 +13,7 @@ export default async function handler(req, res) {
 
   try {
     const supabase = makeSupabaseServiceClient()
-    const auth = await ensureAdminFromBearer(supabase, req.headers.authorization)
+    const auth = await ensurePlatformAdminFromBearer(supabase, req.headers.authorization)
     if (!auth.ok) return json(res, 401, { error: auth.error })
 
     const body =
