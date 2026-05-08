@@ -2,6 +2,7 @@ import { ensurePlatformAdminFromBearer } from './_adminAuth.js'
 import {
   json,
   makeSupabaseServiceClient,
+  resolveAdminCommunicationMailFrom,
   safeSendEmail,
   validateSupabaseServiceEnv,
 } from './_utils.js'
@@ -67,6 +68,7 @@ export default async function handler(req, res) {
     const skipped = []
     const failed = []
     let sent = 0
+    const commFrom = resolveAdminCommunicationMailFrom()
 
     for (const row of normalized) {
       const key = row.email || `recipient_${row.idx + 1}`
@@ -89,6 +91,7 @@ export default async function handler(req, res) {
         .join('<br />')
 
       const mail = await safeSendEmail({
+        from: commFrom,
         to: row.email,
         subject: row.subject,
         html: `<div>${html}</div>`,

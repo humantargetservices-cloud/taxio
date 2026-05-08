@@ -74,15 +74,43 @@ export function escapeHtmlEmail(s) {
     .replace(/"/g, '&quot;')
 }
 
-export async function safeSendEmail({ to, subject, html }) {
-  const from = String(process.env.MAIL_FROM || '').trim()
-  if (!to || !from) {
-    const reason = !from ? 'missing_mail_from' : 'missing_recipient'
-    console.warn('[mail:skip] Missing recipient or MAIL_FROM', { toPresent: !!to, fromPresent: !!from })
+const DEFAULT_MAIL_FROM_AUTOMATED = 'TAXIO <noreply@taxio.be>'
+const DEFAULT_MAIL_FROM_ADMIN_COMM = 'TAXIO Team <info@taxio.be>'
+
+/** Registration, approvals, password flows, booking notices, etc. */
+export function resolveAutomatedMailFrom() {
+  const explicit = String(process.env.MAIL_FROM_AUTOMATED || '').trim()
+  if (explicit) return explicit
+  const fallback = String(process.env.MAIL_FROM || '').trim()
+  if (fallback) return fallback
+  return DEFAULT_MAIL_FROM_AUTOMATED
+}
+
+/** Admin Communication tab only — see api/admin-send-communication-email.js */
+export function resolveAdminCommunicationMailFrom() {
+  const explicit = String(process.env.MAIL_FROM_ADMIN_COMM || '').trim()
+  if (explicit) return explicit
+  const fallback = String(process.env.MAIL_FROM || '').trim()
+  if (fallback) return fallback
+  return DEFAULT_MAIL_FROM_ADMIN_COMM
+}
+
+/**
+ * @param {{ to: string, subject: string, html: string, from?: string }} opts
+ * If `from` is omitted, uses {@link resolveAutomatedMailFrom}.
+ */
+export async function safeSendEmail({ to, subject, html, from }) {
+  const resolvedFrom = String(from ?? '').trim() || resolveAutomatedMailFrom()
+  if (!to || !resolvedFrom) {
+    const reason = !resolvedFrom ? 'missing_mail_from' : 'missing_recipient'
+    console.warn('[mail:skip] Missing recipient or sender FROM', {
+      toPresent: !!to,
+      fromPresent: !!resolvedFrom,
+    })
     return {
       skipped: true,
       reason,
-      error: 'Email skipped because MAIL_FROM or recipient is missing.',
+      error: 'Email skipped because sender address or recipient is missing.',
     }
   }
   const resend = makeResendClient()
@@ -95,14 +123,14 @@ export async function safeSendEmail({ to, subject, html }) {
     }
   }
   try {
-    const result = await resend.emails.send({ from, to, subject, html })
+    const result = await resend.emails.send({ from: resolvedFrom, to, subject, html })
     if (result?.error) {
       console.error('[mail:error:resend-response]', result.error)
       return {
         ok: false,
         error:
           result.error?.message ||
-          'Resend returned an error. Verify sender domain and MAIL_FROM.',
+          'Resend returned an error. Verify sender domain and Resend configuration.',
         provider: 'resend',
       }
     }

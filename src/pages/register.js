@@ -12,9 +12,7 @@ const TURNSTILE_FRONT_ENABLED =
   String(import.meta.env.VITE_TURNSTILE_ENABLED || '')
     .trim()
     .toLowerCase() === 'true'
-const REG_MIN_SUBMIT_MS = 3000
-const REG_REPEAT_BLOCK_MS = 10 * 60 * 1000
-const REG_REPEAT_KEY = 'taxio_reg_last_sig_v1'
+const REG_MIN_SUBMIT_MS = 1000
 
 function tr() {
   const lang = getLocale()
@@ -66,18 +64,6 @@ function isValidBelgianE164(phone) {
   if (!/^\+32\d{8,9}$/.test(s)) return false
   const nsn = s.slice(3)
   return isValidBelgianNationalNumber(nsn)
-}
-
-function readRepeatGuard() {
-  try {
-    const raw = localStorage.getItem(REG_REPEAT_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return null
-    return parsed
-  } catch {
-    return null
-  }
 }
 
 export function mountRegister(root) {
@@ -170,6 +156,11 @@ export function mountRegister(root) {
             </label>
           </div>
 
+          <div id="human-wrap" class="flex items-start gap-3 rounded-2xl border-2 p-4 sm:p-5 transition-colors ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-slate-200 bg-slate-50/90'}">
+            <input type="checkbox" id="reg-human" name="humanConfirmed" required class="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-yellow-500 focus:ring-yellow-500 dark:border-slate-500 dark:bg-slate-700" />
+            <label for="reg-human" class="cursor-pointer text-sm font-medium leading-relaxed ${dark ? 'text-gray-200' : 'text-gray-700'}">${R.humanConfirmLabel}</label>
+          </div>
+
           <p id="reg-err" class="hidden rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800 ring-1 ring-red-100 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900/30"></p>
           <input type="text" id="reg-hp" name="companyWebsite" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
           <div id="reg-turnstile-wrap" class="hidden">
@@ -237,7 +228,9 @@ export function mountRegister(root) {
   const errEl = root.querySelector('#reg-err')
   const previewEl = root.querySelector('#reg-preview')
   const termsWrap = root.querySelector('#terms-wrap')
+  const humanWrap = root.querySelector('#human-wrap')
   const termsCb = root.querySelector('#terms')
+  const humanCb = root.querySelector('#reg-human')
   const overlay = root.querySelector('#reg-success-overlay')
   const phoneInput = root.querySelector('#phone')
   const minSubmitAt = Date.now() + REG_MIN_SUBMIT_MS
@@ -255,9 +248,9 @@ export function mountRegister(root) {
     root.querySelector('#pv-sub').textContent = slug ? `${slug}.taxio.be` : 'companyname.taxio.be'
   }
 
-  function updateTermsStyle() {
-    const on = termsCb.checked
-    termsWrap.className =
+  function updateLegalCheckboxStyle(wrap, checked) {
+    const on = checked
+    wrap.className =
       'flex items-start gap-3 rounded-2xl border-2 p-4 sm:p-5 transition-colors ' +
       (on
         ? dark
@@ -268,6 +261,11 @@ export function mountRegister(root) {
           : 'border-slate-200 bg-slate-50/90')
   }
 
+  function updateTermsStyle() {
+    updateLegalCheckboxStyle(termsWrap, termsCb.checked)
+    updateLegalCheckboxStyle(humanWrap, humanCb.checked)
+  }
+
   root.querySelector('#btn-preview').addEventListener('click', () => {
     refreshPreviewText()
     previewEl.classList.toggle('hidden')
@@ -276,9 +274,10 @@ export function mountRegister(root) {
   const submitBtn = root.querySelector('#btn-submit')
   function syncSubmitEnabled() {
     updateTermsStyle()
-    submitBtn.disabled = !termsCb.checked
+    submitBtn.disabled = !(termsCb.checked && humanCb.checked)
   }
   termsCb.addEventListener('change', syncSubmitEnabled)
+  humanCb.addEventListener('change', syncSubmitEnabled)
   syncSubmitEnabled()
 
   form.querySelector('#companyName')?.addEventListener('input', () => {
@@ -307,9 +306,14 @@ export function mountRegister(root) {
       errEl.classList.remove('hidden')
       return
     }
+    if (!humanCb.checked) {
+      errEl.textContent = R.humanError
+      errEl.classList.remove('hidden')
+      return
+    }
     const fd = new FormData(form)
     if (Date.now() < minSubmitAt) {
-      errEl.textContent = 'Please wait a few seconds before submitting.'
+      errEl.textContent = R.waitBeforeSubmitError
       errEl.classList.remove('hidden')
       return
     }
@@ -325,19 +329,6 @@ export function mountRegister(root) {
       .trim()
       .toUpperCase()
       .replace(/\s+/g, '')
-    const email = String(fd.get('email') || '').trim().toLowerCase()
-    const repeatSig = `${companyName}|${vatNumber}|${normalizedPhone}|${email}`
-    const repeatState = readRepeatGuard()
-    if (
-      repeatState &&
-      repeatState.sig === repeatSig &&
-      Number.isFinite(repeatState.ts) &&
-      Date.now() - repeatState.ts < REG_REPEAT_BLOCK_MS
-    ) {
-      errEl.textContent = 'This registration was already submitted recently. Please wait and retry.'
-      errEl.classList.remove('hidden')
-      return
-    }
     if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY && !turnstileToken) {
       errEl.textContent = 'Please complete the security check before submitting.'
       errEl.classList.remove('hidden')
@@ -356,21 +347,20 @@ export function mountRegister(root) {
       turnstileToken: turnstileToken || null,
       companyWebsite: String(fd.get('companyWebsite') || ''),
       formStartedAt: minSubmitAt - REG_MIN_SUBMIT_MS,
-      submissionFingerprint: repeatSig,
+      humanConfirmed: true,
     }
     const btn = root.querySelector('#btn-submit')
     btn.disabled = true
     btn.textContent = R.btnSubmitting
     const { data, error } = await registerCompanyOwner(payload)
     btn.textContent = R.btnSubmit
-    btn.disabled = !termsCb.checked
+    btn.disabled = !(termsCb.checked && humanCb.checked)
     if (error) {
       errEl.textContent = error.message || String(error)
       errEl.classList.remove('hidden')
       return
     }
     const slug = data.slug
-    localStorage.setItem(REG_REPEAT_KEY, JSON.stringify({ sig: repeatSig, ts: Date.now() }))
     // Registration is request submission only; ensure no stale auth session can
     // route user into authenticated flows (dashboard/change-password).
     try {

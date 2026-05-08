@@ -273,6 +273,12 @@ export const translations = {
       acceptRiderTerms: 'Terms',
       acceptRiderAnd: ' and ',
       acceptRiderPrivacy: 'Privacy Policy',
+      humanConfirmLabel:
+        'I confirm I am a real person and this is a real booking request.',
+      errHuman: 'Please confirm you are a real person.',
+      errWaitSubmit: 'Please wait a moment before submitting.',
+      errSecurityRetry: 'Security verification failed. Please retry.',
+      errTurnstileBooking: 'Please complete the security check before booking.',
       bookWhatsapp: 'Book with WhatsApp',
       email: 'Email',
       call: 'Call',
@@ -332,6 +338,10 @@ export const translations = {
       acceptCompanyAnd: ' and ',
       acceptCompanyPrivacy: 'Privacy Policy',
       termsError: 'Please agree to the Company Terms and Privacy Policy to continue.',
+      humanConfirmLabel:
+        'I confirm I am a real person and this is a real taxi/company registration.',
+      humanError: 'Please confirm you are a real person.',
+      waitBeforeSubmitError: 'Please wait a moment before submitting.',
       btnSubmit: 'Submit Registration',
       btnSubmitting: 'Submitting...',
       successTitle: 'Registration Request Submitted!',
@@ -630,6 +640,12 @@ export const translations = {
       acceptRiderTerms: 'Conditions',
       acceptRiderAnd: ' et la ',
       acceptRiderPrivacy: 'politique de confidentialité',
+      humanConfirmLabel:
+        'Je confirme être une personne réelle et que cette demande de réservation est réelle.',
+      errHuman: 'Veuillez confirmer que vous êtes une personne réelle.',
+      errWaitSubmit: 'Veuillez patienter un instant avant d’envoyer.',
+      errSecurityRetry: 'Vérification de sécurité échouée. Veuillez réessayer.',
+      errTurnstileBooking: 'Veuillez compléter la vérification de sécurité avant de réserver.',
       bookWhatsapp: 'Réserver via WhatsApp',
       email: 'E-mail',
       call: 'Appeler',
@@ -691,6 +707,10 @@ export const translations = {
       acceptCompanyPrivacy: 'politique de confidentialité',
       termsError:
         'Veuillez accepter les Conditions entreprises et la politique de confidentialité pour continuer.',
+      humanConfirmLabel:
+        'Je confirme être une personne réelle et que cette inscription d’entreprise/taxi est réelle.',
+      humanError: 'Veuillez confirmer que vous êtes une personne réelle.',
+      waitBeforeSubmitError: 'Veuillez patienter un instant avant d’envoyer.',
       btnSubmit: "Envoyer l'inscription",
       btnSubmitting: 'Envoi...',
       successTitle: 'Demande envoyée !',
@@ -990,6 +1010,12 @@ export const translations = {
       acceptRiderTerms: 'Voorwaarden',
       acceptRiderAnd: ' en het ',
       acceptRiderPrivacy: 'Privacybeleid',
+      humanConfirmLabel:
+        'Ik bevestig dat ik een echte persoon ben en dat dit een echte boekingsaanvraag is.',
+      errHuman: 'Bevestig alstublieft dat u een echte persoon bent.',
+      errWaitSubmit: 'Wacht even voordat u dit verzendt.',
+      errSecurityRetry: 'Beveiligingscontrole mislukt. Probeer het opnieuw.',
+      errTurnstileBooking: 'Voltooi eerst de beveiligingscontrole voordat u boekt.',
       bookWhatsapp: 'Boeken via WhatsApp',
       email: 'E-mail',
       call: 'Bellen',
@@ -1050,6 +1076,10 @@ export const translations = {
       acceptCompanyPrivacy: 'Privacybeleid',
       termsError:
         'Ga akkoord met de Bedrijfsvoorwaarden en het Privacybeleid om verder te gaan.',
+      humanConfirmLabel:
+        'Ik bevestig dat ik een echte persoon ben en dat dit een echte taxi-/bedrijfsregistratie is.',
+      humanError: 'Bevestig alstublieft dat u een echte persoon bent.',
+      waitBeforeSubmitError: 'Wacht even voordat u dit verzendt.',
       btnSubmit: 'Registratie verzenden',
       btnSubmitting: 'Bezig met verzenden...',
       successTitle: 'Registratie ontvangen!',

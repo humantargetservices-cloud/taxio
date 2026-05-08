@@ -23,8 +23,7 @@ const TURNSTILE_FRONT_ENABLED =
   String(import.meta.env.VITE_TURNSTILE_ENABLED || '')
     .trim()
     .toLowerCase() === 'true'
-const BOOK_MIN_SUBMIT_MS = 3000
-const BOOK_REPEAT_BLOCK_MS = 5 * 60 * 1000
+const BOOK_MIN_SUBMIT_MS = 1000
 
 /** Same ordering as `resolveBookingCarTypes` (fleet / display sort). */
 const BOOKING_CAR_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
@@ -618,6 +617,13 @@ export async function mountBookCompany(root, slug) {
               </label>
             </div>
 
+            <div class="rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-4 ring-1 ring-slate-900/[0.04] dark:border-slate-700/60 dark:bg-slate-800/40 dark:ring-white/[0.04] sm:px-5 sm:py-5">
+              <label class="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" id="bk-human" required class="mt-0.5 h-[18px] w-[18px] shrink-0 rounded border-slate-300 bg-white text-amber-500 focus:ring-amber-400/40 focus:ring-offset-0 dark:border-slate-500 dark:bg-slate-800 dark:text-amber-400" />
+                <span class="text-sm font-medium leading-relaxed text-slate-700 dark:text-slate-300">${escapeHtml(tb.humanConfirmLabel)}</span>
+              </label>
+            </div>
+
             <p id="bk-err" class="hidden rounded-xl bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800 ring-1 ring-red-200 dark:bg-red-950/60 dark:text-red-200 dark:ring-red-500/30"></p>
             <div id="bk-turnstile-wrap" class="hidden">
               <div id="bk-turnstile-widget"></div>
@@ -695,6 +701,7 @@ export async function mountBookCompany(root, slug) {
   const pickupEl = root.querySelector('#bk-pickup')
   const dropEl = root.querySelector('#bk-dropoff')
   const termsEl = root.querySelector('#bk-terms')
+  const humanEl = root.querySelector('#bk-human')
   const waBtn = root.querySelector('#bk-wa')
   const errEl = root.querySelector('#bk-err')
   const estWrap = root.querySelector('#bk-estimate')
@@ -839,9 +846,51 @@ Estimate price: ${estimatePrice}`
     }
   }
 
+  function bookingContactGate(requireTripFields) {
+    const msgs = tBooking(getLocale())
+    errEl.classList.add('hidden')
+    if (!termsEl.checked) {
+      errEl.textContent = msgs.errTerms
+      errEl.classList.remove('hidden')
+      return false
+    }
+    if (!humanEl.checked) {
+      errEl.textContent = msgs.errHuman
+      errEl.classList.remove('hidden')
+      return false
+    }
+    if (Date.now() - formStartedAt < BOOK_MIN_SUBMIT_MS) {
+      errEl.textContent = msgs.errWaitSubmit
+      errEl.classList.remove('hidden')
+      return false
+    }
+    const honeypotGate = String(root.querySelector('#bk-hp')?.value || '').trim()
+    if (honeypotGate) {
+      errEl.textContent = msgs.errSecurityRetry
+      errEl.classList.remove('hidden')
+      return false
+    }
+    if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY && !turnstileToken) {
+      errEl.textContent = msgs.errTurnstileBooking
+      errEl.classList.remove('hidden')
+      return false
+    }
+    if (requireTripFields) {
+      const pu = pickupEl.value.trim()
+      const doff = dropEl.value.trim()
+      if (!pu || !doff) {
+        errEl.textContent = msgs.errAddresses
+        errEl.classList.remove('hidden')
+        return false
+      }
+    }
+    return true
+  }
+
   function refreshWaState() {
     const ok =
       termsEl.checked &&
+      humanEl.checked &&
       pickupEl.value.trim() &&
       dropEl.value.trim() &&
       !!companyWhatsAppDigits
@@ -962,7 +1011,7 @@ Estimate price: ${estimatePrice}`
     syncRideTimingUi()
   })
 
-  ;[pickupEl, dropEl, termsEl, scheduleInput].forEach((el) => {
+  ;[pickupEl, dropEl, termsEl, humanEl, scheduleInput].forEach((el) => {
     if (!el) return
     el.addEventListener('input', refreshWaState)
     el.addEventListener('change', refreshWaState)
@@ -1232,48 +1281,36 @@ Estimate price: ${estimatePrice}`
     w.document.close()
   })
 
+  mailA.addEventListener('click', (e) => {
+    if (!company.email || mailA.classList.contains('pointer-events-none')) return
+    if (!bookingContactGate(false)) {
+      e.preventDefault()
+    }
+  })
+
+  callA.addEventListener('click', (e) => {
+    if (!normalizedCompanyPhone || callA.classList.contains('pointer-events-none')) return
+    if (!bookingContactGate(false)) {
+      e.preventDefault()
+    }
+  })
+
   waBtn.addEventListener('click', async (e) => {
     e.preventDefault()
     const msgs = tBooking(getLocale())
-    errEl.classList.add('hidden')
     const waDisabled = waBtn.getAttribute('aria-disabled') === 'true'
-    if (waDisabled) {
-      e.preventDefault()
-      return
-    }
+    if (waDisabled) return
     if (isDemo) {
-      e.preventDefault()
       errEl.textContent = msgs.demoNoWhatsapp
       errEl.classList.remove('hidden')
       return
     }
-    if (!termsEl.checked) {
-      e.preventDefault()
-      errEl.textContent = msgs.errTerms
-      errEl.classList.remove('hidden')
-      return
-    }
+    if (!bookingContactGate(true)) return
+
     const pu = pickupEl.value.trim()
     const doff = dropEl.value.trim()
-    if (Date.now() - formStartedAt < BOOK_MIN_SUBMIT_MS) {
-      e.preventDefault()
-      errEl.textContent = 'Please wait a few seconds before submitting.'
-      errEl.classList.remove('hidden')
-      return
-    }
     const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
-    if (honeypot) {
-      e.preventDefault()
-      errEl.textContent = 'Security verification failed. Please retry.'
-      errEl.classList.remove('hidden')
-      return
-    }
-    if (!pu || !doff) {
-      e.preventDefault()
-      errEl.textContent = msgs.errAddresses
-      errEl.classList.remove('hidden')
-      return
-    }
+
     if (!companyWhatsAppDigits) {
       errEl.textContent = BK_ERR_NO_WA
       errEl.classList.remove('hidden')
@@ -1283,14 +1320,12 @@ Estimate price: ${estimatePrice}`
     if (rideMode === 'schedule') {
       const raw = scheduleInput?.value || ''
       if (!raw) {
-        e.preventDefault()
         errEl.textContent = msgs.errSchedule
         errEl.classList.remove('hidden')
         return
       }
       const d = new Date(raw)
       if (Number.isNaN(d.getTime())) {
-        e.preventDefault()
         errEl.textContent = msgs.errScheduleBad
         errEl.classList.remove('hidden')
         return
@@ -1300,12 +1335,6 @@ Estimate price: ${estimatePrice}`
     const estimateLineForNotes = latestEstimate
       ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
       : ''
-    if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY && !turnstileToken) {
-      e.preventDefault()
-      errEl.textContent = 'Please complete the security check before booking.'
-      errEl.classList.remove('hidden')
-      return
-    }
     const fingerprint = [
       company.id,
       pu.toLowerCase(),
@@ -1313,24 +1342,6 @@ Estimate price: ${estimatePrice}`
       String(selectedCar || ''),
       String(rideDateIso || 'ride_now'),
     ].join('|')
-    try {
-      const raw = localStorage.getItem('taxio_booking_last_sig_v1')
-      if (raw) {
-        const last = JSON.parse(raw)
-        if (
-          last &&
-          last.sig === fingerprint &&
-          Number.isFinite(last.ts) &&
-          Date.now() - last.ts < BOOK_REPEAT_BLOCK_MS
-        ) {
-          errEl.textContent = 'This request was already sent recently. Please wait before retrying.'
-          errEl.classList.remove('hidden')
-          return
-        }
-      }
-    } catch {
-      /* ignore guard parsing errors */
-    }
     const bookingMessageText = buildWhatsappBookingMessage()
     const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
     if (!url) {
@@ -1358,16 +1369,13 @@ Estimate price: ${estimatePrice}`
       website: honeypot,
       formStartedAt,
       submissionFingerprint: fingerprint,
+      humanConfirmed: true,
     })
     if (bookingErr) {
       errEl.textContent = bookingErr.message || 'Booking validation failed. Please check your details.'
       errEl.classList.remove('hidden')
       return
     }
-    localStorage.setItem(
-      'taxio_booking_last_sig_v1',
-      JSON.stringify({ sig: fingerprint, ts: Date.now() })
-    )
     openWaMeUrl(url)
   })
 }

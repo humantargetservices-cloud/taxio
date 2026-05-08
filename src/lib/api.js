@@ -33,6 +33,7 @@ export async function registerCompanyOwner(payload) {
     companyWebsite,
     formStartedAt,
     submissionFingerprint,
+    humanConfirmed,
   } = payload
 
   const slug = slugFromCompanyName(companyName)
@@ -64,6 +65,7 @@ export async function registerCompanyOwner(payload) {
         companyWebsite: companyWebsite || '',
         formStartedAt: Number(formStartedAt || 0),
         submissionFingerprint: submissionFingerprint || null,
+        humanConfirmed: humanConfirmed === true,
       }),
     })
     const body = await response.json().catch(() => ({}))

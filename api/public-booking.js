@@ -88,6 +88,7 @@ export default async function handler(req, res) {
         : new Date().toISOString()
     const notesRaw = String(body.notes || '')
     const notes = notesRaw.slice(0, MAX_NOTES_LEN)
+    const humanConfirmed = !!body.humanConfirmed
     const ipAddress = getClientIp(req)
     const userAgent = getUserAgent(req)
 
@@ -97,8 +98,11 @@ export default async function handler(req, res) {
     if (honeypot) {
       return json(res, 400, { error: 'Security verification failed. Please retry the booking form.' })
     }
-    if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < 3000) {
-      return json(res, 400, { error: 'Please wait a few seconds before submitting.' })
+    if (!humanConfirmed) {
+      return json(res, 400, { error: 'Please confirm you are a real person.' })
+    }
+    if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < 1000) {
+      return json(res, 400, { error: 'Please wait a moment before submitting.' })
     }
     if (pickup.length < 5 || dropoff.length < 5) {
       return json(res, 400, {
@@ -157,7 +161,7 @@ export default async function handler(req, res) {
           reason: 'rate_limit_ip_10_per_hour',
         })
         return json(res, 429, {
-          error: 'Too many booking attempts from this IP. Please try again in about one hour.',
+          error: 'Too many attempts. Please try again later.',
         })
       }
     }
@@ -181,7 +185,7 @@ export default async function handler(req, res) {
           reason: 'rate_limit_company_30_per_hour',
         })
         return json(res, 429, {
-          error: 'This company reached booking request limits. Please try again in about one hour.',
+          error: 'Too many attempts. Please try again later.',
         })
       }
     }
@@ -205,30 +209,7 @@ export default async function handler(req, res) {
           reason: 'rate_limit_contact_5_per_hour',
         })
         return json(res, 429, {
-          error: 'Too many booking attempts for this contact in the last hour. Please try later.',
-        })
-      }
-    }
-    {
-      let identicalRecentCount = 0
-      try {
-        identicalRecentCount = await countAbuseEvents(supabase, {
-          action: 'rider_booking_submit',
-          sinceIso: fifteenMinutesAgo,
-          contactKey: dedupeKey,
-        })
-      } catch (sigErr) {
-        console.error('[public-booking:repeat-signature]', sigErr)
-      }
-      if (identicalRecentCount >= 1) {
-        await logBlockedBooking(supabase, {
-          ipAddress,
-          companyId,
-          contactKey,
-          reason: 'duplicate_identical_signature_within_15m',
-        })
-        return json(res, 429, {
-          error: 'This booking request was already submitted recently. Please wait 15 minutes before retrying.',
+          error: 'Too many attempts. Please try again later.',
         })
       }
     }
@@ -266,7 +247,8 @@ export default async function handler(req, res) {
         reason: 'duplicate_identical_within_15m',
       })
       return json(res, 429, {
-        error: 'This booking request was already submitted recently. Please wait 15 minutes before retrying.',
+        error:
+          'This identical booking was already submitted recently. Please wait a few minutes before retrying.',
       })
     }
 

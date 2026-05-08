@@ -178,6 +178,7 @@ export default async function handler(req, res) {
     const email = normalizeEmail(body.email)
     const city = required(body.city)
     const termsAccepted = !!body.termsAccepted
+    const humanConfirmed = !!body.humanConfirmed
     let companyTermsAcceptedAt = new Date().toISOString()
     if (body.termsAcceptedAt) {
       const d = new Date(body.termsAcceptedAt)
@@ -204,8 +205,11 @@ export default async function handler(req, res) {
     if (honeypot) {
       return json(res, 400, { error: 'Security verification failed. Please retry the form.' })
     }
-    if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < 3000) {
-      return json(res, 400, { error: 'Please wait a few seconds before submitting.' })
+    if (!humanConfirmed) {
+      return json(res, 400, { error: 'Please confirm you are a real person.' })
+    }
+    if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < 1000) {
+      return json(res, 400, { error: 'Please wait a moment before submitting.' })
     }
     if (!termsAccepted) {
       return json(res, 400, { error: 'Terms must be accepted.' })
@@ -243,30 +247,6 @@ export default async function handler(req, res) {
     const supabase = makeSupabaseServiceClient()
     const origin = getOriginFromReq(req)
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
-
-    {
-      let repeatCount = 0
-      try {
-        repeatCount = await countAbuseEvents(supabase, {
-          action: 'company_registration_submit',
-          sinceIso: tenMinutesAgo,
-          contactKey,
-        })
-      } catch (sigErr) {
-        console.error('[register-company:repeat-signature]', sigErr)
-      }
-      if (repeatCount >= 1) {
-        await logBlockedRegistration(supabase, {
-          ipAddress,
-          reason: 'duplicate_identical_within_10m',
-          extra: { signature: contactKey },
-        })
-        return json(res, 429, {
-          error: 'This registration was already submitted recently. Please wait before retrying.',
-        })
-      }
-    }
 
     if (ipAddress !== 'unknown') {
       let perIpCount = 0
@@ -285,7 +265,7 @@ export default async function handler(req, res) {
           reason: 'rate_limit_ip_3_per_hour',
         })
         return json(res, 429, {
-          error: 'Too many registration attempts from this IP. Please try again in about one hour.',
+          error: 'Too many attempts. Please try again later.',
         })
       }
     }
@@ -321,8 +301,7 @@ export default async function handler(req, res) {
       .maybeSingle()
     if (existingBySlug) {
       return json(res, 409, {
-        error:
-          'That company name produces a subdomain already taken. Slightly change the company name and try again.',
+        error: 'This subdomain is already taken. Please adjust your company name slightly.',
       })
     }
 
@@ -334,7 +313,7 @@ export default async function handler(req, res) {
       .maybeSingle()
     if (existingByEmail) {
       return json(res, 409, {
-        error: 'A company registration with this email already exists.',
+        error: 'This email is already used for another company.',
       })
     }
     let dupRows
@@ -350,15 +329,7 @@ export default async function handler(req, res) {
     )
     if (vatTaken) {
       return json(res, 409, {
-        error: 'This VAT number is already registered on TAXIO.',
-      })
-    }
-    const phoneTaken = dupRows.some(
-      (r) => normalizePhoneForCompare(r.phone) === normalizedPhone
-    )
-    if (phoneTaken) {
-      return json(res, 409, {
-        error: 'This phone number is already registered on TAXIO.',
+        error: 'This VAT number is already registered.',
       })
     }
 
