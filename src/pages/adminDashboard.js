@@ -13,6 +13,7 @@ import {
   setCompanySubscriptionPlan,
   updateCompanyAsAdmin,
   deleteCompanyAsAdmin,
+  adminSendCommunicationEmail,
   devCleanupTestCompanies,
 } from '../lib/api.js'
 import { slugFromCompanyName } from '../lib/slug.js'
@@ -30,6 +31,7 @@ const adminState = {
   commSearch: '',
   commTemplate:
     'Hello {company_name},\n\nWe have an update for your TAXIO account.\nStatus: {status}\nCity: {city}\nBooking page: {booking_url}\nLogin: {login_url}',
+  commSubject: 'Update from TAXIO',
   /** whatsapp | email */
   commChannel: 'whatsapp',
 }
@@ -307,6 +309,9 @@ export async function mountAdminDashboard(root) {
   }
   if (adminState.commChannel !== 'whatsapp' && adminState.commChannel !== 'email') {
     adminState.commChannel = 'whatsapp'
+  }
+  if (!String(adminState.commSubject || '').trim()) {
+    adminState.commSubject = 'Update from TAXIO'
   }
   const tab = adminState.tab
   const tabBtn = (id, label) =>
@@ -684,9 +689,18 @@ export async function mountAdminDashboard(root) {
                   </label>
                   <label class="flex flex-1 cursor-pointer items-center gap-2 rounded-xl border border-slate-600/80 bg-slate-900/40 px-3 py-2 text-sm text-slate-500 transition hover:border-slate-500 ${adminState.commChannel === 'email' ? 'border-amber-400/45 bg-slate-800/70 text-slate-300 ring-1 ring-amber-400/20' : ''}">
                     <input type="radio" name="adm-comm-channel" value="email" class="text-amber-500 focus:ring-amber-400/40" ${adminState.commChannel === 'email' ? 'checked' : ''} />
-                    Email <span class="text-xs font-normal text-slate-500">(soon)</span>
+                    Email
                   </label>
                 </div>
+
+                ${
+                  adminState.commChannel === 'email'
+                    ? `<label class="mt-4 block">
+                  <span class="text-[11px] font-medium text-slate-500">Email subject</span>
+                  <input id="adm-comm-subject" type="text" maxlength="160" value="${escapeHtml(adminState.commSubject || '')}" class="mt-1.5 w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-sm text-white shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20" placeholder="Update from TAXIO" />
+                </label>`
+                    : ''
+                }
 
                 <label class="mt-4 block">
                   <span class="text-[11px] font-medium text-slate-500">Template preset</span>
@@ -731,8 +745,16 @@ export async function mountAdminDashboard(root) {
 
               <div class="max-lg:fixed max-lg:bottom-0 max-lg:left-0 max-lg:right-0 max-lg:z-40 max-lg:border-t max-lg:border-slate-700/80 max-lg:bg-slate-900/95 max-lg:px-4 max-lg:py-3 max-lg:pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-lg:backdrop-blur-md lg:static lg:border-0 lg:bg-transparent lg:p-0">
                 <button type="button" id="adm-comm-open-wa" ${adminState.commChannel !== 'whatsapp' ? 'disabled' : ''} class="w-full rounded-2xl bg-amber-400 py-3.5 text-base font-bold tracking-tight text-slate-900 shadow-lg shadow-amber-900/30 transition hover:bg-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-45">Open WhatsApp Messages</button>
-                <p class="mt-2 hidden text-center text-[11px] text-slate-500 max-lg:block">Opens <span class="font-mono text-slate-400">wa.me</span> one company at a time.</p>
-                <p class="mt-2 text-center text-[11px] text-slate-500 max-lg:hidden">Opens <code class="rounded bg-slate-800 px-1 py-0.5 font-mono text-slate-400">https://wa.me/&lt;number&gt;?text=…</code> sequentially.</p>
+                ${
+                  adminState.commChannel === 'email'
+                    ? '<button type="button" id="adm-comm-send-email" class="mt-2 w-full rounded-2xl bg-sky-500 py-3.5 text-base font-bold tracking-tight text-white shadow-lg shadow-sky-900/30 transition hover:bg-sky-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">Send Email</button>'
+                    : ''
+                }
+                ${
+                  adminState.commChannel === 'email'
+                    ? '<p class="mt-2 text-center text-[11px] text-slate-500">Sends one personalized email per selected company via server-side Resend.</p>'
+                    : '<p class="mt-2 hidden text-center text-[11px] text-slate-500 max-lg:block">Opens <span class="font-mono text-slate-400">wa.me</span> one company at a time.</p><p class="mt-2 text-center text-[11px] text-slate-500 max-lg:hidden">Opens <code class="rounded bg-slate-800 px-1 py-0.5 font-mono text-slate-400">https://wa.me/&lt;number&gt;?text=…</code> sequentially.</p>'
+                }
               </div>
             </div>
           </div>
@@ -1140,6 +1162,10 @@ export async function mountAdminDashboard(root) {
     refreshCommPreview()
   })
 
+  root.querySelector('#adm-comm-subject')?.addEventListener('input', (e) => {
+    adminState.commSubject = String(e.target.value || '')
+  })
+
   root.querySelector('#adm-comm-open-wa')?.addEventListener('click', async () => {
     if (adminState.commChannel !== 'whatsapp') {
       showMsg('Email sending is not available yet. Choose WhatsApp.')
@@ -1189,6 +1215,106 @@ export async function mountAdminDashboard(root) {
     if (opened > 0) showMsg(`Opened ${opened} WhatsApp draft(s). Remember to press Send in each chat.`)
     else if (!skipped.length) showMsg('No WhatsApp tabs opened.')
     else showMsg(`Skipped ${skipped.length} row(s). See list below the preview.`)
+  })
+
+  root.querySelector('#adm-comm-send-email')?.addEventListener('click', async () => {
+    if (adminState.commChannel !== 'email') {
+      showMsg('Choose Email channel first.')
+      return
+    }
+    const subject = String(adminState.commSubject || '').trim()
+    if (!subject) {
+      showMsg('Email subject cannot be empty.')
+      return
+    }
+    const template = String(adminState.commTemplate || '').trim()
+    if (!template) {
+      showMsg('Message template cannot be empty.')
+      return
+    }
+    const selectedIds = [...(adminState.commSelected || [])]
+    if (!selectedIds.length) {
+      showMsg('Select at least one company.')
+      return
+    }
+
+    const origin = window.location.origin
+    const recipients = []
+    const preSkipped = []
+    for (const id of selectedIds) {
+      const company = companies.find((c) => c.id === id)
+      if (!company) continue
+      const email = String(company.email || '').trim()
+      if (!email) {
+        preSkipped.push(String(company.name || id))
+        continue
+      }
+      recipients.push({
+        email,
+        subject,
+        message: fillCommTemplate(company, template, origin),
+      })
+    }
+    if (!recipients.length) {
+      showMsg('No selected company has a valid email.')
+      return
+    }
+    if (
+      !window.confirm(
+        `Send ${recipients.length} email(s)?\n\nSubject: ${subject}\n\nThis sends individual emails to selected companies.`
+      )
+    )
+      return
+
+    const btn = root.querySelector('#adm-comm-send-email')
+    if (btn) btn.disabled = true
+    const { data, error } = await adminSendCommunicationEmail({
+      recipients,
+      subject,
+      message: template,
+    })
+    if (btn) btn.disabled = false
+    if (error) {
+      showMsg(error.message)
+      return
+    }
+
+    const sent = Number(data?.sent || 0)
+    const failed = Array.isArray(data?.failed) ? data.failed : []
+    const skipped = Array.isArray(data?.skipped) ? data.skipped : []
+    const totalSkipped = preSkipped.length + skipped.length
+    showMsg(
+      `Email sent: ${sent}. Skipped: ${totalSkipped}. Failed: ${failed.length}.`
+    )
+
+    const skipEl = root.querySelector('#adm-comm-skipped')
+    if (skipEl) {
+      const parts = []
+      if (preSkipped.length) {
+        parts.push(`Missing company email: ${preSkipped.join('; ')}`)
+      }
+      if (skipped.length) {
+        parts.push(
+          `Skipped by API: ${skipped
+            .map((s) => `${s.email || 'unknown'} (${s.reason || 'skipped'})`)
+            .join('; ')}`
+        )
+      }
+      if (failed.length) {
+        parts.push(
+          `Failed: ${failed
+            .map((f) => `${f.email || 'unknown'} (${f.error || 'send_failed'})`)
+            .join('; ')}`
+        )
+      }
+      if (parts.length) {
+        skipEl.textContent = parts.join(' | ')
+        skipEl.classList.remove('hidden')
+      } else {
+        skipEl.classList.add('hidden')
+        skipEl.textContent = ''
+      }
+    }
   })
 
   root.querySelectorAll('[data-adm]').forEach((btn) => {

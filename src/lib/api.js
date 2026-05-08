@@ -427,6 +427,44 @@ export async function deleteCompanyAsAdmin(companyId) {
   return { error: null }
 }
 
+export async function adminSendCommunicationEmail(payload) {
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return { data: null, error: new Error('You must be signed in as admin.') }
+
+  const res = await fetch(apiUrl('/api/admin-send-communication-email'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload || {}),
+  })
+
+  const raw = await res.text()
+  let jsonBody = {}
+  try {
+    jsonBody = raw ? JSON.parse(raw) : {}
+  } catch {
+    const snippet = raw.replace(/\s+/g, ' ').trim().slice(0, 120)
+    return {
+      data: null,
+      error: new Error(
+        snippet
+          ? `Email send failed (HTTP ${res.status}): ${snippet}`
+          : `Email send failed (HTTP ${res.status}).`
+      ),
+    }
+  }
+  if (!res.ok) {
+    return {
+      data: null,
+      error: new Error(jsonBody.error || `Email send failed (HTTP ${res.status}).`),
+    }
+  }
+  return { data: jsonBody, error: null }
+}
+
 /**
  * Dev-only bulk cleanup (requires server TAXIO_DEV_CLEANUP_ENABLED=true).
  */
