@@ -76,6 +76,13 @@ export function escapeHtmlEmail(s) {
 
 const DEFAULT_MAIL_FROM_AUTOMATED = 'TAXIO <noreply@taxio.be>'
 const DEFAULT_MAIL_FROM_ADMIN_COMM = 'TAXIO Team <info@taxio.be>'
+const DEFAULT_MAIL_REPLY_TO = 'humantargetservices@gmail.com'
+
+/** Reply-To on all outbound mail (automated + admin communication). Resend: `replyTo`. */
+export function resolveMailReplyTo() {
+  const explicit = String(process.env.MAIL_REPLY_TO || '').trim()
+  return explicit || DEFAULT_MAIL_REPLY_TO
+}
 
 /** Registration, approvals, password flows, booking notices, etc. */
 export function resolveAutomatedMailFrom() {
@@ -96,11 +103,13 @@ export function resolveAdminCommunicationMailFrom() {
 }
 
 /**
- * @param {{ to: string, subject: string, html: string, from?: string }} opts
+ * @param {{ to: string, subject: string, html: string, from?: string, replyTo?: string }} opts
  * If `from` is omitted, uses {@link resolveAutomatedMailFrom}.
+ * If `replyTo` is omitted, uses {@link resolveMailReplyTo}.
  */
-export async function safeSendEmail({ to, subject, html, from }) {
+export async function safeSendEmail({ to, subject, html, from, replyTo }) {
   const resolvedFrom = String(from ?? '').trim() || resolveAutomatedMailFrom()
+  const resolvedReplyTo = String(replyTo ?? '').trim() || resolveMailReplyTo()
   if (!to || !resolvedFrom) {
     const reason = !resolvedFrom ? 'missing_mail_from' : 'missing_recipient'
     console.warn('[mail:skip] Missing recipient or sender FROM', {
@@ -123,7 +132,13 @@ export async function safeSendEmail({ to, subject, html, from }) {
     }
   }
   try {
-    const result = await resend.emails.send({ from: resolvedFrom, to, subject, html })
+    const result = await resend.emails.send({
+      from: resolvedFrom,
+      to,
+      subject,
+      html,
+      replyTo: resolvedReplyTo,
+    })
     if (result?.error) {
       console.error('[mail:error:resend-response]', result.error)
       return {
