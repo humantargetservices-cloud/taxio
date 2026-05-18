@@ -72,12 +72,7 @@ export function mountLanding(root) {
     <div class="container mx-auto max-w-5xl">
       <div class="mb-10 text-center sm:mb-12">
         <div class="mb-6 flex flex-col items-center gap-5 sm:mb-8">
-          <div class="relative sm:h-[4.5rem] sm:w-[4.5rem]">
-            ${taxioLogoImg('h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]')}
-            <div class="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-500 shadow-sm">
-              ${icon.zap('h-2.5 w-2.5 text-white')}
-            </div>
-          </div>
+          ${taxioLogoImg('h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]')}
           <div class="max-w-2xl space-y-4">
             <p class="text-xs font-semibold uppercase tracking-[0.2em] ${t ? 'text-yellow-400/90' : 'text-amber-700/80'}">TAXIO</p>
             <h1 class="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl ${t ? 'text-white' : 'text-slate-900'}">${o.title}</h1>

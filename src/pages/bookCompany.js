@@ -397,7 +397,7 @@ function bookingCompanyPhotoHtml(company) {
   }
   return `<div class="relative h-28 w-28 shrink-0 overflow-hidden rounded-2xl bg-slate-800 shadow-[0_12px_40px_rgba(0,0,0,0.35)] ring-2 ring-amber-400/25 ring-offset-2 ring-offset-slate-100 dark:ring-offset-[#0c0e12] sm:h-32 sm:w-32">
     <img src="${escapeHtml(src)}" alt="" class="bk-company-photo-img h-full w-full object-cover" loading="lazy" decoding="async" />
-    <div class="bk-company-photo-fallback absolute inset-0 hidden items-center justify-center bg-slate-900/90">${taxioLogoImg('h-20 w-20 sm:h-24 sm:w-24')}</div>
+    <div class="bk-company-photo-fallback absolute inset-0 hidden items-center justify-center">${taxioLogoImg('h-20 w-20 sm:h-24 sm:w-24')}</div>
   </div>`
 }
 

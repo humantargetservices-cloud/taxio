@@ -179,12 +179,7 @@ export async function mountTaxiDirectory(root) {
 
     <div class="mt-8 text-center sm:mt-10">
       <div class="mx-auto mb-6 flex flex-col items-center gap-4">
-        <div class="relative sm:h-[4.5rem] sm:w-[4.5rem]">
-          ${taxioLogoImg('h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]')}
-          <div class="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-500 shadow-sm dark:border-slate-900">
-            ${icon.zap('h-2.5 w-2.5 text-white')}
-          </div>
-        </div>
+        ${taxioLogoImg('h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]')}
         <div class="max-w-2xl space-y-3">
           <p class="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700/90 dark:text-yellow-400/90">TAXIO</p>
           <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">${escapeHtml(d.eyebrow)}</p>

@@ -245,7 +245,7 @@ export async function mountDashboardCompany(root) {
     const slogan = company.slogan || 'Fast & Reliable Service'
     const logoPreviewInner = logoOk
       ? `<img id="dash-logo-preview-img" src="${logoSrcEsc}" alt="" class="h-full w-full object-cover" decoding="async" />`
-      : `<div class="flex h-full w-full items-center justify-center bg-slate-900">${taxioLogoImg('h-16 w-16')}</div>`
+      : `<div class="flex h-full w-full items-center justify-center">${taxioLogoImg('h-16 w-16')}</div>`
     bodyHtml = `
       <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
         <h2 class="text-lg font-bold text-gray-900">${td.essentialHead}</h2>
@@ -409,7 +409,7 @@ export async function mountDashboardCompany(root) {
               logoOk
                 ? `<div class="relative flex h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-gray-100 shadow-sm ring-1 ring-gray-200/80">
               <img src="${logoSrcEsc}" alt="" class="dash-header-logo-img h-full w-full object-cover" decoding="async" />
-              <div class="dash-header-logo-fallback absolute inset-0 hidden items-center justify-center bg-slate-900">${taxioLogoImg('h-10 w-10')}</div>
+              <div class="dash-header-logo-fallback absolute inset-0 hidden items-center justify-center">${taxioLogoImg('h-10 w-10')}</div>
             </div>`
                 : `<div class="flex h-14 w-14 shrink-0 items-center justify-center">
               ${taxioLogoImg('h-14 w-14')}

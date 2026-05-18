@@ -77,7 +77,7 @@ export function featureIcon(name, cls) {
     case 'qr':
       return icon.sparkles(cls)
     case 'dashboard':
-      return taxioLogoMark({ wrapClass: cls, padDark: false })
+      return taxioLogoMark({ wrapClass: cls })
     case 'support':
       return icon.users(cls)
     default:
