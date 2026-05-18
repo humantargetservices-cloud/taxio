@@ -1,3 +1,5 @@
+import { taxioLogoMark } from './taxioLogo.js'
+
 /** Shared SVG icons (Lucide-style paths) — same visuals as the landing page. */
 export const icon = {
   car: (c) =>
@@ -75,7 +77,7 @@ export function featureIcon(name, cls) {
     case 'qr':
       return icon.sparkles(cls)
     case 'dashboard':
-      return icon.car(cls)
+      return taxioLogoMark({ wrapClass: cls, padDark: false })
     case 'support':
       return icon.users(cls)
     default:

@@ -11,6 +11,7 @@ import {
 } from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
+import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
 import { tBooking } from '../i18n.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
@@ -392,11 +393,11 @@ function bookingCompanyPhotoHtml(company) {
   const allowed = /^https?:\/\//i.test(raw) || (raw.startsWith('/') && !raw.startsWith('//'))
   const src = allowed ? raw : ''
   if (!src) {
-    return `<div class="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500 shadow-[0_12px_40px_rgba(251,191,36,0.25)] ring-2 ring-amber-400/35 sm:h-32 sm:w-32">${icon.car('h-14 w-14 text-slate-900 sm:h-16 sm:w-16')}</div>`
+    return `<div class="flex h-28 w-28 shrink-0 items-center justify-center sm:h-32 sm:w-32">${taxioLogoImg('h-28 w-28 sm:h-32 sm:w-32')}</div>`
   }
   return `<div class="relative h-28 w-28 shrink-0 overflow-hidden rounded-2xl bg-slate-800 shadow-[0_12px_40px_rgba(0,0,0,0.35)] ring-2 ring-amber-400/25 ring-offset-2 ring-offset-slate-100 dark:ring-offset-[#0c0e12] sm:h-32 sm:w-32">
     <img src="${escapeHtml(src)}" alt="" class="bk-company-photo-img h-full w-full object-cover" loading="lazy" decoding="async" />
-    <div class="bk-company-photo-fallback absolute inset-0 hidden items-center justify-center bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500">${icon.car('h-14 w-14 text-slate-900 sm:h-16 sm:w-16')}</div>
+    <div class="bk-company-photo-fallback absolute inset-0 hidden items-center justify-center bg-slate-900/90">${taxioLogoImg('h-20 w-20 sm:h-24 sm:w-24')}</div>
   </div>`
 }
 

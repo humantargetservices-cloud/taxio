@@ -20,6 +20,7 @@ import { slugFromCompanyName } from '../lib/slug.js'
 import { isPlatformAdmin, signOutEverywhere } from '../lib/auth.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
+import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 
 const adminState = {
@@ -789,7 +790,7 @@ export async function mountAdminDashboard(root) {
       <header class="bg-gradient-to-r from-violet-600 via-purple-600 to-violet-700 px-4 py-6 shadow-lg">
         <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
           <div class="flex items-center gap-3">
-            ${icon.shield('h-10 w-10 text-white')}
+            ${taxioLogoImg('h-10 w-10')}
             <div>
               <h1 class="text-xl font-bold text-white md:text-2xl">Platform Admin Dashboard</h1>
               <p class="text-sm text-white/80">Subscription &amp; company management</p>

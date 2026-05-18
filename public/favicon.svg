@@ -1,11 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="TAXIO">
-  <defs>
-    <linearGradient id="tx" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#fbbf24"/>
-      <stop offset="100%" stop-color="#f59e0b"/>
-    </linearGradient>
-  </defs>
-  <rect width="32" height="32" rx="8" fill="url(#tx)"/>
-  <rect x="5" y="7.5" width="22" height="4.5" rx="1" fill="#0f172a"/>
-  <rect x="13.25" y="7.5" width="5.5" height="17" rx="1" fill="#0f172a"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="TAXIO logo">
+  <rect width="32" height="32" rx="7" fill="#0f172a"/>
+  <rect x="17.2" y="2" width="12.8" height="12.8" rx="1.8" fill="#F5C400"/>
+  <rect x="12.2" y="12.2" width="7.6" height="7.6" rx="1.2" fill="#F5C400"/>
+  <path
+    fill="#F5C400"
+    fill-rule="evenodd"
+    d="M16 3.5 3.5 16 16 28.5 28.5 16 16 3.5zm0 4.2 8.3 8.3-8.3 8.3-8.3-8.3 8.3-8.3zM17.2 2h12.8v12.8H17.2V2z"
+  />
 </svg>

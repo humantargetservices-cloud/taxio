@@ -3,6 +3,7 @@ import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { listApprovedCompaniesDirectory } from '../lib/api.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
+import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 import { absolutePublicBookingUrl, bookPathFromSlug } from '../lib/tenant.js'
 
@@ -76,7 +77,7 @@ function renderCompanyGridItem(c, d, tb) {
   return `<li class="flex h-full min-h-[14.5rem] flex-col rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700/80 dark:bg-slate-800/50 dark:ring-white/[0.06] dark:hover:bg-slate-800/70">
     <div class="flex flex-1 flex-col gap-5">
       <div class="flex items-start gap-4">
-        <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500 shadow-md ring-2 ring-amber-400/25 ring-offset-2 ring-offset-white dark:ring-offset-slate-900">${icon.car('h-7 w-7 text-slate-900')}</div>
+        <div class="flex h-14 w-14 shrink-0 items-center justify-center">${taxioLogoImg('h-14 w-14')}</div>
         <div class="min-w-0 flex-1 text-left">
           <div class="flex flex-wrap items-start justify-between gap-2">
             <p class="text-lg font-bold leading-tight tracking-tight text-slate-900 dark:text-white">${escapeHtml(c.name)}</p>
@@ -100,7 +101,7 @@ function renderCompanyRow(c, d, tb) {
   const { label: statusLabel, dot } = dirCompanyStatus(c, tb)
   return `<li class="flex flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white px-5 py-4 shadow-sm ring-1 ring-slate-900/[0.03] transition hover:border-amber-200/90 hover:shadow dark:border-slate-700/80 dark:bg-slate-800/40 dark:ring-white/[0.05] sm:flex-row sm:items-center sm:justify-between sm:gap-5">
     <div class="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
-      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-yellow-500 shadow-sm ring-1 ring-black/5 dark:ring-white/10">${icon.car('h-5 w-5 text-slate-900')}</div>
+      <div class="flex h-11 w-11 shrink-0 items-center justify-center">${taxioLogoImg('h-11 w-11')}</div>
       <div class="min-w-0 flex-1 text-left">
         <p class="font-bold tracking-tight text-slate-900 dark:text-white">${escapeHtml(c.name)}</p>
         <p class="mt-0.5 text-sm font-medium text-slate-600 dark:text-slate-400">${escapeHtml(loc)}</p>
@@ -178,8 +179,8 @@ export async function mountTaxiDirectory(root) {
 
     <div class="mt-8 text-center sm:mt-10">
       <div class="mx-auto mb-6 flex flex-col items-center gap-4">
-        <div class="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-400 shadow-lg ring-1 ring-black/5 dark:ring-white/10 sm:h-[4.5rem] sm:w-[4.5rem]">
-          ${icon.car('h-9 w-9 text-slate-900')}
+        <div class="relative sm:h-[4.5rem] sm:w-[4.5rem]">
+          ${taxioLogoImg('h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]')}
           <div class="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-500 shadow-sm dark:border-slate-900">
             ${icon.zap('h-2.5 w-2.5 text-white')}
           </div>

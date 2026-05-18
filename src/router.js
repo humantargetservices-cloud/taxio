@@ -15,11 +15,12 @@ import { mountTerms, mountPrivacy, mountCompanyTerms, mountContact } from './pag
 import { mountTaxiDirectory } from './pages/taxiDirectory.js'
 import { resolveBookSlugForRouter } from './lib/tenant.js'
 import { getLocale, syncDocumentLang } from './lib/locale.js'
+import { taxioLogoImg } from './lib/taxioLogo.js'
 
 function mountNotFound(root) {
   root.innerHTML = `
     <div class="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
-      <p class="text-slate-900 text-xl font-bold mb-2">TAXIO</p>
+      <div class="mb-4">${taxioLogoImg('h-14 w-14')}</div>
       <p class="text-gray-600 mb-6">Page not found.</p>
       <a href="/" class="text-yellow-600 font-semibold hover:underline">Back home</a>
     </div>`

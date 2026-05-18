@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js'
 import { icon } from '../lib/icons.js'
+import { taxioLogoImgOnLight } from '../lib/taxioLogo.js'
 
 const NEUTRAL_SUCCESS =
   'If an account exists for this email, a password reset link has been sent.'
@@ -15,8 +16,8 @@ export function mountForgotPasswordCompany(root) {
 
         <div class="mt-10 rounded-2xl border border-gray-200/80 bg-white p-8 shadow-xl md:p-10">
           <div class="mb-8 flex items-center gap-4">
-            <div class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-emerald-100 shadow-inner">
-              ${icon.car('h-8 w-8 text-emerald-700')}
+            <div class="flex h-16 w-16 shrink-0 items-center justify-center">
+              ${taxioLogoImgOnLight('h-16 w-16')}
             </div>
             <div>
               <h1 class="text-2xl font-bold text-gray-900">Reset password</h1>

@@ -2,6 +2,7 @@ import { navigate } from '../nav.js'
 import { signInWithPassword } from '../lib/api.js'
 import { isPlatformAdmin } from '../lib/auth.js'
 import { icon } from '../lib/icons.js'
+import { taxioLogoImgOnLight } from '../lib/taxioLogo.js'
 
 export function mountAdminLogin(root) {
   root.innerHTML = `
@@ -40,7 +41,7 @@ export function mountAdminLogin(root) {
 
           <p class="text-center text-sm text-gray-600">Show taxi companies what their website will look like:</p>
           <a href="/book/demo" class="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border-2 border-gray-200 bg-white py-3.5 text-sm font-semibold text-gray-900 shadow-sm hover:bg-gray-50">
-            ${icon.car('h-5 w-5 text-gray-700')}
+            ${taxioLogoImgOnLight('h-8 w-8')}
             View Demo Booking Page
             ${icon.externalLink('h-4 w-4 text-gray-400')}
           </a>

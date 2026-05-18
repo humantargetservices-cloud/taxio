@@ -2,6 +2,7 @@ import { translations } from '../i18n.js'
 import { escapeHtml } from '../lib/html.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { icon, featureIcon } from '../lib/icons.js'
+import { taxioLogoImg, taxioLogoImgOnLight } from '../lib/taxioLogo.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 
 let lang = getLocale()
@@ -71,8 +72,8 @@ export function mountLanding(root) {
     <div class="container mx-auto max-w-5xl">
       <div class="mb-10 text-center sm:mb-12">
         <div class="mb-6 flex flex-col items-center gap-5 sm:mb-8">
-          <div class="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-400 shadow-lg ring-1 ring-black/5 sm:h-[4.5rem] sm:w-[4.5rem]">
-            ${icon.car('h-9 w-9 text-slate-900')}
+          <div class="relative sm:h-[4.5rem] sm:w-[4.5rem]">
+            ${taxioLogoImg('h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]')}
             <div class="absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-emerald-500 shadow-sm">
               ${icon.zap('h-2.5 w-2.5 text-white')}
             </div>
@@ -102,8 +103,8 @@ export function mountLanding(root) {
 
         <div class="flex flex-col rounded-2xl border shadow-sm transition-shadow hover:shadow-md ${t ? 'border-slate-700/80 bg-slate-800/60' : 'border-slate-200/90 bg-white'}">
           <div class="flex flex-1 flex-col px-6 pt-8 pb-4 text-center">
-            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl shadow-sm ring-1 ring-white/10 ${t ? 'bg-slate-700' : 'bg-slate-900'}">
-              ${icon.car('h-7 w-7 text-white')}
+            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center">
+              ${taxioLogoImg('h-14 w-14')}
             </div>
             <h4 class="mb-2 text-lg font-semibold tracking-tight ${t ? 'text-white' : 'text-gray-900'}">${o.loginCard.title}</h4>
             <p class="text-sm leading-relaxed ${t ? 'text-gray-400' : 'text-gray-600'}">${o.loginCard.desc}</p>
