@@ -1,9 +1,9 @@
-import taxioLogoUrl from '../assets/images/logo/taxio-logo.svg'
+import taxioLogoUrl from '../assets/images/logo/taxio-logo.png'
 
 export const TAXIO_LOGO_ALT = 'TAXIO logo'
 
 /**
- * Official TAXIO mark (transparent SVG). No badges, frames, or background fills.
+ * Official TAXIO mark (transparent PNG, original artwork). Platform branding only.
  *
  * @param {{ wrapClass?: string, imgClass?: string }} [opts]
  */

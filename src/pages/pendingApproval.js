@@ -2,7 +2,6 @@ import { navigate } from '../nav.js'
 import { getSession, getCompanyForUser } from '../lib/api.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
-import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 
 function loadingShell() {
@@ -34,8 +33,8 @@ export async function mountPendingApproval(root) {
     root.innerHTML = `
       <div class="min-h-screen flex flex-col items-center justify-center px-4 py-10 ${dark ? 'bg-slate-900' : 'bg-gradient-to-br from-blue-50 to-indigo-100'}">
         <div class="max-w-lg rounded-xl border-2 ${dark ? 'border-slate-700 bg-slate-800' : 'border-gray-100 bg-white'} p-8 text-center shadow-2xl">
-          <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center">
-            ${taxioLogoImg('h-16 w-16')}
+          <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg ${dark ? 'bg-yellow-400' : 'bg-gradient-to-br from-blue-500 to-indigo-600'}">
+            ${icon.building2(dark ? 'h-8 w-8 text-slate-900' : 'h-8 w-8 text-white')}
           </div>
           <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Pending approval</h1>
           <p class="mt-3 text-gray-600 dark:text-gray-400">
@@ -97,8 +96,8 @@ export async function mountPendingApproval(root) {
   root.innerHTML = `
     <div class="min-h-screen flex flex-col items-center justify-center px-4 py-10 ${dark ? 'bg-slate-900' : 'bg-gradient-to-br from-blue-50 to-indigo-100'}">
       <div class="max-w-lg rounded-xl border-2 ${dark ? 'border-slate-700 bg-slate-800' : 'border-gray-100 bg-white'} p-8 text-center shadow-2xl">
-        <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center">
-          ${taxioLogoImg('h-16 w-16')}
+        <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg ${dark ? 'bg-yellow-400' : 'bg-gradient-to-br from-blue-500 to-indigo-600'}">
+          ${icon.building2(dark ? 'h-8 w-8 text-slate-900' : 'h-8 w-8 text-white')}
         </div>
         <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Pending approval</h1>
         <p class="mt-3 text-gray-600 dark:text-gray-400">

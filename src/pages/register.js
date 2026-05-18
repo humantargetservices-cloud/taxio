@@ -5,7 +5,6 @@ import { signOutEverywhere } from '../lib/auth.js'
 import { translations } from '../i18n.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { icon } from '../lib/icons.js'
-import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { slugFromCompanyName } from '../lib/slug.js'
 
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
@@ -97,8 +96,8 @@ export function mountRegister(root) {
     <div class="mx-auto max-w-2xl">
       <div class="rounded-2xl border ${dark ? 'border-slate-700/80 bg-slate-800/90' : 'border-slate-200/90 bg-white'} p-6 shadow-lg ring-1 ring-black/[0.04] md:p-9">
         <div class="mb-8 flex flex-col gap-4 md:flex-row md:items-center">
-          <div class="flex h-14 w-14 shrink-0 items-center justify-center">
-            ${taxioLogoImg('h-14 w-14')}
+          <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl shadow-sm ring-1 ring-black/5 ${dark ? 'bg-amber-400' : 'bg-gradient-to-br from-slate-800 to-slate-900'}">
+            ${icon.building2(dark ? 'h-7 w-7 text-slate-900' : 'h-7 w-7 text-white')}
           </div>
           <div>
             <p class="text-xs font-semibold uppercase tracking-wider ${dark ? 'text-amber-400/90' : 'text-amber-800/80'}">${R.registerEyebrow || 'TAXIO'}</p>

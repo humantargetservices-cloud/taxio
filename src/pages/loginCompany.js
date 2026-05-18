@@ -3,7 +3,6 @@ import { translations, tBooking } from '../i18n.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { signInWithPassword, getCompanyForUser, getMyProfile } from '../lib/api.js'
 import { icon } from '../lib/icons.js'
-import { taxioLogoImgOnLight } from '../lib/taxioLogo.js'
 import { escapeHtml } from '../lib/html.js'
 
 export function mountLoginCompany(root) {
@@ -32,8 +31,8 @@ export function mountLoginCompany(root) {
 
         <div class="mt-8 rounded-2xl border border-slate-200/90 bg-white p-8 shadow-lg ring-1 ring-slate-900/[0.04] md:mt-10 md:p-10">
           <div class="mb-8 flex items-start gap-4">
-            <div class="flex h-14 w-14 shrink-0 items-center justify-center">
-              ${taxioLogoImgOnLight('h-14 w-14')}
+            <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-emerald-50 shadow-sm ring-1 ring-emerald-100">
+              ${icon.building2('h-7 w-7 text-emerald-700')}
             </div>
             <div class="min-w-0 pt-0.5">
               <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">${LP.eyebrow}</p>
