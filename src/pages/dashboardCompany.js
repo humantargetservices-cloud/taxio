@@ -20,7 +20,12 @@ import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
-import { companyHourlyFromRecord } from '../lib/companyHourly.js'
+import {
+  BOOKING_CAR_TYPE_ORDER,
+  defaultCompanyPricing,
+  resolveBookingCarTypes,
+} from '../lib/bookingCarTypes.js'
+import { companyHourlyFromRecord, pricingWithHourlyEmbed } from '../lib/companyHourly.js'
 
 const dashState = {
   tab: 'overview',
@@ -29,9 +34,29 @@ const dashState = {
 }
 
 function pricingOf(company) {
-  const p = company.pricing
-  if (p && typeof p === 'object' && Object.keys(p).length) return p
-  return { ...DEFAULT_PRICING }
+  const p = company?.pricing
+  const hasRows =
+    p &&
+    typeof p === 'object' &&
+    BOOKING_CAR_TYPE_ORDER.some((name) => p[name] && typeof p[name] === 'object')
+  if (!hasRows) return defaultCompanyPricing()
+
+  const out = { ...defaultCompanyPricing() }
+  for (const name of BOOKING_CAR_TYPE_ORDER) {
+    const row = p[name]
+    if (!row || typeof row !== 'object') continue
+    const def = DEFAULT_PRICING[name]
+    out[name] = {
+      enabled: row.enabled === true,
+      start: row.start ?? def.start,
+      per_km: row.per_km ?? def.per_km,
+      initial_km: row.initial_km ?? def.initial_km,
+    }
+  }
+  if (!out.Standard?.enabled) {
+    out.Standard = { enabled: true, ...DEFAULT_PRICING.Standard }
+  }
+  return out
 }
 
 function tabClass(active) {
@@ -240,6 +265,7 @@ export async function mountDashboardCompany(root) {
         <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
           <h2 class="text-lg font-bold text-gray-900">${td.pricingHead}</h2>
           <p class="text-sm text-gray-500">${td.pricingSub}</p>
+          <p class="mt-1 text-xs text-gray-500">${escapeHtml(td.pricingCarTypesHint)}</p>
           <div id="pricing-form-mount" class="mt-6 space-y-4"></div>
           <button type="button" id="save-pricing" class="mt-6 w-full rounded-xl bg-yellow-400 py-3.5 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">${td.savePricing}</button>
         </div>
@@ -262,10 +288,20 @@ export async function mountDashboardCompany(root) {
               </div>
             </div>
           </div>
-          <button type="button" id="save-hourly" class="mt-6 w-full rounded-xl border-2 border-gray-900 bg-gray-900 py-3.5 text-sm font-bold text-white shadow hover:bg-gray-800">${escapeHtml(td.saveHourly)}</button>
+          <p id="dash-hourly-status" class="${hourly.enabled ? '' : 'hidden '}mt-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800" role="status">${hourly.enabled ? escapeHtml(td.hourlySavedOn) : ''}</p>
+          <button type="button" id="save-hourly" class="mt-4 w-full rounded-xl border-2 border-gray-900 bg-gray-900 py-3.5 text-sm font-bold text-white shadow hover:bg-gray-800">${escapeHtml(td.saveHourly)}</button>
         </div>
       </div>`
   } else if (t === 'essential') {
+    const enabledTypeBadges = resolveBookingCarTypes(
+      cars.map((c) => ({ car_type: c.car_type })),
+      company.pricing
+    )
+      .map(
+        (tName) =>
+          `<span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">${escapeHtml(tName)}</span>`
+      )
+      .join('')
     const slogan = company.slogan || 'Fast & Reliable Service'
     const logoPreviewInner = logoOk
       ? `<img id="dash-logo-preview-img" src="${logoSrcEsc}" alt="" class="h-full w-full object-cover" decoding="async" />`
@@ -348,11 +384,7 @@ export async function mountDashboardCompany(root) {
           <div class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div>
               <p class="text-xs text-gray-500 mb-2">${td.carTypes}</p>
-              <div class="flex flex-wrap gap-2">
-                <span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">Standard</span>
-                <span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">Van</span>
-                <span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">Luxury</span>
-              </div>
+              <div class="flex flex-wrap gap-2">${enabledTypeBadges}</div>
             </div>
             <button type="button" data-edit-field="contact" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}${td.edit}</button>
           </div>
@@ -569,14 +601,31 @@ export async function mountDashboardCompany(root) {
 
   if (t === 'pricing') {
     const mount = root.querySelector('#pricing-form-mount')
+
+    function syncPricingFieldPanels() {
+      BOOKING_CAR_TYPE_ORDER.forEach((name) => {
+        const on = !!root.querySelector(`[data-pricing-enable="${name}"]`)?.checked
+        const panel = root.querySelector(`[data-pricing-fields="${name}"]`)
+        if (!panel) return
+        panel.classList.toggle('opacity-50', !on)
+        panel.classList.toggle('pointer-events-none', !on)
+        panel.querySelectorAll('input[data-pcat]').forEach((inp) => {
+          inp.disabled = !on
+        })
+      })
+    }
+
     if (mount) {
-      mount.innerHTML = ['Standard', 'Van', 'Luxury']
-        .map((name) => {
-          const p = pricing[name] || DEFAULT_PRICING[name]
-          return `
+      mount.innerHTML = BOOKING_CAR_TYPE_ORDER.map((name) => {
+        const p = pricing[name] || { enabled: name === 'Standard', ...DEFAULT_PRICING[name] }
+        const enabled = p.enabled === true
+        return `
         <div class="rounded-xl border border-gray-200 p-4">
-          <p class="mb-3 font-bold text-gray-900">${name}</p>
-          <div class="grid grid-cols-3 gap-3">
+          <label class="flex cursor-pointer items-center gap-3">
+            <input type="checkbox" data-pricing-enable="${name}" class="h-5 w-5 rounded border-gray-300 text-yellow-500 focus:ring-yellow-400" ${enabled ? 'checked' : ''} />
+            <span class="text-base font-bold text-gray-900">${escapeHtml(name)}</span>
+          </label>
+          <div data-pricing-fields="${name}" class="mt-4 grid grid-cols-3 gap-3 transition-opacity">
             <div>
               <label class="text-xs text-gray-500">Start</label>
               <input type="text" data-pcat="${name}" data-pfield="start" value="${escapeHtml(p.start)}" class="mt-1 w-full rounded-lg border border-gray-300 px-2 py-2 text-sm" />
@@ -591,27 +640,45 @@ export async function mountDashboardCompany(root) {
             </div>
           </div>
         </div>`
-        })
-        .join('')
-    }
-    root.querySelector('#save-pricing')?.addEventListener('click', async () => {
-      const next = { ...pricing }
-      root.querySelectorAll('[data-pcat]').forEach((inp) => {
-        const cat = inp.getAttribute('data-pcat')
-        const field = inp.getAttribute('data-pfield')
-        if (!next[cat]) next[cat] = {}
-        next[cat][field] = inp.value
+      }).join('')
+      BOOKING_CAR_TYPE_ORDER.forEach((name) => {
+        root.querySelector(`[data-pricing-enable="${name}"]`)?.addEventListener('change', syncPricingFieldPanels)
       })
+      syncPricingFieldPanels()
+    }
+
+    root.querySelector('#save-pricing')?.addEventListener('click', async () => {
+      const next = {}
+      let anyEnabled = false
+      for (const name of BOOKING_CAR_TYPE_ORDER) {
+        const cb = root.querySelector(`[data-pricing-enable="${name}"]`)
+        if (!cb?.checked) continue
+        anyEnabled = true
+        const start = root.querySelector(`[data-pcat="${name}"][data-pfield="start"]`)?.value ?? ''
+        const per_km = root.querySelector(`[data-pcat="${name}"][data-pfield="per_km"]`)?.value ?? ''
+        const initial_km =
+          root.querySelector(`[data-pcat="${name}"][data-pfield="initial_km"]`)?.value ?? ''
+        next[name] = { enabled: true, start, per_km, initial_km }
+      }
+      if (!anyEnabled || !next.Standard) {
+        next.Standard = { enabled: true, ...DEFAULT_PRICING.Standard }
+      }
+      const existing =
+        company.pricing && typeof company.pricing === 'object' ? company.pricing : {}
+      if (existing.__hourly) next.__hourly = existing.__hourly
+
       const { error } = await updateCompanyByOwner(company.id, { pricing: next })
       const m = root.querySelector('#dash-msg')
       if (error) {
+        m.className = 'mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'
         m.textContent = error.message
         m.classList.remove('hidden')
       } else {
         m.className = 'mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800'
-        m.textContent = 'Pricing saved.'
+        m.textContent = td.pricingSaved
         m.classList.remove('hidden')
-        setTimeout(() => mountDashboardCompany(root), 600)
+        dashState.tab = 'pricing'
+        setTimeout(() => mountDashboardCompany(root), 500)
       }
     })
 
@@ -619,20 +686,33 @@ export async function mountDashboardCompany(root) {
       const enabled = !!root.querySelector('#dash-hourly-enabled')?.checked
       const rateEur = Number(root.querySelector('#dash-hourly-rate')?.value)
       const minHours = parseInt(String(root.querySelector('#dash-hourly-min')?.value || ''), 10)
+      const hourlyCfg = { enabled, rateEur, minHours }
+      const pricingPatch = pricingWithHourlyEmbed(company.pricing, hourlyCfg)
       const { error } = await updateCompanyByOwner(company.id, {
         hourly_enabled: enabled,
         hourly_rate_eur: rateEur,
         hourly_min_hours: minHours,
+        pricing: pricingPatch,
       })
       const m = root.querySelector('#dash-msg')
+      const statusEl = root.querySelector('#dash-hourly-status')
       if (error) {
+        m.className = 'mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'
         m.textContent = error.message
         m.classList.remove('hidden')
+        if (statusEl) statusEl.classList.add('hidden')
       } else {
         m.className = 'mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800'
-        m.textContent = 'Hourly service settings saved.'
+        m.textContent = td.hourlySaveSuccess
         m.classList.remove('hidden')
-        setTimeout(() => mountDashboardCompany(root), 600)
+        if (statusEl) {
+          statusEl.textContent = enabled ? td.hourlySavedOn : td.hourlySavedOff
+          statusEl.className =
+            'mt-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800'
+          statusEl.classList.remove('hidden')
+        }
+        dashState.tab = 'pricing'
+        setTimeout(() => mountDashboardCompany(root), 500)
       }
     })
   }

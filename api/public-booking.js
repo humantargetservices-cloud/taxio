@@ -128,12 +128,33 @@ export default async function handler(req, res) {
       return json(res, 400, { error: 'Company not available for booking.' })
     }
 
-    const companyHourlyEnabled = companyRow.hourly_enabled === true
+    const hourlyEmbed =
+      companyRow.pricing &&
+      typeof companyRow.pricing === 'object' &&
+      companyRow.pricing.__hourly &&
+      typeof companyRow.pricing.__hourly === 'object'
+        ? companyRow.pricing.__hourly
+        : null
+    const coerceTruthy = (v) => {
+      if (v === true || v === 1) return true
+      const s = String(v ?? '')
+        .trim()
+        .toLowerCase()
+      return s === 'true' || s === '1' || s === 'yes'
+    }
+    const companyHourlyEnabled =
+      coerceTruthy(companyRow.hourly_enabled) || coerceTruthy(hourlyEmbed?.enabled)
     const companyHourlyRate =
-      Number(companyRow.hourly_rate_eur) > 0 ? Number(companyRow.hourly_rate_eur) : 60
+      Number(companyRow.hourly_rate_eur ?? hourlyEmbed?.rate_eur) > 0
+        ? Number(companyRow.hourly_rate_eur ?? hourlyEmbed?.rate_eur)
+        : 60
+    const companyHourlyMinParsed = parseInt(
+      String(companyRow.hourly_min_hours ?? hourlyEmbed?.min_hours ?? ''),
+      10
+    )
     const companyHourlyMin =
-      parseInt(String(companyRow.hourly_min_hours ?? ''), 10) >= 1
-        ? parseInt(String(companyRow.hourly_min_hours), 10)
+      Number.isFinite(companyHourlyMinParsed) && companyHourlyMinParsed >= 1
+        ? companyHourlyMinParsed
         : 3
 
     if (serviceType === 'hourly' && !companyHourlyEnabled) {

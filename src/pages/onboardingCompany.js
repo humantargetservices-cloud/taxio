@@ -146,7 +146,7 @@ export async function mountOnboardingCompany(root) {
       ...(company.pricing && typeof company.pricing === 'object' ? company.pricing : {}),
     }
     for (const k of ['Standard', 'Van', 'Luxury']) {
-      if (enabled[k]) nextPricing[k] = { ...DEFAULT_PRICING[k] }
+      if (enabled[k]) nextPricing[k] = { enabled: true, ...DEFAULT_PRICING[k] }
       else delete nextPricing[k]
     }
     const { error: pErr } = await updateCompanyByOwner(company.id, { pricing: nextPricing })
