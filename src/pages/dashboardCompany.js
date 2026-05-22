@@ -20,6 +20,7 @@ import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
+import { companyHourlyFromRecord } from '../lib/companyHourly.js'
 
 const dashState = {
   tab: 'overview',
@@ -233,12 +234,36 @@ export async function mountDashboardCompany(root) {
         </button>
       </div>`
   } else if (t === 'pricing') {
+    const hourly = companyHourlyFromRecord(company)
     bodyHtml = `
-      <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
-        <h2 class="text-lg font-bold text-gray-900">${td.pricingHead}</h2>
-        <p class="text-sm text-gray-500">${td.pricingSub}</p>
-        <div id="pricing-form-mount" class="mt-6 space-y-4"></div>
-        <button type="button" id="save-pricing" class="mt-6 w-full rounded-xl bg-yellow-400 py-3.5 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">${td.savePricing}</button>
+      <div class="space-y-6">
+        <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
+          <h2 class="text-lg font-bold text-gray-900">${td.pricingHead}</h2>
+          <p class="text-sm text-gray-500">${td.pricingSub}</p>
+          <div id="pricing-form-mount" class="mt-6 space-y-4"></div>
+          <button type="button" id="save-pricing" class="mt-6 w-full rounded-xl bg-yellow-400 py-3.5 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">${td.savePricing}</button>
+        </div>
+        <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-md">
+          <h2 class="text-lg font-bold text-gray-900">${escapeHtml(td.hourlyHead)}</h2>
+          <p class="text-sm leading-relaxed text-gray-500">${escapeHtml(td.hourlySub)}</p>
+          <div class="mt-6 space-y-4">
+            <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+              <input type="checkbox" id="dash-hourly-enabled" class="mt-1 h-5 w-5 rounded border-gray-300 text-yellow-500 focus:ring-yellow-400" ${hourly.enabled ? 'checked' : ''} />
+              <span class="text-sm font-semibold text-gray-900">${escapeHtml(td.hourlyEnable)}</span>
+            </label>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label class="text-xs font-semibold text-gray-500" for="dash-hourly-rate">${escapeHtml(td.hourlyRateLabel)}</label>
+                <input type="number" id="dash-hourly-rate" min="1" step="1" value="${escapeHtml(String(hourly.rateEur))}" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-500" for="dash-hourly-min">${escapeHtml(td.hourlyMinLabel)}</label>
+                <input type="number" id="dash-hourly-min" min="1" step="1" value="${escapeHtml(String(hourly.minHours))}" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              </div>
+            </div>
+          </div>
+          <button type="button" id="save-hourly" class="mt-6 w-full rounded-xl border-2 border-gray-900 bg-gray-900 py-3.5 text-sm font-bold text-white shadow hover:bg-gray-800">${escapeHtml(td.saveHourly)}</button>
+        </div>
       </div>`
   } else if (t === 'essential') {
     const slogan = company.slogan || 'Fast & Reliable Service'
@@ -585,6 +610,27 @@ export async function mountDashboardCompany(root) {
       } else {
         m.className = 'mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800'
         m.textContent = 'Pricing saved.'
+        m.classList.remove('hidden')
+        setTimeout(() => mountDashboardCompany(root), 600)
+      }
+    })
+
+    root.querySelector('#save-hourly')?.addEventListener('click', async () => {
+      const enabled = !!root.querySelector('#dash-hourly-enabled')?.checked
+      const rateEur = Number(root.querySelector('#dash-hourly-rate')?.value)
+      const minHours = parseInt(String(root.querySelector('#dash-hourly-min')?.value || ''), 10)
+      const { error } = await updateCompanyByOwner(company.id, {
+        hourly_enabled: enabled,
+        hourly_rate_eur: rateEur,
+        hourly_min_hours: minHours,
+      })
+      const m = root.querySelector('#dash-msg')
+      if (error) {
+        m.textContent = error.message
+        m.classList.remove('hidden')
+      } else {
+        m.className = 'mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800'
+        m.textContent = 'Hourly service settings saved.'
         m.classList.remove('hidden')
         setTimeout(() => mountDashboardCompany(root), 600)
       }

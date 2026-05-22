@@ -13,6 +13,12 @@ import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 import { getDemoBookingCompany, isDemoBookingSlug } from '../lib/demoBookingCompany.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
+import {
+  companyHourlyFromRecord,
+  formatHourlyPricingNote,
+  HOURLY_DROPOFF_PLACEHOLDER,
+  hourlyServiceLabelForLocale,
+} from '../lib/companyHourly.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const TURNSTILE_FRONT_ENABLED =
@@ -434,6 +440,14 @@ export async function mountBookCompany(root, slug) {
   const carTypes = resolveBookingCarTypes(fleetRows, company.pricing)
   const effectivePricing = effectivePricingForTypes(carTypes, company.pricing)
   const showVehicleSection = carTypes.length > 1
+  const hourlyCfg = companyHourlyFromRecord(company)
+  const hourlyOffered = hourlyCfg.enabled && !isDemo
+  const hourlyPricingNoteText = formatHourlyPricingNote(
+    tBooking(getLocale()).hourlyPricingNote,
+    hourlyCfg.rateEur,
+    hourlyCfg.minHours
+  )
+  const byHourLabel = tBooking(getLocale()).byHour
 
   const tb = tBooking(getLocale())
   const defaultSelectedCar = carTypes[0] ?? 'Standard'
@@ -458,6 +472,16 @@ export async function mountBookCompany(root, slug) {
           return `<button type="button" role="option" data-car="${escapeHtml(t)}" aria-selected="${on ? 'true' : 'false'}" class="${bkCarOptBase}${on ? bkCarOptOn : bkCarOptOff}"><span class="flex shrink-0">${iconH}</span><span class="min-w-0 flex-1"><span class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(t)}</span><span class="mt-0.5 block text-xs font-medium text-slate-500 dark:text-slate-400">${escapeHtml(seats)}</span></span></button>`
         })
         .join('')
+
+  const serviceSectionHtml = hourlyOffered
+    ? `<div id="bk-service-wrap" class="rounded-2xl border border-slate-200/90 bg-slate-50/60 px-4 py-4 ring-1 ring-slate-900/[0.03] dark:border-slate-700/60 dark:bg-slate-800/30 dark:ring-white/[0.04] sm:px-5">
+          <p class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.serviceType)}</p>
+          <div class="mt-3 grid grid-cols-2 gap-3">
+            <button type="button" id="bk-service-standard" class="min-h-12 rounded-2xl border-2 border-amber-400/80 bg-amber-400/15 px-3 py-3 text-sm font-bold text-amber-900 shadow-sm ring-1 ring-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100 dark:ring-amber-400/25">${escapeHtml(tb.standardRide)}</button>
+            <button type="button" id="bk-service-hourly" class="min-h-12 rounded-2xl border-2 border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-300">${escapeHtml(byHourLabel)}</button>
+          </div>
+        </div>`
+    : ''
 
   const vehicleSectionHtml = !showVehicleSection
     ? ''
@@ -543,6 +567,7 @@ export async function mountBookCompany(root, slug) {
           <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-600/90 dark:text-amber-400/75">${escapeHtml(tb.tripEyebrow)}</p>
           ${isDemo ? `<div class="mb-1 rounded-xl border border-amber-400/35 bg-amber-50 px-3 py-2.5 text-xs font-medium leading-snug text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-50">${escapeHtml(tb.demoRibbon)}</div>` : ''}
           <div class="mt-5 space-y-6">
+            ${serviceSectionHtml}
             <div class="taxio-ac-field relative z-50 focus-within:z-[120]">
               <label class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.pickupLabel)}</label>
               <div class="relative mt-2">
@@ -553,7 +578,7 @@ export async function mountBookCompany(root, slug) {
               </div>
               <p id="bk-pickup-locate-msg" class="hidden mt-1.5 px-0.5 text-xs font-medium leading-snug text-slate-600 dark:text-slate-400" role="status" aria-live="polite"></p>
             </div>
-            <div class="taxio-ac-field relative z-50 focus-within:z-[120]">
+            <div id="bk-dropoff-wrap" class="taxio-ac-field relative z-50 focus-within:z-[120]">
               <label class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.dropLabel)}</label>
               <div class="relative mt-2">
                 <span class="pointer-events-none absolute left-4 top-1/2 z-10 -translate-y-1/2 text-rose-500 dark:text-rose-400">${icon.mapPin('h-[18px] w-[18px]')}</span>
@@ -564,7 +589,7 @@ export async function mountBookCompany(root, slug) {
 
             ${vehicleSectionHtml}
 
-            <div>
+            <div id="bk-when-wrap">
               <p class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.when)}</p>
               <div class="mt-3 grid grid-cols-2 gap-3">
                 <button type="button" id="bk-ride-now" class="min-h-12 rounded-2xl border-2 border-amber-400/80 bg-amber-400/15 px-3 py-3 text-sm font-bold text-amber-900 shadow-sm ring-1 ring-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100 dark:ring-amber-400/25">${escapeHtml(tb.rideNow)}</button>
@@ -573,6 +598,27 @@ export async function mountBookCompany(root, slug) {
               <div id="bk-schedule-wrap" class="mt-3 hidden">
                 <input id="bk-schedule-at" type="datetime-local" class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
               </div>
+            </div>
+
+            <div id="bk-hourly-wrap" class="hidden space-y-4">
+              <div>
+                <label class="text-sm font-bold text-slate-800 dark:text-slate-100" for="bk-hourly-start">${escapeHtml(tb.hourlyStartLabel)}</label>
+                <input id="bk-hourly-start" type="datetime-local" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              </div>
+              <div>
+                <label class="text-sm font-bold text-slate-800 dark:text-slate-100" for="bk-hourly-hours">${escapeHtml(tb.hourlyDurationLabel)}</label>
+                <input id="bk-hourly-hours" type="number" min="${hourlyCfg.minHours}" step="1" value="${hourlyCfg.minHours}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              </div>
+              <div>
+                <label class="text-sm font-bold text-slate-800 dark:text-slate-100" for="bk-hourly-notes">${escapeHtml(tb.hourlyNotesLabel)}</label>
+                <textarea id="bk-hourly-notes" rows="3" maxlength="500" placeholder="${escapeHtml(tb.hourlyNotesPh)}" class="mt-2 w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:ring-amber-400/25"></textarea>
+              </div>
+            </div>
+
+            <div id="bk-hourly-ref" class="hidden rounded-2xl border border-slate-200/90 bg-gradient-to-br from-slate-50 via-white to-amber-50/40 px-4 py-4 shadow-md ring-1 ring-slate-200/80 dark:border-slate-600/60 dark:from-slate-900/60 dark:via-slate-900/40 dark:to-amber-400/5 dark:ring-white/[0.06]">
+              <p class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.hourlyRefTitle)}</p>
+              <p class="mt-2 text-sm leading-relaxed text-slate-700 dark:text-slate-300">${escapeHtml(hourlyPricingNoteText)}</p>
+              <p class="mt-2 text-[0.6875rem] leading-snug text-slate-500 dark:text-slate-400">${escapeHtml(tb.hourlyRefDisclaimer)}</p>
             </div>
 
             <div id="bk-estimate" class="hidden rounded-2xl border border-amber-300/40 bg-gradient-to-br from-amber-50 via-white to-slate-50 px-4 py-4 shadow-md ring-1 ring-amber-200/50 dark:border-amber-400/20 dark:from-amber-400/10 dark:via-slate-900/40 dark:to-slate-900/80 dark:shadow-lg dark:shadow-black/20 dark:ring-amber-400/15">
@@ -673,9 +719,27 @@ export async function mountBookCompany(root, slug) {
 
   let selectedCar = carTypes[0] ?? 'Standard'
   let rideMode = 'now'
+  let serviceMode = 'standard'
   let estimateTimer = null
   const pickupEl = root.querySelector('#bk-pickup')
   const dropEl = root.querySelector('#bk-dropoff')
+  const dropoffWrap = root.querySelector('#bk-dropoff-wrap')
+  const whenWrap = root.querySelector('#bk-when-wrap')
+  const hourlyWrap = root.querySelector('#bk-hourly-wrap')
+  const hourlyRefWrap = root.querySelector('#bk-hourly-ref')
+  const hourlyStartEl = root.querySelector('#bk-hourly-start')
+  const hourlyHoursEl = root.querySelector('#bk-hourly-hours')
+  const hourlyNotesEl = root.querySelector('#bk-hourly-notes')
+  const serviceStandardBtn = root.querySelector('#bk-service-standard')
+  const serviceHourlyBtn = root.querySelector('#bk-service-hourly')
+  const bkSegOn =
+    'min-h-12 rounded-2xl border-2 border-amber-400/80 bg-amber-400/15 px-3 py-3 text-sm font-bold text-amber-900 shadow-sm ring-1 ring-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100 dark:ring-amber-400/25'
+  const bkSegOff =
+    'min-h-12 rounded-2xl border-2 border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-300'
+
+  function isHourlyMode() {
+    return hourlyOffered && serviceMode === 'hourly'
+  }
   const termsEl = root.querySelector('#bk-terms')
   const humanEl = root.querySelector('#bk-human')
   const waBtn = root.querySelector('#bk-wa')
@@ -758,6 +822,25 @@ export async function mountBookCompany(root, slug) {
 
   function buildWhatsappBookingMessage() {
     const pu = pickupEl.value.trim()
+    if (isHourlyMode()) {
+      const startRaw = hourlyStartEl?.value || ''
+      const hours = Number(hourlyHoursEl?.value)
+      const notes = String(hourlyNotesEl?.value || '').trim()
+      const svcLabel = hourlyServiceLabelForLocale(getLocale())
+      const refLine = `from €${hourlyCfg.rateEur}/hour, minimum ${hourlyCfg.minHours} hours`
+      let msg = `Hello ${company.name},
+I would like to request a by-hour taxi service.
+
+Service: By hour / ${svcLabel}
+Pickup: ${pu}
+Start time: ${startRaw}
+Duration: ${hours} hours
+Car type: ${selectedCar}
+Reference price: ${refLine}`
+      if (notes) msg += `\nNotes: ${notes}`
+      msg += `\n\nFinal price to be confirmed with the taxi company.`
+      return msg
+    }
     const doff = dropEl.value.trim()
     const whenLine =
       rideMode === 'schedule'
@@ -779,6 +862,27 @@ Car type: ${selectedCar}`
   function buildMailtoHref() {
     if (!company.email) return '#'
     const pu = pickupEl.value.trim() || 'Not provided'
+    if (isHourlyMode()) {
+      const startRaw = hourlyStartEl?.value || 'Not provided'
+      const hours = Number(hourlyHoursEl?.value) || hourlyCfg.minHours
+      const notes = String(hourlyNotesEl?.value || '').trim() || '—'
+      const svcLabel = hourlyServiceLabelForLocale(getLocale())
+      const subject = `By-hour taxi request - ${company.name}`
+      const body = `Hello ${company.name},
+
+I would like to request a by-hour taxi service.
+
+Service: By hour / ${svcLabel}
+Pickup: ${pu}
+Start time: ${startRaw}
+Duration: ${hours} hours
+Car type: ${selectedCar}
+Reference price: from €${hourlyCfg.rateEur}/hour, minimum ${hourlyCfg.minHours} hours
+Notes: ${notes}
+
+Final price to be confirmed with the taxi company.`
+      return `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    }
     const doff = dropEl.value.trim() || 'Not provided'
     const whenLine =
       rideMode === 'schedule'
@@ -853,22 +957,67 @@ Estimate price: ${estimatePrice}`
     }
     if (requireTripFields) {
       const pu = pickupEl.value.trim()
-      const doff = dropEl.value.trim()
-      if (!pu || !doff) {
-        errEl.textContent = msgs.errAddresses
+      if (!pu) {
+        errEl.textContent = isHourlyMode() ? msgs.errPickupOnly : msgs.errAddresses
         errEl.classList.remove('hidden')
         return false
+      }
+      if (isHourlyMode()) {
+        const startRaw = hourlyStartEl?.value || ''
+        if (!startRaw) {
+          errEl.textContent = msgs.errHourlyStart
+          errEl.classList.remove('hidden')
+          return false
+        }
+        const hours = Number(hourlyHoursEl?.value)
+        if (!Number.isFinite(hours) || hours < hourlyCfg.minHours) {
+          errEl.textContent = String(msgs.errHourlyDuration).replace(
+            '{min}',
+            String(hourlyCfg.minHours)
+          )
+          errEl.classList.remove('hidden')
+          return false
+        }
+      } else {
+        const doff = dropEl.value.trim()
+        if (!doff) {
+          errEl.textContent = msgs.errAddresses
+          errEl.classList.remove('hidden')
+          return false
+        }
       }
     }
     return true
   }
 
+  function syncServiceModeUi() {
+    const hourly = isHourlyMode()
+    dropoffWrap?.classList.toggle('hidden', hourly)
+    whenWrap?.classList.toggle('hidden', hourly)
+    hourlyWrap?.classList.toggle('hidden', !hourly)
+    hourlyRefWrap?.classList.toggle('hidden', !hourly)
+    if (hourly) {
+      latestEstimate = null
+      estWrap?.classList.add('hidden')
+    }
+    if (serviceStandardBtn && serviceHourlyBtn) {
+      serviceStandardBtn.className = hourly ? bkSegOff : bkSegOn
+      serviceHourlyBtn.className = hourly ? bkSegOn : bkSegOff
+    }
+    refreshWaState()
+  }
+
   function refreshWaState() {
+    const puOk = !!pickupEl.value.trim()
+    const tripOk = isHourlyMode()
+      ? puOk &&
+        !!hourlyStartEl?.value &&
+        Number(hourlyHoursEl?.value) >= hourlyCfg.minHours
+      : puOk && !!dropEl.value.trim()
     const ok =
       termsEl.checked &&
       humanEl.checked &&
-      pickupEl.value.trim() &&
-      dropEl.value.trim() &&
+      tripOk &&
       !!companyWhatsAppDigits
     waBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
     waBtn.classList.toggle('pointer-events-none', !ok)
@@ -907,6 +1056,11 @@ Estimate price: ${estimatePrice}`
   }
 
   async function refreshEstimate() {
+    if (isHourlyMode()) {
+      latestEstimate = null
+      estWrap?.classList.add('hidden')
+      return
+    }
     const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
     const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
     if (!pickupOk || !dropoffOk) {
@@ -944,6 +1098,7 @@ Estimate price: ${estimatePrice}`
   }
 
   function queueEstimate() {
+    if (isHourlyMode()) return
     if (estimateTimer) window.clearTimeout(estimateTimer)
     estimateTimer = window.setTimeout(() => {
       refreshEstimate().catch(() => {
@@ -977,6 +1132,17 @@ Estimate price: ${estimatePrice}`
   })
   syncCarUi()
   syncRideTimingUi()
+  syncServiceModeUi()
+
+  serviceStandardBtn?.addEventListener('click', () => {
+    serviceMode = 'standard'
+    syncServiceModeUi()
+    queueEstimate()
+  })
+  serviceHourlyBtn?.addEventListener('click', () => {
+    serviceMode = 'hourly'
+    syncServiceModeUi()
+  })
 
   rideNowBtn?.addEventListener('click', () => {
     rideMode = 'now'
@@ -987,11 +1153,13 @@ Estimate price: ${estimatePrice}`
     syncRideTimingUi()
   })
 
-  ;[pickupEl, dropEl, termsEl, humanEl, scheduleInput].forEach((el) => {
-    if (!el) return
-    el.addEventListener('input', refreshWaState)
-    el.addEventListener('change', refreshWaState)
-  })
+  ;[pickupEl, dropEl, termsEl, humanEl, scheduleInput, hourlyStartEl, hourlyHoursEl, hourlyNotesEl].forEach(
+    (el) => {
+      if (!el) return
+      el.addEventListener('input', refreshWaState)
+      el.addEventListener('change', refreshWaState)
+    }
+  )
   refreshWaState()
 
   if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY) {
@@ -1284,7 +1452,8 @@ Estimate price: ${estimatePrice}`
     if (!bookingContactGate(true)) return
 
     const pu = pickupEl.value.trim()
-    const doff = dropEl.value.trim()
+    const hourlyActive = isHourlyMode()
+    const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
     const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
 
     if (!companyWhatsAppDigits) {
@@ -1293,7 +1462,16 @@ Estimate price: ${estimatePrice}`
       return
     }
     let rideDateIso = null
-    if (rideMode === 'schedule') {
+    if (hourlyActive) {
+      const raw = hourlyStartEl?.value || ''
+      const d = new Date(raw)
+      if (Number.isNaN(d.getTime())) {
+        errEl.textContent = msgs.errHourlyStart
+        errEl.classList.remove('hidden')
+        return
+      }
+      rideDateIso = d.toISOString()
+    } else if (rideMode === 'schedule') {
       const raw = scheduleInput?.value || ''
       if (!raw) {
         errEl.textContent = msgs.errSchedule
@@ -1311,11 +1489,14 @@ Estimate price: ${estimatePrice}`
     const estimateLineForNotes = latestEstimate
       ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
       : ''
+    const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
     const fingerprint = [
       company.id,
+      hourlyActive ? 'hourly' : 'standard',
       pu.toLowerCase(),
-      doff.toLowerCase(),
+      hourlyActive ? '' : doff.toLowerCase(),
       String(selectedCar || ''),
+      hourlyActive ? String(hourlyHoursEl?.value || '') : '',
       String(rideDateIso || 'ride_now'),
     ].join('|')
     const bookingMessageText = buildWhatsappBookingMessage()
@@ -1328,16 +1509,24 @@ Estimate price: ${estimatePrice}`
 
     openWaMeUrl(url)
 
+    const logNotes = hourlyActive
+      ? `WhatsApp by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+      : `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
+
     void createQuickBookingLog({
       company_id: company.id,
       pickup_address: pu,
       dropoff_address: doff,
       car_type: selectedCar,
+      service_type: hourlyActive ? 'hourly' : 'standard',
+      duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
+      hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
+      hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
       customer_name: 'Booking request',
       customer_phone: '',
       customer_email: null,
       ride_datetime: rideDateIso,
-      notes: `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`,
+      notes: logNotes,
       termsAcceptance: {
         terms_accepted: true,
         accepted_at: new Date().toISOString(),

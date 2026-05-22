@@ -77,6 +77,15 @@ export default async function handler(req, res) {
     const riderPhoneDigits = normalizePhoneDigits(body.customer_phone)
     const riderEmail = normalizeEmail(body.customer_email || '')
     const carType = String(body.car_type || '').trim().slice(0, 40) || null
+    const serviceType =
+      String(body.service_type || 'standard').trim().toLowerCase() === 'hourly' ? 'hourly' : 'standard'
+    const durationHoursRaw = Number(body.duration_hours)
+    const durationHours =
+      serviceType === 'hourly' && Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
+        ? durationHoursRaw
+        : null
+    const bodyHourlyRate = Number(body.hourly_rate_eur)
+    const bodyHourlyMin = parseInt(String(body.hourly_min_hours ?? ''), 10)
     const status = 'new'
     const turnstileToken = String(body.turnstileToken || '').trim()
     const honeypot = String(body.website || '').trim()
@@ -92,7 +101,7 @@ export default async function handler(req, res) {
     const ipAddress = getClientIp(req)
     const userAgent = getUserAgent(req)
 
-    if (!companyId || !pickup || !dropoff) {
+    if (!companyId || !pickup) {
       return json(res, 400, { error: 'Missing booking fields.' })
     }
     if (honeypot) {
@@ -104,24 +113,67 @@ export default async function handler(req, res) {
     if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < 1000) {
       return json(res, 400, { error: 'Please wait a moment before submitting.' })
     }
-    if (pickup.length < 5 || dropoff.length < 5) {
-      return json(res, 400, {
-        error: 'Pickup and drop-off must contain at least 5 characters.',
-      })
+    const supabase = makeSupabaseServiceClient()
+
+    const { data: companyRow, error: companyErr } = await supabase
+      .from('companies')
+      .select('id, status, hourly_enabled, hourly_rate_eur, hourly_min_hours')
+      .eq('id', companyId)
+      .maybeSingle()
+    if (companyErr) {
+      console.error('[public-booking:company]', companyErr)
+      return json(res, 500, { error: 'Could not verify company.' })
     }
-    if (pickup.toLowerCase() === dropoff.toLowerCase()) {
-      return json(res, 400, { error: 'Pickup and drop-off cannot be the same.' })
+    if (!companyRow || companyRow.status !== 'approved') {
+      return json(res, 400, { error: 'Company not available for booking.' })
+    }
+
+    const companyHourlyEnabled = companyRow.hourly_enabled === true
+    const companyHourlyRate =
+      Number(companyRow.hourly_rate_eur) > 0 ? Number(companyRow.hourly_rate_eur) : 60
+    const companyHourlyMin =
+      parseInt(String(companyRow.hourly_min_hours ?? ''), 10) >= 1
+        ? parseInt(String(companyRow.hourly_min_hours), 10)
+        : 3
+
+    if (serviceType === 'hourly' && !companyHourlyEnabled) {
+      return json(res, 400, { error: 'By-hour service is not available for this company.' })
+    }
+
+    let dropoffFinal = dropoff
+    if (serviceType === 'hourly') {
+      dropoffFinal = dropoff || 'By-hour service (no fixed drop-off)'
+      if (!durationHours || durationHours < companyHourlyMin) {
+        return json(res, 400, {
+          error: `Duration must be at least ${companyHourlyMin} hour(s).`,
+        })
+      }
+    } else if (!dropoffFinal) {
+      return json(res, 400, { error: 'Missing booking fields.' })
+    }
+
+    if (pickup.length < 5) {
+      return json(res, 400, { error: 'Pick-up must contain at least 5 characters.' })
+    }
+    if (serviceType === 'standard') {
+      if (dropoffFinal.length < 5) {
+        return json(res, 400, {
+          error: 'Pickup and drop-off must contain at least 5 characters.',
+        })
+      }
+      if (pickup.toLowerCase() === dropoffFinal.toLowerCase()) {
+        return json(res, 400, { error: 'Pickup and drop-off cannot be the same.' })
+      }
     }
     if (notesRaw.length > MAX_NOTES_LEN) {
       return json(res, 400, { error: `Message too long (max ${MAX_NOTES_LEN} characters).` })
     }
 
-    const supabase = makeSupabaseServiceClient()
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString()
     const dedupeKey =
       submissionFingerprint ||
-      `booking:${companyId}:${pickup.toLowerCase()}:${dropoff.toLowerCase()}:${String(carType || '')}:${String(requestedRideDate || 'now')}`.slice(
+      `booking:${companyId}:${serviceType}:${pickup.toLowerCase()}:${dropoffFinal.toLowerCase()}:${String(carType || '')}:${String(durationHours || '')}:${String(requestedRideDate || 'now')}`.slice(
         0,
         220
       )
@@ -233,7 +285,7 @@ export default async function handler(req, res) {
       .select('id')
       .eq('company_id', companyId)
       .eq('pickup_address', pickup)
-      .eq('dropoff_address', dropoff)
+      .eq('dropoff_address', dropoffFinal)
       .gte('created_at', fifteenMinutesAgo)
       .limit(1)
     duplicateQuery = carType ? duplicateQuery.eq('car_type', carType) : duplicateQuery.is('car_type', null)
@@ -255,8 +307,12 @@ export default async function handler(req, res) {
     const payload = {
       company_id: companyId,
       pickup_address: pickup,
-      dropoff_address: dropoff,
+      dropoff_address: dropoffFinal,
       car_type: carType,
+      service_type: serviceType,
+      duration_hours: serviceType === 'hourly' ? durationHours : null,
+      hourly_rate_eur: serviceType === 'hourly' ? companyHourlyRate : null,
+      hourly_min_hours: serviceType === 'hourly' ? companyHourlyMin : null,
       customer_name: riderName,
       customer_phone: riderPhoneDigits,
       customer_email: riderEmail || null,
@@ -300,6 +356,33 @@ export default async function handler(req, res) {
         ...withoutLegal
       } = payload
       ;({ error: insertErr } = await supabase.from('booking_requests').insert(withoutLegal))
+    }
+    if (
+      insertErr &&
+      (missingColumn(insertErr, 'service_type') ||
+        missingColumn(insertErr, 'duration_hours') ||
+        missingColumn(insertErr, 'hourly_rate_eur') ||
+        missingColumn(insertErr, 'hourly_min_hours'))
+    ) {
+      const {
+        service_type: _st,
+        duration_hours: _dh,
+        hourly_rate_eur: _hr,
+        hourly_min_hours: _hm,
+        ...withoutHourlyCols
+      } = payload
+      const hourlyMeta =
+        serviceType === 'hourly'
+          ? `taxio_hourly[service=hourly;duration_h=${durationHours};rate_eur=${companyHourlyRate};min_h=${companyHourlyMin}]`
+          : ''
+      const notesWithHourly = hourlyMeta
+        ? withoutHourlyCols.notes
+          ? `${withoutHourlyCols.notes} | ${hourlyMeta}`
+          : hourlyMeta
+        : withoutHourlyCols.notes
+      ;({ error: insertErr } = await supabase
+        .from('booking_requests')
+        .insert({ ...withoutHourlyCols, notes: notesWithHourly || null }))
     }
     if (insertErr) {
       console.error('[public-booking:insert]', insertErr)

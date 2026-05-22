@@ -346,6 +346,9 @@ const ADMIN_EDITABLE_COMPANY_FIELDS = [
   'availability_status',
   'pricing',
   'logo_url',
+  'hourly_enabled',
+  'hourly_rate_eur',
+  'hourly_min_hours',
 ]
 
 const AVAILABILITY_STATUSES = ['available', 'busy', 'offline']
@@ -537,6 +540,9 @@ export async function updateCompanyByOwner(companyId, patch) {
     'availability_status',
     'pricing',
     'logo_url',
+    'hourly_enabled',
+    'hourly_rate_eur',
+    'hourly_min_hours',
   ]
   const data = {}
   for (const k of allowed) {
@@ -544,6 +550,20 @@ export async function updateCompanyByOwner(companyId, patch) {
     if (k === 'logo_url') {
       const v = patch[k]
       data[k] = v == null || v === '' ? null : String(v).trim()
+      continue
+    }
+    if (k === 'hourly_enabled') {
+      data[k] = patch[k] === true
+      continue
+    }
+    if (k === 'hourly_rate_eur') {
+      const n = Number(patch[k])
+      data[k] = Number.isFinite(n) && n > 0 ? n : 60
+      continue
+    }
+    if (k === 'hourly_min_hours') {
+      const n = parseInt(String(patch[k]), 10)
+      data[k] = Number.isFinite(n) && n >= 1 ? n : 3
       continue
     }
     data[k] = patch[k]
