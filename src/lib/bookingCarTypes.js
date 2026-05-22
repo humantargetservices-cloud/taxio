@@ -21,19 +21,35 @@ function pricingRowDiffersFromDefault(pricing, typeName) {
   )
 }
 
+/** True when dashboard/onboarding saved a pricing row for this vehicle type. */
+function pricingTypeIsConfigured(pricing, typeName) {
+  const cur = pricing?.[typeName]
+  if (!cur || typeof cur !== 'object') return false
+  return (
+    String(cur.start ?? '').trim() !== '' ||
+    String(cur.per_km ?? '').trim() !== '' ||
+    String(cur.initial_km ?? '').trim() !== ''
+  )
+}
+
 /**
  * Car types shown on the booking page, ordered Standard → Van → Luxury.
+ * Merges fleet rows with pricing keys (onboarding enables types via pricing).
  * @param {{ car_type?: string }[]} fleetRows
  * @param {Record<string, { start?: string, per_km?: string, initial_km?: string }>|null} rawPricing
  */
 export function resolveBookingCarTypes(fleetRows, rawPricing) {
   const pricing = rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
 
-  const fromFleet = [
-    ...new Set((fleetRows || []).map((r) => normalizeFleetCarType(r.car_type))),
-  ].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b))
+  const fromFleet = (fleetRows || [])
+    .map((r) => normalizeFleetCarType(r.car_type))
+    .filter(Boolean)
+  const fromPricingKeys = ORDER.filter((k) => pricingTypeIsConfigured(pricing, k))
 
-  if (fromFleet.length > 0) return fromFleet
+  const merged = [...new Set([...fromFleet, ...fromPricingKeys])].sort(
+    (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b)
+  )
+  if (merged.length > 0) return merged
 
   const fromCustomPricing = ORDER.filter((k) => pricingRowDiffersFromDefault(pricing, k))
   if (fromCustomPricing.length > 0) return fromCustomPricing

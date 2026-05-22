@@ -4,11 +4,7 @@ import {
   fetchFleetCarTypesForBooking,
 } from '../lib/api.js'
 import { TERMS_VERSION_BOOKING_RIDER } from '../lib/legalVersions.js'
-import {
-  effectivePricingForTypes,
-  normalizeFleetCarType,
-  resolveBookingCarTypes,
-} from '../lib/bookingCarTypes.js'
+import { effectivePricingForTypes, resolveBookingCarTypes } from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
@@ -24,9 +20,6 @@ const TURNSTILE_FRONT_ENABLED =
     .trim()
     .toLowerCase() === 'true'
 const BOOK_MIN_SUBMIT_MS = 1000
-
-/** Same ordering as `resolveBookingCarTypes` (fleet / display sort). */
-const BOOKING_CAR_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
 
 function bookingCarTypeSeatsLabel(t) {
   const s = String(t).toLowerCase()
@@ -440,27 +433,10 @@ export async function mountBookCompany(root, slug) {
     : await fetchFleetCarTypesForBooking(company.id)
   const carTypes = resolveBookingCarTypes(fleetRows, company.pricing)
   const effectivePricing = effectivePricingForTypes(carTypes, company.pricing)
-
-  const fromFleetUnique = [
-    ...new Set(
-      (fleetRows || [])
-        .filter((r) => String(r?.car_type || '').trim())
-        .map((r) => normalizeFleetCarType(r.car_type))
-    ),
-  ].sort(
-    (a, b) => BOOKING_CAR_TYPE_ORDER.indexOf(a) - BOOKING_CAR_TYPE_ORDER.indexOf(b)
-  )
-
-  /** Cards only from fleet rows; if none, use resolved types except lone default Standard (no phantom card). */
-  const phantomFleetEmptyStandardOnly =
-    fromFleetUnique.length === 0 && carTypes.length === 1 && carTypes[0] === 'Standard'
-  const displayCarTypes =
-    fromFleetUnique.length > 0 ? fromFleetUnique : phantomFleetEmptyStandardOnly ? [] : carTypes
-
-  const showVehicleSection = displayCarTypes.length > 1
+  const showVehicleSection = carTypes.length > 1
 
   const tb = tBooking(getLocale())
-  const defaultSelectedCar = displayCarTypes[0] ?? carTypes[0] ?? 'Standard'
+  const defaultSelectedCar = carTypes[0] ?? 'Standard'
 
   const bkCarOptBase =
     'bk-car-opt flex w-full items-center gap-3 border-0 border-t border-slate-100 px-4 py-3.5 text-left transition first:border-t-0 dark:border-slate-700/80 '
@@ -474,7 +450,7 @@ export async function mountBookCompany(root, slug) {
 
   const bkCarOptsHtml = !showVehicleSection
     ? ''
-    : displayCarTypes
+    : carTypes
         .map((t) => {
           const seats = bookingCarTypeSeatsLabel(t)
           const iconH = bookingCarTypeIconHtml(t, 'h-6 w-6')
@@ -695,7 +671,7 @@ export async function mountBookCompany(root, slug) {
     mountBookCompany(root, slug)
   })
 
-  let selectedCar = displayCarTypes[0] ?? carTypes[0] ?? 'Standard'
+  let selectedCar = carTypes[0] ?? 'Standard'
   let rideMode = 'now'
   let estimateTimer = null
   const pickupEl = root.querySelector('#bk-pickup')
@@ -1295,7 +1271,7 @@ Estimate price: ${estimatePrice}`
     }
   })
 
-  waBtn.addEventListener('click', async (e) => {
+  waBtn.addEventListener('click', (e) => {
     e.preventDefault()
     const msgs = tBooking(getLocale())
     const waDisabled = waBtn.getAttribute('aria-disabled') === 'true'
@@ -1350,7 +1326,9 @@ Estimate price: ${estimatePrice}`
       return
     }
 
-    const { error: bookingErr } = await createQuickBookingLog({
+    openWaMeUrl(url)
+
+    void createQuickBookingLog({
       company_id: company.id,
       pickup_address: pu,
       dropoff_address: doff,
@@ -1370,12 +1348,10 @@ Estimate price: ${estimatePrice}`
       formStartedAt,
       submissionFingerprint: fingerprint,
       humanConfirmed: true,
+    }).then(({ error: bookingErr }) => {
+      if (bookingErr) {
+        console.warn('[createQuickBookingLog]', bookingErr.message || bookingErr)
+      }
     })
-    if (bookingErr) {
-      errEl.textContent = bookingErr.message || 'Booking validation failed. Please check your details.'
-      errEl.classList.remove('hidden')
-      return
-    }
-    openWaMeUrl(url)
   })
 }
