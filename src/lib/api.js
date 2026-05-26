@@ -34,6 +34,7 @@ export async function registerCompanyOwner(payload) {
     formStartedAt,
     submissionFingerprint,
     humanConfirmed,
+    vehicleTypes,
   } = payload
 
   const slug = slugFromCompanyName(companyName)
@@ -66,6 +67,7 @@ export async function registerCompanyOwner(payload) {
         formStartedAt: Number(formStartedAt || 0),
         submissionFingerprint: submissionFingerprint || null,
         humanConfirmed: humanConfirmed === true,
+        vehicleTypes: Array.isArray(vehicleTypes) ? vehicleTypes : [],
       }),
     })
     const body = await response.json().catch(() => ({}))
@@ -351,43 +353,32 @@ const ADMIN_EDITABLE_COMPANY_FIELDS = [
   'hourly_min_hours',
 ]
 
-const AVAILABILITY_STATUSES = ['available', 'busy', 'offline']
-
 /**
- * Platform admin updates company profile fields (RLS: companies_update_admin).
- * Only keys present on `patch` are written; `undefined` values are skipped (partial-safe).
+ * Platform admin updates company profile fields through the protected service-role API.
+ * Only keys present on `patch` are written; `undefined` values are skipped server-side.
  */
 export async function updateCompanyAsAdmin(companyId, patch) {
-  const data = {}
+  const filteredPatch = {}
   for (const k of ADMIN_EDITABLE_COMPANY_FIELDS) {
-    if (!(k in patch)) continue
-    let v = patch[k]
-    if (v === undefined) continue
-    if (k === 'pricing') {
-      if (v == null || v === '') {
-        data[k] = {}
-      } else if (typeof v === 'string') {
-        try {
-          data[k] = JSON.parse(v)
-        } catch {
-          return { error: new Error('Pricing must be valid JSON.') }
-        }
-      } else if (typeof v === 'object') {
-        data[k] = v
-      } else {
-        return { error: new Error('Invalid pricing value.') }
-      }
-      continue
-    }
-    if (typeof v === 'string') v = v.trim()
-    if (k === 'availability_status' && v && !AVAILABILITY_STATUSES.includes(v)) {
-      return { error: new Error('Invalid availability status.') }
-    }
-    data[k] = v === '' ? null : v
+    if (k in (patch || {})) filteredPatch[k] = patch[k]
   }
-  if (Object.keys(data).length === 0) return { error: null }
-  const { error } = await supabase.from('companies').update(data).eq('id', companyId)
-  return { error }
+  if (Object.keys(filteredPatch).length === 0) return { error: null, data: { updated: false } }
+
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return { error: new Error('You must be signed in as admin.') }
+
+  const res = await fetch(apiUrl('/api/admin-update-company'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ companyId, patch: filteredPatch }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) return { error: new Error(body.error || `Company update failed (${res.status}).`) }
+  return { error: null, data: body.data || null }
 }
 
 export async function deleteCompanyAsAdmin(companyId) {

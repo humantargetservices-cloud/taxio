@@ -912,6 +912,7 @@ export async function mountAdminDashboard(root) {
               </label>
               <label class="block text-xs font-semibold text-gray-600 sm:col-span-2">Email
                 <input id="adm-edit-email" type="email" required class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
+                <span class="mt-1 block text-[11px] font-medium text-amber-700">Changing this updates company contact email only. Login email remains unchanged.</span>
               </label>
               <label class="block text-xs font-semibold text-gray-600">Phone
                 <input id="adm-edit-phone" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900" />
@@ -951,11 +952,18 @@ export async function mountAdminDashboard(root) {
       </div>
     </div>`
 
-  function showMsg(t) {
+  function showMsg(t, tone = 'info') {
     const el = root.querySelector('#adm-msg')
+    const toneClass =
+      tone === 'success'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+        : tone === 'error'
+          ? 'border-red-200 bg-red-50 text-red-700'
+          : 'border-amber-200 bg-amber-50 text-amber-900'
+    el.className = `mt-4 rounded-lg border px-4 py-2 text-sm ${toneClass}`
     el.textContent = t
     el.classList.remove('hidden')
-    setTimeout(() => el.classList.add('hidden'), 4000)
+    setTimeout(() => el.classList.add('hidden'), tone === 'error' ? 7000 : 5000)
   }
 
   let devCleanupCandidateIds = []
@@ -1478,14 +1486,18 @@ export async function mountAdminDashboard(root) {
 
     const submitBtn = root.querySelector('#adm-edit-submit')
     submitBtn.disabled = true
-    const { error } = await updateCompanyAsAdmin(id, patch)
+    const { error, data } = await updateCompanyAsAdmin(id, patch)
     submitBtn.disabled = false
     if (error) {
-      showMsg(error.message)
+      showMsg(error.message, 'error')
       return
     }
     root.querySelector('#adm-company-edit')?.close()
     await mountAdminDashboard(root)
-    showMsg('Company updated.')
+    const warnings = Array.isArray(data?.warnings) ? data.warnings : []
+    showMsg(
+      warnings.length ? `Company updated. ${warnings.join(' ')}` : 'Company updated successfully.',
+      warnings.length ? 'info' : 'success'
+    )
   })
 }

@@ -438,6 +438,16 @@ export async function mountBookCompany(root, slug) {
     ? [{ car_type: 'Standard' }, { car_type: 'Van' }]
     : await fetchFleetCarTypesForBooking(company.id)
   const carTypes = resolveBookingCarTypes(fleetRows, company.pricing)
+  const tb = tBooking(getLocale())
+  if (carTypes.length === 0) {
+    root.innerHTML = `
+      <div class="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-slate-100 via-white to-slate-100 px-4 py-12 text-center dark:from-[#0c0e12] dark:via-[#12151c] dark:to-[#0a0b0f]">
+        <p class="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">${escapeHtml(company.name)}</p>
+        <p class="mt-3 max-w-sm text-sm leading-relaxed text-slate-600 dark:text-slate-400">No vehicle types are currently enabled for online booking.</p>
+        <a href="/" class="mt-10 inline-flex items-center rounded-2xl bg-amber-400 px-6 py-3 text-sm font-bold text-slate-900 shadow-[0_8px_30px_rgba(251,191,36,0.25)] transition hover:bg-amber-300">${escapeHtml(tb.homeCta)}</a>
+      </div>`
+    return
+  }
   const effectivePricing = effectivePricingForTypes(carTypes, company.pricing)
   const showVehicleSection = carTypes.length > 1
   const hourlyCfg = companyHourlyFromRecord(company)
@@ -449,8 +459,7 @@ export async function mountBookCompany(root, slug) {
   )
   const byHourLabel = tBooking(getLocale()).byHour
 
-  const tb = tBooking(getLocale())
-  const defaultSelectedCar = carTypes[0] ?? 'Standard'
+  const defaultSelectedCar = carTypes[0]
 
   const bkCarOptBase =
     'bk-car-opt flex w-full items-center gap-3 border-0 border-t border-slate-100 px-4 py-3.5 text-left transition first:border-t-0 dark:border-slate-700/80 '
@@ -717,7 +726,7 @@ export async function mountBookCompany(root, slug) {
     mountBookCompany(root, slug)
   })
 
-  let selectedCar = carTypes[0] ?? 'Standard'
+  let selectedCar = carTypes[0]
   let rideMode = 'now'
   let serviceMode = 'standard'
   let estimateTimer = null
@@ -1085,7 +1094,7 @@ Estimate price: ${estimatePrice}`
       pickupAddress: useCoords ? `${pickupPlacesState.lat},${pickupPlacesState.lng}` : pickupText,
       dropoffAddress: useCoords ? `${dropoffPlacesState.lat},${dropoffPlacesState.lng}` : dropoffText,
       pricing: effectivePricing,
-      carType: selectedCar || 'Standard',
+      carType: selectedCar,
       apiKey: GOOGLE_API_KEY,
     })
 

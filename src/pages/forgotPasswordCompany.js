@@ -3,6 +3,21 @@ import { icon } from '../lib/icons.js'
 
 const NEUTRAL_SUCCESS =
   'If an account exists for this email, a password reset link has been sent.'
+const PRODUCTION_RESET_URL = 'https://www.taxio.be/reset-password'
+
+function resetPasswordRedirectUrl() {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const host = typeof window !== 'undefined' ? window.location.hostname : ''
+  const isLocal =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '[::1]' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local')
+
+  if (import.meta.env.DEV && isLocal && origin) return `${origin}/reset-password`
+  return PRODUCTION_RESET_URL
+}
 
 export function mountForgotPasswordCompany(root) {
   root.innerHTML = `
@@ -51,7 +66,7 @@ export function mountForgotPasswordCompany(root) {
     const email = String(fd.get('email') || '').trim()
 
     btn.disabled = true
-    const redirectTo = `${window.location.origin}/reset-password`
+    const redirectTo = resetPasswordRedirectUrl()
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
     btn.disabled = false
 

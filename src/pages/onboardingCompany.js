@@ -10,7 +10,12 @@ import {
   insertCar,
   listCarsForCompany,
 } from '../lib/api.js'
-import { normalizeFleetCarType } from '../lib/bookingCarTypes.js'
+import {
+  BOOKING_CAR_TYPE_ORDER,
+  hasExplicitVehicleTypeConfig,
+  normalizeFleetCarType,
+  pricingTypeIsEnabled,
+} from '../lib/bookingCarTypes.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
@@ -29,7 +34,17 @@ function plateSuffix() {
   }
 }
 
-function defaultEnabledFromFleet(cars) {
+function emptyEnabledTypes() {
+  return { Standard: false, Van: false, Luxury: false }
+}
+
+function defaultEnabledFromCompanyConfig(company, cars) {
+  if (hasExplicitVehicleTypeConfig(company?.pricing)) {
+    const enabled = emptyEnabledTypes()
+    for (const k of BOOKING_CAR_TYPE_ORDER) enabled[k] = pricingTypeIsEnabled(company.pricing, k)
+    return enabled
+  }
+
   const fromFleet = new Set((cars || []).map((c) => normalizeFleetCarType(c.car_type)))
   if (fromFleet.size > 0) {
     return {
@@ -38,7 +53,7 @@ function defaultEnabledFromFleet(cars) {
       Luxury: fromFleet.has('Luxury'),
     }
   }
-  return { Standard: true, Van: true, Luxury: false }
+  return emptyEnabledTypes()
 }
 
 function progressRow(current) {
@@ -109,7 +124,7 @@ export async function mountOnboardingCompany(root) {
   const ui = {
     step: 1,
     markedDone: false,
-    enabledTypes: defaultEnabledFromFleet(cars),
+    enabledTypes: defaultEnabledFromCompanyConfig(company, cars),
   }
 
   async function markDoneOnce() {
@@ -136,7 +151,7 @@ export async function mountOnboardingCompany(root) {
     if (!any) {
       const err = root.querySelector('#onb-err')
       if (err) {
-        err.textContent = 'Turn on at least one vehicle type, or use Skip for now.'
+        err.textContent = 'Turn on at least one vehicle type.'
         err.classList.remove('hidden')
       }
       return false
@@ -290,7 +305,7 @@ export async function mountOnboardingCompany(root) {
           <h1 class="text-2xl font-bold text-gray-900">You&apos;re in</h1>
           <p class="mt-2 text-sm leading-relaxed text-gray-600">Your password is set. Let&apos;s finish a quick setup so your public booking page is ready—about three minutes.</p>
           <p id="onb-err" class="mt-4 hidden rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
-          ${footerNav(true)}
+          ${footerNav(false)}
         </div>`
     } else if (step === 2) {
       const logoHint = /^https?:\/\//i.test(String(company.logo_url || '').trim())

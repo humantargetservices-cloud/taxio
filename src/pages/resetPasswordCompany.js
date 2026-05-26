@@ -8,13 +8,26 @@ const INVALID_COPY =
 function recoveryUrlHint() {
   const h = window.location.hash || ''
   const q = window.location.search || ''
-  return /type=recovery/.test(h) || /type=recovery/.test(q)
+  return /type=recovery/.test(h) || /type=recovery/.test(q) || /[?&]code=/.test(q)
 }
 
 /**
  * Wait for a Supabase recovery session (email link with type=recovery or PASSWORD_RECOVERY event).
  */
-function awaitRecoverySession(timeoutMs = 12000) {
+async function awaitRecoverySession(timeoutMs = 12000) {
+  const params = new URLSearchParams(window.location.search || '')
+  const code = params.get('code')
+  if (code) {
+    const { data } = await supabase.auth.exchangeCodeForSession(code)
+    if (data?.session) {
+      window.history.replaceState({}, '', '/reset-password')
+      return data.session
+    }
+  }
+
+  const existing = await supabase.auth.getSession()
+  if (existing?.data?.session && recoveryUrlHint()) return existing.data.session
+
   return new Promise((resolve) => {
     let settled = false
     let subscription = null

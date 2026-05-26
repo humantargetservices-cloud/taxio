@@ -9,6 +9,18 @@ export function normalizeFleetCarType(raw) {
   return 'Standard'
 }
 
+function pricingObject(rawPricing) {
+  return rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
+}
+
+export function hasExplicitVehicleTypeConfig(rawPricing) {
+  const pricing = pricingObject(rawPricing)
+  return BOOKING_CAR_TYPE_ORDER.some((typeName) => {
+    const cur = pricing[typeName]
+    return cur && typeof cur === 'object' && Object.prototype.hasOwnProperty.call(cur, 'enabled')
+  })
+}
+
 /** True only when dashboard explicitly enabled this type (`enabled: true`). */
 export function pricingTypeIsEnabled(pricing, typeName) {
   const cur = pricing?.[typeName]
@@ -17,35 +29,34 @@ export function pricingTypeIsEnabled(pricing, typeName) {
 }
 
 /**
- * Car types on the booking page: fleet types ∪ pricing-enabled types; else Standard only.
+ * Car types on the booking page: explicit pricing-enabled types.
+ * Legacy fallback: if no explicit vehicle config exists, use fleet types; if that is also empty,
+ * show Standard temporarily for old companies.
  * @param {{ car_type?: string }[]} fleetRows
  * @param {Record<string, { enabled?: boolean, start?: string, per_km?: string, initial_km?: string }>|null} rawPricing
  */
 export function resolveBookingCarTypes(fleetRows, rawPricing) {
-  const pricing = rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
+  const pricing = pricingObject(rawPricing)
 
-  const fromFleet = (fleetRows || [])
-    .map((r) => normalizeFleetCarType(r.car_type))
-    .filter(Boolean)
-  const fromPricingEnabled = BOOKING_CAR_TYPE_ORDER.filter((k) => pricingTypeIsEnabled(pricing, k))
+  if (hasExplicitVehicleTypeConfig(pricing)) {
+    return BOOKING_CAR_TYPE_ORDER.filter((k) => pricingTypeIsEnabled(pricing, k))
+  }
 
-  const merged = [...new Set([...fromFleet, ...fromPricingEnabled])].sort(
+  const fromFleet = [...new Set((fleetRows || []).map((r) => normalizeFleetCarType(r.car_type)).filter(Boolean))].sort(
     (a, b) => BOOKING_CAR_TYPE_ORDER.indexOf(a) - BOOKING_CAR_TYPE_ORDER.indexOf(b)
   )
-  if (merged.length > 0) return merged
+  if (fromFleet.length > 0) return fromFleet
   return ['Standard']
 }
 
-/** Default pricing blob for new companies / empty state (Standard only). */
+/** Default pricing blob for new companies / empty state. Nothing is auto-enabled. */
 export function defaultCompanyPricing() {
-  return {
-    Standard: { enabled: true, ...DEFAULT_PRICING.Standard },
-  }
+  return {}
 }
 
 /** Merge company pricing with defaults for estimate + display. */
 export function effectivePricingForTypes(displayTypes, rawPricing) {
-  const pricing = rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
+  const pricing = pricingObject(rawPricing)
   const out = {}
   for (const typeName of displayTypes) {
     const def = DEFAULT_PRICING[typeName] || DEFAULT_PRICING.Standard

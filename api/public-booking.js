@@ -8,6 +8,7 @@ import {
 } from './_utils.js'
 
 const MAX_NOTES_LEN = 500
+const VEHICLE_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase()
@@ -21,6 +22,27 @@ function normalizeAddress(a) {
   return String(a || '')
     .trim()
     .replace(/\s+/g, ' ')
+}
+
+function normalizeVehicleType(value) {
+  const s = String(value || '').trim().toLowerCase()
+  if (s === 'standard') return 'Standard'
+  if (s === 'van') return 'Van'
+  if (s === 'luxury') return 'Luxury'
+  return null
+}
+
+function hasExplicitVehicleTypeConfig(rawPricing) {
+  const pricing = rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
+  return VEHICLE_TYPE_ORDER.some((typeName) => {
+    const cur = pricing[typeName]
+    return cur && typeof cur === 'object' && Object.prototype.hasOwnProperty.call(cur, 'enabled')
+  })
+}
+
+function enabledVehicleTypes(rawPricing) {
+  const pricing = rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
+  return VEHICLE_TYPE_ORDER.filter((typeName) => pricing[typeName]?.enabled === true)
 }
 
 function missingColumn(err, column) {
@@ -76,7 +98,7 @@ export default async function handler(req, res) {
     const riderName = String(body.customer_name || '').trim().slice(0, 120) || 'WhatsApp request'
     const riderPhoneDigits = normalizePhoneDigits(body.customer_phone)
     const riderEmail = normalizeEmail(body.customer_email || '')
-    const carType = String(body.car_type || '').trim().slice(0, 40) || null
+    const carType = normalizeVehicleType(body.car_type) || null
     const serviceType =
       String(body.service_type || 'standard').trim().toLowerCase() === 'hourly' ? 'hourly' : 'standard'
     const durationHoursRaw = Number(body.duration_hours)
@@ -117,7 +139,7 @@ export default async function handler(req, res) {
 
     const { data: companyRow, error: companyErr } = await supabase
       .from('companies')
-      .select('id, status, hourly_enabled, hourly_rate_eur, hourly_min_hours')
+      .select('id, status, pricing, hourly_enabled, hourly_rate_eur, hourly_min_hours')
       .eq('id', companyId)
       .maybeSingle()
     if (companyErr) {
@@ -126,6 +148,12 @@ export default async function handler(req, res) {
     }
     if (!companyRow || companyRow.status !== 'approved') {
       return json(res, 400, { error: 'Company not available for booking.' })
+    }
+    if (hasExplicitVehicleTypeConfig(companyRow.pricing)) {
+      const enabledTypes = enabledVehicleTypes(companyRow.pricing)
+      if (!carType || !enabledTypes.includes(carType)) {
+        return json(res, 400, { error: 'Selected vehicle type is not available.' })
+      }
     }
 
     const hourlyEmbed =

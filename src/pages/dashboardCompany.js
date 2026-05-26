@@ -22,7 +22,6 @@ import { absolutePublicBookingUrl } from '../lib/tenant.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import {
   BOOKING_CAR_TYPE_ORDER,
-  defaultCompanyPricing,
   resolveBookingCarTypes,
 } from '../lib/bookingCarTypes.js'
 import { companyHourlyFromRecord, pricingWithHourlyEmbed } from '../lib/companyHourly.js'
@@ -34,27 +33,17 @@ const dashState = {
 }
 
 function pricingOf(company) {
-  const p = company?.pricing
-  const hasRows =
-    p &&
-    typeof p === 'object' &&
-    BOOKING_CAR_TYPE_ORDER.some((name) => p[name] && typeof p[name] === 'object')
-  if (!hasRows) return defaultCompanyPricing()
-
-  const out = { ...defaultCompanyPricing() }
+  const p = company?.pricing && typeof company.pricing === 'object' ? company.pricing : {}
+  const out = {}
   for (const name of BOOKING_CAR_TYPE_ORDER) {
     const row = p[name]
-    if (!row || typeof row !== 'object') continue
     const def = DEFAULT_PRICING[name]
     out[name] = {
-      enabled: row.enabled === true,
-      start: row.start ?? def.start,
-      per_km: row.per_km ?? def.per_km,
-      initial_km: row.initial_km ?? def.initial_km,
+      enabled: row && typeof row === 'object' ? row.enabled === true : false,
+      start: row && typeof row === 'object' ? row.start ?? def.start : def.start,
+      per_km: row && typeof row === 'object' ? row.per_km ?? def.per_km : def.per_km,
+      initial_km: row && typeof row === 'object' ? row.initial_km ?? def.initial_km : def.initial_km,
     }
-  }
-  if (!out.Standard?.enabled) {
-    out.Standard = { enabled: true, ...DEFAULT_PRICING.Standard }
   }
   return out
 }
@@ -384,7 +373,7 @@ export async function mountDashboardCompany(root) {
           <div class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div>
               <p class="text-xs text-gray-500 mb-2">${td.carTypes}</p>
-              <div class="flex flex-wrap gap-2">${enabledTypeBadges}</div>
+              <div class="flex flex-wrap gap-2">${enabledTypeBadges || `<span class="text-xs font-semibold text-gray-500">${escapeHtml(td.noCars)}</span>`}</div>
             </div>
             <button type="button" data-edit-field="contact" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}${td.edit}</button>
           </div>
@@ -607,8 +596,7 @@ export async function mountDashboardCompany(root) {
         const on = !!root.querySelector(`[data-pricing-enable="${name}"]`)?.checked
         const panel = root.querySelector(`[data-pricing-fields="${name}"]`)
         if (!panel) return
-        panel.classList.toggle('opacity-50', !on)
-        panel.classList.toggle('pointer-events-none', !on)
+        panel.classList.toggle('hidden', !on)
         panel.querySelectorAll('input[data-pcat]').forEach((inp) => {
           inp.disabled = !on
         })
@@ -617,7 +605,7 @@ export async function mountDashboardCompany(root) {
 
     if (mount) {
       mount.innerHTML = BOOKING_CAR_TYPE_ORDER.map((name) => {
-        const p = pricing[name] || { enabled: name === 'Standard', ...DEFAULT_PRICING[name] }
+        const p = pricing[name] || { enabled: false, ...DEFAULT_PRICING[name] }
         const enabled = p.enabled === true
         return `
         <div class="rounded-xl border border-gray-200 p-4">
@@ -625,7 +613,7 @@ export async function mountDashboardCompany(root) {
             <input type="checkbox" data-pricing-enable="${name}" class="h-5 w-5 rounded border-gray-300 text-yellow-500 focus:ring-yellow-400" ${enabled ? 'checked' : ''} />
             <span class="text-base font-bold text-gray-900">${escapeHtml(name)}</span>
           </label>
-          <div data-pricing-fields="${name}" class="mt-4 grid grid-cols-3 gap-3 transition-opacity">
+          <div data-pricing-fields="${name}" class="mt-4 grid gap-3 sm:grid-cols-3">
             <div>
               <label class="text-xs text-gray-500">Start</label>
               <input type="text" data-pcat="${name}" data-pfield="start" value="${escapeHtml(p.start)}" class="mt-1 w-full rounded-lg border border-gray-300 px-2 py-2 text-sm" />
@@ -652,16 +640,20 @@ export async function mountDashboardCompany(root) {
       let anyEnabled = false
       for (const name of BOOKING_CAR_TYPE_ORDER) {
         const cb = root.querySelector(`[data-pricing-enable="${name}"]`)
-        if (!cb?.checked) continue
-        anyEnabled = true
         const start = root.querySelector(`[data-pcat="${name}"][data-pfield="start"]`)?.value ?? ''
         const per_km = root.querySelector(`[data-pcat="${name}"][data-pfield="per_km"]`)?.value ?? ''
         const initial_km =
           root.querySelector(`[data-pcat="${name}"][data-pfield="initial_km"]`)?.value ?? ''
-        next[name] = { enabled: true, start, per_km, initial_km }
+        const enabled = cb?.checked === true
+        if (enabled) anyEnabled = true
+        next[name] = { enabled, start, per_km, initial_km }
       }
-      if (!anyEnabled || !next.Standard) {
-        next.Standard = { enabled: true, ...DEFAULT_PRICING.Standard }
+      if (!anyEnabled) {
+        const m = root.querySelector('#dash-msg')
+        m.className = 'mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'
+        m.textContent = 'Please enable at least one vehicle type.'
+        m.classList.remove('hidden')
+        return
       }
       const existing =
         company.pricing && typeof company.pricing === 'object' ? company.pricing : {}

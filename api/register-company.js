@@ -18,6 +18,31 @@ const DEFAULT_PRICING = {
   Luxury: { start: '10.00', per_km: '4.00', initial_km: '3' },
 }
 
+const VEHICLE_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
+
+function normalizeVehicleType(value) {
+  const s = String(value || '').trim().toLowerCase()
+  if (s === 'standard') return 'Standard'
+  if (s === 'van') return 'Van'
+  if (s === 'luxury') return 'Luxury'
+  return null
+}
+
+function normalizeVehicleTypes(raw) {
+  const values = Array.isArray(raw) ? raw : []
+  return [...new Set(values.map(normalizeVehicleType).filter(Boolean))].sort(
+    (a, b) => VEHICLE_TYPE_ORDER.indexOf(a) - VEHICLE_TYPE_ORDER.indexOf(b)
+  )
+}
+
+function pricingForVehicleTypes(vehicleTypes) {
+  const pricing = {}
+  for (const typeName of vehicleTypes) {
+    pricing[typeName] = { enabled: true, ...DEFAULT_PRICING[typeName] }
+  }
+  return pricing
+}
+
 function required(value) {
   return String(value || '').trim()
 }
@@ -190,6 +215,7 @@ export default async function handler(req, res) {
     const honeypot = String(body.companyWebsite || '').trim()
     const formStartedAt = Number(body.formStartedAt || 0)
     const submissionFingerprint = String(body.submissionFingerprint || '').trim().slice(0, 220)
+    const vehicleTypes = normalizeVehicleTypes(body.vehicleTypes)
     const normalizedVat = normalizeVatForCompare(vatNumberInput)
     const normalizedPhoneE164 = normalizeBelgianPhoneToE164(phoneInput)
     const normalizedPhone = normalizePhoneForCompare(phoneInput)
@@ -207,6 +233,9 @@ export default async function handler(req, res) {
     }
     if (!humanConfirmed) {
       return json(res, 400, { error: 'Please confirm you are a real person.' })
+    }
+    if (vehicleTypes.length === 0) {
+      return json(res, 400, { error: 'Please select at least one vehicle type.' })
     }
     if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < 1000) {
       return json(res, 400, { error: 'Please wait a moment before submitting.' })
@@ -346,7 +375,7 @@ export default async function handler(req, res) {
       slogan: 'Your Ride, Your Way, Anytime!',
       availability_status: 'available',
       subscription_plan: 'basic',
-      pricing: DEFAULT_PRICING,
+      pricing: pricingForVehicleTypes(vehicleTypes),
       preferred_locale,
       ip_address: ipAddress,
       user_agent: userAgent,
