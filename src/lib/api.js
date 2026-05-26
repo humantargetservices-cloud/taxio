@@ -34,7 +34,6 @@ export async function registerCompanyOwner(payload) {
     formStartedAt,
     submissionFingerprint,
     humanConfirmed,
-    vehicleTypes,
   } = payload
 
   const slug = slugFromCompanyName(companyName)
@@ -67,7 +66,6 @@ export async function registerCompanyOwner(payload) {
         formStartedAt: Number(formStartedAt || 0),
         submissionFingerprint: submissionFingerprint || null,
         humanConfirmed: humanConfirmed === true,
-        vehicleTypes: Array.isArray(vehicleTypes) ? vehicleTypes : [],
       }),
     })
     const body = await response.json().catch(() => ({}))

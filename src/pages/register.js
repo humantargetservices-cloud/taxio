@@ -72,11 +72,6 @@ export function mountRegister(root) {
   const R = tr()
   const ic = inputCls(dark)
   const lang = getLocale()
-  const vehicleTypes = [
-    { key: 'Standard', label: R.vehicleTypeStandard || 'Standard' },
-    { key: 'Van', label: R.vehicleTypeVan || 'Van' },
-    { key: 'Luxury', label: R.vehicleTypeLuxury || 'Luxury' },
-  ]
 
   root.innerHTML = `
 <div class="min-h-screen ${dark ? 'bg-slate-900' : 'bg-gradient-to-b from-slate-100/80 to-[#eef2f6]'} py-8 md:py-14 px-4">
@@ -136,24 +131,6 @@ export function mountRegister(root) {
             <input id="city" name="city" required placeholder="${R.phCity}" class="${ic}" />
           </div>
 
-          <div id="reg-vehicle-types-wrap" class="rounded-2xl border-2 p-4 sm:p-5 ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-slate-200 bg-slate-50/90'}">
-            <div class="mb-3">
-              <p class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.vehicleTypesTitle || 'Vehicle types'} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></p>
-              <p class="mt-1 text-xs ${dark ? 'text-gray-400' : 'text-slate-500'}">${R.vehicleTypesHint || 'Select only the vehicle types your company offers.'}</p>
-            </div>
-            <div class="grid gap-2 sm:grid-cols-3">
-              ${vehicleTypes
-                .map(
-                  (v) => `
-                    <label class="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${dark ? 'border-slate-600 bg-slate-800/60 text-gray-200 has-[:checked]:border-amber-400 has-[:checked]:bg-amber-400/10' : 'border-slate-200 bg-white text-slate-800 has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50'}">
-                      <input type="checkbox" data-reg-type="${v.key}" name="vehicleTypes" value="${v.key}" class="h-4 w-4 shrink-0 rounded border-gray-300 text-yellow-500 focus:ring-yellow-500 dark:border-slate-500 dark:bg-slate-700" />
-                      <span>${v.label}</span>
-                    </label>`
-                )
-                .join('')}
-            </div>
-          </div>
-
           <div id="reg-preview" class="hidden rounded-xl border p-4 sm:p-5 ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-slate-200 bg-slate-50'}">
             <h3 class="mb-3 flex items-center gap-2 text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">
               ${icon.eye('h-4 w-4')}
@@ -165,7 +142,6 @@ export function mountRegister(root) {
               <p><strong class="${dark ? 'text-white' : 'text-slate-900'}">${R.previewPhone}</strong> <span id="pv-phone">—</span></p>
               <p><strong class="${dark ? 'text-white' : 'text-slate-900'}">${R.previewEmail}</strong> <span id="pv-email">—</span></p>
               <p><strong class="${dark ? 'text-white' : 'text-slate-900'}">${R.previewCity}</strong> <span id="pv-city">—</span></p>
-              <p><strong class="${dark ? 'text-white' : 'text-slate-900'}">${R.vehicleTypesTitle || 'Vehicle types'}:</strong> <span id="pv-vehicle-types">—</span></p>
               <p class="mt-3 border-t pt-3 ${dark ? 'border-slate-600' : 'border-blue-200'}">
                 <strong class="${dark ? 'text-white' : 'text-slate-900'}">${R.previewSubdomain}</strong>
                 <span id="pv-sub" class="font-mono font-semibold ${dark ? 'text-yellow-400' : 'text-blue-600'}">companyname.taxio.be</span>
@@ -260,13 +236,6 @@ export function mountRegister(root) {
   const minSubmitAt = Date.now() + REG_MIN_SUBMIT_MS
   let turnstileToken = ''
 
-  function selectedVehicleTypes() {
-    return [...root.querySelectorAll('[data-reg-type]')]
-      .filter((el) => el instanceof HTMLInputElement && el.checked)
-      .map((el) => el.getAttribute('data-reg-type'))
-      .filter(Boolean)
-  }
-
   function refreshPreviewText() {
     const fd = new FormData(form)
     const cn = fd.get('companyName') || ''
@@ -276,7 +245,6 @@ export function mountRegister(root) {
     root.querySelector('#pv-phone').textContent = fd.get('phone') || '—'
     root.querySelector('#pv-email').textContent = fd.get('email') || '—'
     root.querySelector('#pv-city').textContent = fd.get('city') || '—'
-    root.querySelector('#pv-vehicle-types').textContent = selectedVehicleTypes().join(', ') || '—'
     root.querySelector('#pv-sub').textContent = slug ? `${slug}.taxio.be` : 'companyname.taxio.be'
   }
 
@@ -306,16 +274,10 @@ export function mountRegister(root) {
   const submitBtn = root.querySelector('#btn-submit')
   function syncSubmitEnabled() {
     updateTermsStyle()
-    submitBtn.disabled = !(termsCb.checked && humanCb.checked && selectedVehicleTypes().length > 0)
+    submitBtn.disabled = !(termsCb.checked && humanCb.checked)
   }
   termsCb.addEventListener('change', syncSubmitEnabled)
   humanCb.addEventListener('change', syncSubmitEnabled)
-  root.querySelectorAll('[data-reg-type]').forEach((el) => {
-    el.addEventListener('change', () => {
-      syncSubmitEnabled()
-      if (!previewEl.classList.contains('hidden')) refreshPreviewText()
-    })
-  })
   syncSubmitEnabled()
 
   form.querySelector('#companyName')?.addEventListener('input', () => {
@@ -346,12 +308,6 @@ export function mountRegister(root) {
     }
     if (!humanCb.checked) {
       errEl.textContent = R.humanError
-      errEl.classList.remove('hidden')
-      return
-    }
-    const vehicleTypesSelected = selectedVehicleTypes()
-    if (vehicleTypesSelected.length === 0) {
-      errEl.textContent = R.vehicleTypesError || 'Please select at least one vehicle type.'
       errEl.classList.remove('hidden')
       return
     }
@@ -392,14 +348,13 @@ export function mountRegister(root) {
       companyWebsite: String(fd.get('companyWebsite') || ''),
       formStartedAt: minSubmitAt - REG_MIN_SUBMIT_MS,
       humanConfirmed: true,
-      vehicleTypes: vehicleTypesSelected,
     }
     const btn = root.querySelector('#btn-submit')
     btn.disabled = true
     btn.textContent = R.btnSubmitting
     const { data, error } = await registerCompanyOwner(payload)
     btn.textContent = R.btnSubmit
-    btn.disabled = !(termsCb.checked && humanCb.checked && selectedVehicleTypes().length > 0)
+    btn.disabled = !(termsCb.checked && humanCb.checked)
     if (error) {
       errEl.textContent = error.message || String(error)
       errEl.classList.remove('hidden')
