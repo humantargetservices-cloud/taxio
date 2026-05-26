@@ -4,60 +4,118 @@ import { icon } from '../lib/icons.js'
 
 const INVALID_COPY =
   'This reset link is invalid or expired. Please request a new one.'
+const RECOVERY_CHECK_TIMEOUT_MS = 1800
 
-function recoveryUrlHint() {
-  const h = window.location.hash || ''
-  const q = window.location.search || ''
-  return /type=recovery/.test(h) || /type=recovery/.test(q) || /[?&]code=/.test(q)
+function recoveryParamsFromUrl() {
+  const merged = new URLSearchParams(window.location.search || '')
+  let hash = String(window.location.hash || '').replace(/^#/, '')
+  if (hash) {
+    const queryIdx = hash.indexOf('?')
+    if (queryIdx >= 0) hash = hash.slice(queryIdx + 1)
+    const hashIdx = hash.indexOf('#')
+    if (hashIdx >= 0) hash = hash.slice(hashIdx + 1)
+    const hashParams = new URLSearchParams(hash)
+    for (const [key, value] of hashParams.entries()) {
+      if (!merged.has(key)) merged.set(key, value)
+    }
+  }
+  return merged
+}
+
+function recoveryUrlHint(params = recoveryParamsFromUrl()) {
+  return (
+    params.get('type') === 'recovery' ||
+    params.has('code') ||
+    params.has('access_token') ||
+    params.has('refresh_token')
+  )
+}
+
+function cleanRecoveryUrl() {
+  window.history.replaceState({}, '', '/reset-password')
+}
+
+function waitForRecoveryAuthEvent(timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false
+    let subscription = null
+    const finish = (session) => {
+      if (done) return
+      done = true
+      window.clearTimeout(timer)
+      subscription?.unsubscribe()
+      resolve(session || null)
+    }
+
+    const timer = window.setTimeout(() => finish(null), timeoutMs)
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') && session) {
+        finish(session)
+      }
+    })
+    subscription = data?.subscription
+  })
 }
 
 /**
- * Wait for a Supabase recovery session (email link with type=recovery or PASSWORD_RECOVERY event).
+ * Establish a Supabase recovery session from PKCE `?code=...`, hash tokens, or the
+ * PASSWORD_RECOVERY auth event. This supports mobile mail clients that preserve either
+ * query or hash parameters when opening the SPA route.
  */
-async function awaitRecoverySession(timeoutMs = 12000) {
-  const params = new URLSearchParams(window.location.search || '')
+async function establishRecoverySession(timeoutMs = RECOVERY_CHECK_TIMEOUT_MS) {
+  const params = recoveryParamsFromUrl()
+  const hasRecoveryParams = recoveryUrlHint(params)
+  const eventSessionPromise = hasRecoveryParams ? waitForRecoveryAuthEvent(timeoutMs) : null
+
   const code = params.get('code')
   if (code) {
-    const { data } = await supabase.auth.exchangeCodeForSession(code)
-    if (data?.session) {
-      window.history.replaceState({}, '', '/reset-password')
-      return data.session
+    try {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+      if (!error && data?.session) {
+        cleanRecoveryUrl()
+        return data.session
+      }
+    } catch {
+      /* fall through to getSession/event fallback */
     }
   }
 
-  const existing = await supabase.auth.getSession()
-  if (existing?.data?.session && recoveryUrlHint()) return existing.data.session
-
-  return new Promise((resolve) => {
-    let settled = false
-    let subscription = null
-
-    const finish = (session) => {
-      if (settled) return
-      settled = true
-      clearTimeout(tid)
-      clearInterval(iv)
-      subscription?.unsubscribe()
-      resolve(session)
+  const accessToken = params.get('access_token')
+  const refreshToken = params.get('refresh_token')
+  if (accessToken && refreshToken) {
+    try {
+      const { data, error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      })
+      if (!error && data?.session) {
+        cleanRecoveryUrl()
+        return data.session
+      }
+    } catch {
+      /* fall through to getSession/event fallback */
     }
+  }
 
-    const tid = setTimeout(() => finish(null), timeoutMs)
+  try {
+    const { data } = await supabase.auth.getSession()
+    if (data?.session) {
+      if (hasRecoveryParams) cleanRecoveryUrl()
+      return data.session
+    }
+  } catch {
+    /* fall through to event fallback */
+  }
 
-    const { data } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'PASSWORD_RECOVERY' && session) finish(session)
-    })
-    subscription = data.subscription
+  if (eventSessionPromise) {
+    const eventSession = await eventSessionPromise
+    if (eventSession) {
+      cleanRecoveryUrl()
+      return eventSession
+    }
+  }
 
-    const iv = setInterval(async () => {
-      if (!recoveryUrlHint()) return
-      const { data } = await supabase.auth.getSession()
-      if (data.session) finish(data.session)
-    }, 200)
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session && recoveryUrlHint()) finish(data.session)
-    })
-  })
+  return null
 }
 
 function renderInvalid(root) {
@@ -90,7 +148,7 @@ export function mountResetPasswordCompany(root) {
       <p class="text-sm text-gray-500">Checking your link…</p>
     </div>`
 
-  awaitRecoverySession().then((session) => {
+  establishRecoverySession().then((session) => {
     if (!session) {
       renderInvalid(root)
       return
