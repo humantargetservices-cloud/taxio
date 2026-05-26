@@ -26,23 +26,38 @@ function normalizeAddress(a) {
 
 function normalizeVehicleType(value) {
   const s = String(value || '').trim().toLowerCase()
-  if (s === 'standard') return 'Standard'
-  if (s === 'van') return 'Van'
-  if (s === 'luxury') return 'Luxury'
+  if (s === 'standard' || s.includes('standard')) return 'Standard'
+  if (s === 'van' || s.includes('van')) return 'Van'
+  if (s === 'luxury' || s.includes('lux')) return 'Luxury'
+  return null
+}
+
+function pricingRowForType(pricing, typeName) {
+  const p = pricing && typeof pricing === 'object' ? pricing : {}
+  const direct = p[typeName]
+  if (direct && typeof direct === 'object') return direct
+  const wanted = normalizeVehicleType(typeName)
+  for (const [key, row] of Object.entries(p)) {
+    if (normalizeVehicleType(key) === wanted && row && typeof row === 'object') return row
+  }
   return null
 }
 
 function hasExplicitVehicleTypeConfig(rawPricing) {
-  const pricing = rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
-  return VEHICLE_TYPE_ORDER.some((typeName) => {
-    const cur = pricing[typeName]
-    return cur && typeof cur === 'object' && Object.prototype.hasOwnProperty.call(cur, 'enabled')
-  })
+  return VEHICLE_TYPE_ORDER.some((typeName) =>
+    Object.prototype.hasOwnProperty.call(pricingRowForType(rawPricing, typeName) || {}, 'enabled')
+  )
 }
 
 function enabledVehicleTypes(rawPricing) {
-  const pricing = rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
-  return VEHICLE_TYPE_ORDER.filter((typeName) => pricing[typeName]?.enabled === true)
+  return VEHICLE_TYPE_ORDER.filter((typeName) => pricingRowForType(rawPricing, typeName)?.enabled === true)
+}
+
+function resolveEnabledVehicleTypes(rawPricing) {
+  // Same source-of-truth rule as src/lib/bookingCarTypes.js:
+  // { luxury: { enabled: true } } => Luxury only; van+luxury => Van + Luxury; {} => Standard fallback.
+  if (!hasExplicitVehicleTypeConfig(rawPricing)) return ['Standard']
+  return enabledVehicleTypes(rawPricing)
 }
 
 function missingColumn(err, column) {
@@ -149,11 +164,9 @@ export default async function handler(req, res) {
     if (!companyRow || companyRow.status !== 'approved') {
       return json(res, 400, { error: 'Company not available for booking.' })
     }
-    if (hasExplicitVehicleTypeConfig(companyRow.pricing)) {
-      const enabledTypes = enabledVehicleTypes(companyRow.pricing)
-      if (!carType || !enabledTypes.includes(carType)) {
-        return json(res, 400, { error: 'Selected vehicle type is not available.' })
-      }
+    const enabledTypes = resolveEnabledVehicleTypes(companyRow.pricing)
+    if (!carType || !enabledTypes.includes(carType)) {
+      return json(res, 400, { error: 'Selected vehicle type is not available.' })
     }
 
     const hourlyEmbed =

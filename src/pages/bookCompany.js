@@ -1,10 +1,9 @@
 import {
   fetchApprovedCompanyBySlug,
   createQuickBookingLog,
-  fetchFleetCarTypesForBooking,
 } from '../lib/api.js'
 import { TERMS_VERSION_BOOKING_RIDER } from '../lib/legalVersions.js'
-import { effectivePricingForTypes, resolveBookingCarTypes } from '../lib/bookingCarTypes.js'
+import { effectivePricingForTypes, resolveEnabledBookingCarTypes } from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
@@ -434,10 +433,7 @@ export async function mountBookCompany(root, slug) {
     return
   }
 
-  const fleetRows = isDemo
-    ? [{ car_type: 'Standard' }, { car_type: 'Van' }]
-    : await fetchFleetCarTypesForBooking(company.id)
-  const carTypes = resolveBookingCarTypes(fleetRows, company.pricing)
+  const carTypes = resolveEnabledBookingCarTypes(company)
   const tb = tBooking(getLocale())
   if (carTypes.length === 0) {
     root.innerHTML = `

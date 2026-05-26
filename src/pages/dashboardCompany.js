@@ -22,7 +22,8 @@ import { absolutePublicBookingUrl } from '../lib/tenant.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import {
   BOOKING_CAR_TYPE_ORDER,
-  resolveBookingCarTypes,
+  pricingRowForType,
+  resolveEnabledBookingCarTypes,
 } from '../lib/bookingCarTypes.js'
 import { companyHourlyFromRecord, pricingWithHourlyEmbed } from '../lib/companyHourly.js'
 
@@ -36,7 +37,7 @@ function pricingOf(company) {
   const p = company?.pricing && typeof company.pricing === 'object' ? company.pricing : {}
   const out = {}
   for (const name of BOOKING_CAR_TYPE_ORDER) {
-    const row = p[name]
+    const row = pricingRowForType(p, name)
     const def = DEFAULT_PRICING[name]
     out[name] = {
       enabled: row && typeof row === 'object' ? row.enabled === true : false,
@@ -282,10 +283,7 @@ export async function mountDashboardCompany(root) {
         </div>
       </div>`
   } else if (t === 'essential') {
-    const enabledTypeBadges = resolveBookingCarTypes(
-      cars.map((c) => ({ car_type: c.car_type })),
-      company.pricing
-    )
+    const enabledTypeBadges = resolveEnabledBookingCarTypes(company)
       .map(
         (tName) =>
           `<span class="rounded-full bg-yellow-400 px-3 py-1 text-xs font-bold text-gray-900">${escapeHtml(tName)}</span>`
@@ -645,8 +643,9 @@ export async function mountDashboardCompany(root) {
         const initial_km =
           root.querySelector(`[data-pcat="${name}"][data-pfield="initial_km"]`)?.value ?? ''
         const enabled = cb?.checked === true
-        if (enabled) anyEnabled = true
-        next[name] = { enabled, start, per_km, initial_km }
+        if (!enabled) continue
+        anyEnabled = true
+        next[name] = { enabled: true, start, per_km, initial_km }
       }
       if (!anyEnabled) {
         const m = root.querySelector('#dash-msg')
