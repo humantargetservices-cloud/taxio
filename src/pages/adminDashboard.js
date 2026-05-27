@@ -176,6 +176,19 @@ function normalizePhoneForWhatsApp(phone) {
   return digits
 }
 
+function isMobileWhatsAppTarget() {
+  if (typeof navigator === 'undefined') return false
+  return /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent || '')
+}
+
+function whatsappDraftUrl(phoneDigits, message) {
+  const encoded = encodeURIComponent(message)
+  if (isMobileWhatsAppTarget()) {
+    return `https://wa.me/${phoneDigits}?text=${encoded}`
+  }
+  return `https://web.whatsapp.com/send?phone=${phoneDigits}&text=${encoded}`
+}
+
 export async function mountAdminDashboard(root) {
   root.innerHTML = `<div class="min-h-screen flex flex-col items-center justify-center bg-violet-950/20">
     <div class="h-10 w-10 animate-pulse rounded-full border-2 border-violet-300 border-t-violet-600"></div>
@@ -754,9 +767,10 @@ export async function mountAdminDashboard(root) {
                 ${
                   adminState.commChannel === 'email'
                     ? '<p class="mt-2 text-center text-[11px] text-slate-500">Sends one personalized email per selected company via server-side Resend.</p>'
-                    : '<p class="mt-2 hidden text-center text-[11px] text-slate-500 max-lg:block">Opens <span class="font-mono text-slate-400">wa.me</span> one company at a time.</p><p class="mt-2 text-center text-[11px] text-slate-500 max-lg:hidden">Opens <code class="rounded bg-slate-800 px-1 py-0.5 font-mono text-slate-400">https://wa.me/&lt;number&gt;?text=…</code> sequentially.</p>'
+                    : '<p class="mt-2 hidden text-center text-[11px] text-slate-500 max-lg:block">Opens one WhatsApp draft at a time.</p><p class="mt-2 text-center text-[11px] text-slate-500 max-lg:hidden">Opens <code class="rounded bg-slate-800 px-1 py-0.5 font-mono text-slate-400">web.whatsapp.com/send</code> one company at a time.</p>'
                 }
               </div>
+              <div id="adm-wa-sender-root"></div>
             </div>
           </div>
         </div>
@@ -1175,6 +1189,102 @@ export async function mountAdminDashboard(root) {
     adminState.commSubject = String(e.target.value || '')
   })
 
+  function renderWhatsAppSender(state) {
+    const mount = root.querySelector('#adm-wa-sender-root')
+    if (!mount) return
+
+    const current = state.recipients[state.index] || null
+    const total = state.recipients.length
+    const done = state.opened.length + state.manualSkipped.length
+    const skippedInvalidText = state.invalidSkipped.length
+      ? `Invalid phone skipped: ${state.invalidSkipped.join('; ')}`
+      : ''
+
+    if (!current) {
+      mount.innerHTML = `
+        <div class="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="adm-wa-sender-title">
+          <div class="w-full max-w-2xl rounded-t-3xl border border-slate-700 bg-slate-900 p-5 shadow-2xl sm:rounded-3xl sm:p-6">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h3 id="adm-wa-sender-title" class="text-lg font-bold text-white">WhatsApp drafts prepared</h3>
+                <p class="mt-1 text-sm text-slate-400">Opened ${state.opened.length} draft(s). Skipped ${state.manualSkipped.length + state.invalidSkipped.length} recipient(s).</p>
+              </div>
+              <button type="button" data-wa-close class="rounded-xl p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white">${icon.x('h-5 w-5')}</button>
+            </div>
+            ${skippedInvalidText ? `<p class="mt-4 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-medium text-amber-100">${escapeHtml(skippedInvalidText)}</p>` : ''}
+            <button type="button" data-wa-close class="mt-5 w-full rounded-2xl bg-amber-400 py-3 text-sm font-bold text-slate-900 hover:bg-amber-300">Done</button>
+          </div>
+        </div>`
+      mount.querySelectorAll('[data-wa-close]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          mount.innerHTML = ''
+          const parts = []
+          if (state.opened.length) parts.push(`Opened ${state.opened.length} WhatsApp draft(s).`)
+          if (state.invalidSkipped.length) parts.push(`Invalid phone skipped: ${state.invalidSkipped.join('; ')}`)
+          if (state.manualSkipped.length) parts.push(`Manually skipped ${state.manualSkipped.length}.`)
+          showMsg(parts.join(' ') || 'WhatsApp sender closed.')
+        })
+      })
+      return
+    }
+
+    const escapedMessage = escapeHtml(current.message).replace(/\n/g, '<br />')
+    const fallbackHtml = state.popupBlocked
+      ? `<a href="${escapeHtml(current.url)}" target="_blank" rel="noopener noreferrer" data-wa-fallback class="mt-3 inline-flex w-full items-center justify-center rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-slate-900 shadow hover:bg-amber-100">Click here to open WhatsApp</a>`
+      : ''
+
+    mount.innerHTML = `
+      <div class="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="adm-wa-sender-title">
+        <div class="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-slate-700 bg-slate-900 p-5 shadow-2xl sm:rounded-3xl sm:p-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-wide text-amber-300">Recipient ${state.index + 1} of ${total}</p>
+              <h3 id="adm-wa-sender-title" class="mt-1 text-lg font-bold text-white">${escapeHtml(current.company.name || '')}</h3>
+              <p class="mt-1 text-sm text-slate-400">${escapeHtml(current.company.phone || '')}</p>
+            </div>
+            <button type="button" data-wa-close class="rounded-xl p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white">${icon.x('h-5 w-5')}</button>
+          </div>
+          <div class="mt-4 rounded-2xl border border-slate-700 bg-slate-950/70 p-4 text-sm leading-relaxed text-slate-200 shadow-inner">${escapedMessage}</div>
+          ${state.popupBlocked ? `<p class="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs font-medium text-amber-100">Popup blocked. Use the fallback link below.</p>` : ''}
+          ${fallbackHtml}
+          ${skippedInvalidText ? `<p class="mt-3 text-xs text-amber-200/90">${escapeHtml(skippedInvalidText)}</p>` : ''}
+          <div class="mt-5 grid gap-3 sm:grid-cols-2">
+            <button type="button" data-wa-open class="rounded-2xl bg-[#25D366] py-3 text-sm font-bold text-white shadow hover:bg-[#20bd5a]">Open in WhatsApp</button>
+            <button type="button" data-wa-skip class="rounded-2xl border border-slate-600 bg-slate-800 py-3 text-sm font-bold text-slate-100 hover:bg-slate-700">Skip</button>
+          </div>
+          <p class="mt-3 text-center text-[11px] text-slate-500">${done} completed · Manual sending only, TAXIO does not auto-send messages.</p>
+        </div>
+      </div>`
+
+    const advance = (kind) => {
+      if (kind === 'opened') state.opened.push(current.company.name || current.company.id)
+      else state.manualSkipped.push(current.company.name || current.company.id)
+      state.index += 1
+      state.popupBlocked = false
+      renderWhatsAppSender(state)
+    }
+
+    mount.querySelector('[data-wa-open]')?.addEventListener('click', () => {
+      const openedWindow = window.open(current.url, '_blank', 'noopener,noreferrer')
+      if (!openedWindow) {
+        state.popupBlocked = true
+        renderWhatsAppSender(state)
+        return
+      }
+      advance('opened')
+    })
+    mount.querySelector('[data-wa-fallback]')?.addEventListener('click', () => {
+      advance('opened')
+    })
+    mount.querySelector('[data-wa-skip]')?.addEventListener('click', () => {
+      advance('skipped')
+    })
+    mount.querySelector('[data-wa-close]')?.addEventListener('click', () => {
+      mount.innerHTML = ''
+      showMsg('WhatsApp sender closed.')
+    })
+  }
+
   root.querySelector('#adm-comm-open-wa')?.addEventListener('click', async () => {
     if (adminState.commChannel !== 'whatsapp') {
       showMsg('Email sending is not available yet. Choose WhatsApp.')
@@ -1191,39 +1301,50 @@ export async function mountAdminDashboard(root) {
       return
     }
     const origin = window.location.origin
-    const skipped = []
-    let opened = 0
+    const invalidSkipped = []
+    const recipients = []
     for (const id of selectedIds) {
       const company = companies.find((c) => c.id === id)
       if (!company) continue
       const digits = waMeDigits(company.phone)
       if (!digits) {
-        skipped.push(String(company.name || id).trim())
+        invalidSkipped.push(String(company.name || id).trim())
         continue
       }
       const message = fillCommTemplate(company, template, origin)
-      const ok = window.confirm(
-        `Open WhatsApp for ${company.name}?\n\nPhone: ${company.phone}\n\nMessage:\n${message}`
-      )
-      if (!ok) continue
-      const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
-      window.open(waUrl, '_blank', 'noopener,noreferrer')
-      opened += 1
-      await new Promise((resolve) => window.setTimeout(resolve, 350))
+      recipients.push({
+        company,
+        digits,
+        message,
+        url: whatsappDraftUrl(digits, message),
+      })
     }
     const skipEl = root.querySelector('#adm-comm-skipped')
     if (skipEl) {
-      if (skipped.length) {
-        skipEl.textContent = `Skipped (no valid WhatsApp number): ${skipped.join('; ')}`
+      if (invalidSkipped.length) {
+        skipEl.textContent = `Skipped (no valid WhatsApp number): ${invalidSkipped.join('; ')}`
         skipEl.classList.remove('hidden')
       } else {
         skipEl.classList.add('hidden')
         skipEl.textContent = ''
       }
     }
-    if (opened > 0) showMsg(`Opened ${opened} WhatsApp draft(s). Remember to press Send in each chat.`)
-    else if (!skipped.length) showMsg('No WhatsApp tabs opened.')
-    else showMsg(`Skipped ${skipped.length} row(s). See list below the preview.`)
+    if (!recipients.length) {
+      showMsg(
+        invalidSkipped.length
+          ? `Skipped ${invalidSkipped.length} row(s). No valid WhatsApp numbers selected.`
+          : 'No WhatsApp recipients to open.'
+      )
+      return
+    }
+    renderWhatsAppSender({
+      recipients,
+      invalidSkipped,
+      index: 0,
+      opened: [],
+      manualSkipped: [],
+      popupBlocked: false,
+    })
   })
 
   root.querySelector('#adm-comm-send-email')?.addEventListener('click', async () => {
