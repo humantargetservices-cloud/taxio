@@ -55,9 +55,10 @@ function enabledVehicleTypes(rawPricing) {
 
 function resolveEnabledVehicleTypes(rawPricing) {
   // Same source-of-truth rule as src/lib/bookingCarTypes.js:
-  // { luxury: { enabled: true } } => Luxury only; van+luxury => Van + Luxury; {} => Standard fallback.
+  // { luxury: { enabled: true } } => Luxury only; van+luxury => Van + Luxury; {} or none enabled => Standard fallback.
   if (!hasExplicitVehicleTypeConfig(rawPricing)) return ['Standard']
-  return enabledVehicleTypes(rawPricing)
+  const enabledTypes = enabledVehicleTypes(rawPricing)
+  return enabledTypes.length > 0 ? enabledTypes : ['Standard']
 }
 
 function missingColumn(err, column) {

@@ -603,7 +603,7 @@ export async function mountDashboardCompany(root) {
 
     if (mount) {
       mount.innerHTML = BOOKING_CAR_TYPE_ORDER.map((name) => {
-        const p = pricing[name] || { enabled: false, ...DEFAULT_PRICING[name] }
+        const p = pricingRowForType(company.pricing, name) || { enabled: false, ...DEFAULT_PRICING[name] }
         const enabled = p.enabled === true
         return `
         <div class="rounded-xl border border-gray-200 p-4">

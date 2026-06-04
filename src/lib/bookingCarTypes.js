@@ -49,12 +49,13 @@ export function pricingTypeIsEnabled(pricing, typeName) {
  * Examples:
  * - { luxury: { enabled: true } } => ['Luxury']
  * - { van: { enabled: true }, luxury: { enabled: true } } => ['Van', 'Luxury']
- * - {} or missing pricing => ['Standard'] legacy fallback
+ * - {} or no enabled pricing rows => ['Standard'] fallback
  */
 export function resolveEnabledBookingCarTypes(company) {
   const pricing = pricingObject(company?.pricing ?? company)
   if (!hasExplicitVehicleTypeConfig(pricing)) return ['Standard']
-  return BOOKING_CAR_TYPE_ORDER.filter((typeName) => pricingTypeIsEnabled(pricing, typeName))
+  const enabled = BOOKING_CAR_TYPE_ORDER.filter((typeName) => pricingTypeIsEnabled(pricing, typeName))
+  return enabled.length > 0 ? enabled : ['Standard']
 }
 
 /** Default pricing blob for new companies / empty state. Nothing is auto-enabled. */
