@@ -12,34 +12,18 @@ function copy() {
   return translations[lang] || translations.nl
 }
 
-function renderFeatureCard(f) {
-  const t = isPublicDarkMode()
+function renderWhyChooseCard(card, t) {
+  const ic =
+    card.iconKey && icon[card.iconKey]
+      ? icon[card.iconKey]('h-5 w-5 text-gray-900')
+      : featureIcon(card.icon, 'h-5 w-5 text-gray-900')
   return `
-    <div class="flex flex-col gap-6 rounded-2xl border shadow-sm transition-shadow hover:shadow-md ${t ? 'border-slate-700/80 bg-slate-800/60' : 'border-slate-200/90 bg-white'}">
-      <div class="px-6 pt-6 last:pb-6">
-        <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-yellow-400/95 shadow-sm ring-1 ring-black/5">
-          ${featureIcon(f.icon, 'h-6 w-6 text-gray-900')}
-        </div>
-        <h3 class="mb-2 text-lg font-semibold tracking-tight ${t ? 'text-white' : 'text-gray-900'}">${f.title}</h3>
-        <p class="text-sm leading-relaxed ${t ? 'text-gray-400' : 'text-gray-600'}">${f.desc}</p>
+    <div class="rounded-2xl border p-5 shadow-sm transition-shadow hover:shadow-md ${t ? 'border-slate-700/70 bg-slate-800/50' : 'border-slate-200/90 bg-white'}">
+      <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-yellow-400 shadow-sm ring-1 ring-black/5">
+        ${ic}
       </div>
-    </div>`
-}
-
-function renderHowStep(step, i, total) {
-  const t = isPublicDarkMode()
-  const arrow =
-    i < total - 1
-      ? icon.arrowRight(`hidden md:block absolute top-1/2 -right-12 h-8 w-8 -translate-y-1/2 transform ${t ? 'text-gray-600' : 'text-gray-300'}`)
-      : ''
-  return `
-    <div class="text-center">
-      <div class="relative mb-6">
-        <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-yellow-400 text-xl font-bold text-gray-900 shadow-sm ring-1 ring-black/5">${step.step}</div>
-        ${arrow}
-      </div>
-      <h3 class="mb-2 text-lg font-semibold tracking-tight ${t ? 'text-white' : 'text-gray-900'}">${step.title}</h3>
-      <p class="mx-auto max-w-xs text-sm leading-relaxed ${t ? 'text-gray-400' : 'text-gray-600'}">${step.desc}</p>
+      <h3 class="mb-1.5 text-base font-semibold tracking-tight ${t ? 'text-white' : 'text-gray-900'}">${card.title}</h3>
+      <p class="text-sm leading-relaxed ${t ? 'text-gray-400' : 'text-gray-600'}">${card.desc}</p>
     </div>`
 }
 
@@ -53,8 +37,7 @@ export function mountLanding(root) {
   const whyLabel = detailsOpen ? o.hideDetails : o.whyChoose
   const chevronClass = detailsOpen ? 'ml-2 h-5 w-5 transition-transform rotate-180' : 'ml-2 h-5 w-5 transition-transform'
 
-  const featuresHtml = o.features.map(renderFeatureCard).join('')
-  const howHtml = o.howItWorks.map((s, i) => renderHowStep(s, i, o.howItWorks.length)).join('')
+  const whyChooseHtml = (o.whyChooseCards || []).map((c) => renderWhyChooseCard(c, t)).join('')
 
   root.innerHTML = `
 <div class="min-h-screen transition-colors duration-300 ${t ? 'bg-slate-900' : 'bg-white'}">
@@ -137,169 +120,18 @@ export function mountLanding(root) {
   </section>
 
   <div id="detail-sections" class="${detailsOpen ? '' : 'hidden'}">
-    <section class="px-4 py-20 ${t ? 'bg-slate-800' : 'bg-gray-50'}">
-      <div class="container mx-auto max-w-6xl">
-        <div class="grid items-center gap-12 md:grid-cols-2">
-          <div>
-            <div class="mb-4 inline-block rounded-full bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-500">The Problem</div>
-            <h2 class="mb-4 text-3xl font-bold ${t ? 'text-white' : 'text-gray-900'}">${o.problemTitle}</h2>
-            <p class="mb-6 text-lg ${t ? 'text-gray-300' : 'text-gray-600'}">${o.problemDesc}</p>
-            <div class="space-y-3">
-              <div class="flex items-center gap-3">
-                ${icon.x('h-5 w-5 shrink-0 text-red-500')}
-                <span class="${t ? 'text-gray-300' : 'text-gray-700'}">25% commission on EVERY ride</span>
-              </div>
-              <div class="flex items-center gap-3">
-                ${icon.x('h-5 w-5 shrink-0 text-red-500')}
-                <span class="${t ? 'text-gray-300' : 'text-gray-700'}">No control over pricing</span>
-              </div>
-              <div class="flex items-center gap-3">
-                ${icon.x('h-5 w-5 shrink-0 text-red-500')}
-                <span class="${t ? 'text-gray-300' : 'text-gray-700'}">No direct customer relationship</span>
-              </div>
-            </div>
-          </div>
-          <div>
-            <div class="mb-4 inline-block rounded-full bg-green-500/10 px-4 py-2 text-sm font-semibold text-green-500">The Solution</div>
-            <h2 class="mb-4 text-3xl font-bold ${t ? 'text-white' : 'text-gray-900'}">${o.solutionTitle}</h2>
-            <p class="mb-6 text-lg ${t ? 'text-gray-300' : 'text-gray-600'}">${o.solutionDesc}</p>
-            <div class="space-y-3">
-              <div class="flex items-center gap-3">
-                ${icon.check('h-5 w-5 shrink-0 text-green-500')}
-                <span class="${t ? 'text-gray-300' : 'text-gray-700'}">0% commission - Keep 100%</span>
-              </div>
-              <div class="flex items-center gap-3">
-                ${icon.check('h-5 w-5 shrink-0 text-green-500')}
-                <span class="${t ? 'text-gray-300' : 'text-gray-700'}">Full pricing control</span>
-              </div>
-              <div class="flex items-center gap-3">
-                ${icon.check('h-5 w-5 shrink-0 text-green-500')}
-                <span class="${t ? 'text-gray-300' : 'text-gray-700'}">Direct WhatsApp contact</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="px-4 py-20 ${t ? 'bg-slate-900' : 'bg-white'}">
-      <div class="container mx-auto max-w-6xl">
-        <div class="mb-14 text-center">
-          <h2 class="text-3xl font-bold tracking-tight sm:text-4xl ${t ? 'text-white' : 'text-slate-900'}">${o.howItWorksTitle}</h2>
-        </div>
-        <div class="grid gap-8 md:grid-cols-3">${howHtml}</div>
-      </div>
-    </section>
-
-    <section class="px-4 py-20 ${t ? 'bg-slate-800' : 'bg-gray-50'}">
+    <section class="px-4 py-12 sm:py-16 ${t ? 'bg-slate-800' : 'bg-gray-50'}">
       <div class="container mx-auto max-w-5xl">
-        <div class="mb-10 text-center">
-          <h2 class="text-3xl font-bold tracking-tight sm:text-4xl ${t ? 'text-white' : 'text-slate-900'}">${o.comparisonTitle}</h2>
+        <div class="mb-8 text-center sm:mb-10">
+          <h2 class="text-2xl font-bold tracking-tight sm:text-3xl ${t ? 'text-white' : 'text-gray-900'}">${o.whyChooseTitle}</h2>
         </div>
-        <div class="overflow-hidden rounded-2xl border shadow-lg ${t ? 'border-slate-700/80 bg-slate-900' : 'border-slate-200/90 bg-white'}">
-          <table class="w-full">
-            <thead class="${t ? 'bg-slate-700' : 'bg-gray-100'}">
-              <tr>
-                <th class="p-4 text-left ${t ? 'text-gray-300' : 'text-gray-700'}"></th>
-                <th class="p-4 text-center">
-                  <div class="inline-block rounded-lg bg-yellow-400 px-4 py-2 font-bold text-gray-900">TAXIO</div>
-                </th>
-                <th class="p-4 text-center ${t ? 'text-gray-400' : 'text-gray-600'}">Other Platforms</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr class="${t ? 'border-b border-gray-700' : 'border-b border-gray-200'}">
-                <td class="p-4 font-semibold ${t ? 'text-gray-300' : 'text-gray-700'}">${o.comparison.commission}</td>
-                <td class="p-4 text-center">
-                  <div class="flex items-center justify-center gap-2">
-                    ${icon.check('h-5 w-5 text-green-500')}
-                    <span class="font-bold ${t ? 'text-green-400' : 'text-green-600'}">${o.comparison.taxio}</span>
-                  </div>
-                </td>
-                <td class="p-4 text-center">
-                  <div class="flex items-center justify-center gap-2">
-                    ${icon.x('h-5 w-5 text-red-500')}
-                    <span class="${t ? 'text-gray-400' : 'text-gray-600'}">${o.comparison.others}</span>
-                  </div>
-                </td>
-              </tr>
-              <tr class="${t ? 'border-b border-gray-700' : 'border-b border-gray-200'}">
-                <td class="p-4 font-semibold ${t ? 'text-gray-300' : 'text-gray-700'}">${o.comparison.website}</td>
-                <td class="p-4 text-center">${icon.check('h-6 w-6 mx-auto text-green-500')}</td>
-                <td class="p-4 text-center">${icon.x('h-6 w-6 mx-auto text-red-500')}</td>
-              </tr>
-              <tr class="${t ? 'border-b border-gray-700' : 'border-b border-gray-200'}">
-                <td class="p-4 font-semibold ${t ? 'text-gray-300' : 'text-gray-700'}">${o.comparison.pricing}</td>
-                <td class="p-4 text-center">${icon.check('h-6 w-6 mx-auto text-green-500')}</td>
-                <td class="p-4 text-center">${icon.x('h-6 w-6 mx-auto text-red-500')}</td>
-              </tr>
-              <tr class="${t ? 'border-b border-gray-700' : 'border-b border-gray-200'}">
-                <td class="p-4 font-semibold ${t ? 'text-gray-300' : 'text-gray-700'}">${o.comparison.contact}</td>
-                <td class="p-4 text-center">${icon.check('h-6 w-6 mx-auto text-green-500')}</td>
-                <td class="p-4 text-center">${icon.x('h-6 w-6 mx-auto text-red-500')}</td>
-              </tr>
-              <tr>
-                <td class="p-4 font-semibold ${t ? 'text-gray-300' : 'text-gray-700'}">${o.comparison.cost}</td>
-                <td class="p-4 text-center"><span class="font-bold ${t ? 'text-yellow-400' : 'text-yellow-600'}">€29/month</span></td>
-                <td class="p-4 text-center"><span class="${t ? 'text-gray-400' : 'text-gray-600'}">€0 + 25% commission</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <section class="px-4 py-20 ${t ? 'bg-slate-900' : 'bg-white'}">
-      <div class="container mx-auto max-w-6xl">
-        <div class="mb-14 text-center">
-          <h2 class="text-3xl font-bold tracking-tight sm:text-4xl ${t ? 'text-white' : 'text-slate-900'}">${o.featuresTitle}</h2>
-        </div>
-        <div class="grid gap-8 md:grid-cols-3">${featuresHtml}</div>
-      </div>
-    </section>
-
-    <section class="px-4 py-20 ${t ? 'bg-slate-800' : 'bg-gray-50'}">
-      <div class="container mx-auto max-w-6xl">
-        <div class="mb-10 text-center">
-          <h2 class="text-3xl font-bold tracking-tight sm:text-4xl ${t ? 'text-white' : 'text-slate-900'}">${o.pricingTitle}</h2>
-          <p class="mt-3 max-w-xl mx-auto text-base leading-relaxed sm:text-lg ${t ? 'text-gray-300' : 'text-slate-600'}">${o.pricingDesc}</p>
-        </div>
-        <div class="mx-auto grid max-w-5xl gap-6 md:grid-cols-2 md:gap-8">
-          <div class="flex flex-col gap-6 rounded-2xl border shadow-md transition-shadow hover:shadow-lg ${t ? 'border-slate-700/80 bg-slate-900' : 'border-slate-200/90 bg-white'}">
-            <div class="px-6 pt-8 pb-8">
-              <div class="mb-6 text-center">
-                <div class="mb-4 inline-block rounded-full bg-blue-500/10 px-4 py-2 text-sm font-bold text-blue-500">${o.pricingBasic.badge}</div>
-                <h3 class="mb-2 text-3xl font-bold ${t ? 'text-white' : 'text-gray-900'}">${o.pricingBasic.name}</h3>
-                <div class="mb-1 text-4xl font-bold ${t ? 'text-white' : 'text-gray-900'}">${o.pricingBasic.price}</div>
-                <p class="text-sm ${t ? 'text-gray-400' : 'text-gray-600'}">${o.pricingBasic.period}</p>
-              </div>
-              <div class="mb-6 space-y-3">
-                ${o.pricingBasic.features.map((l) => `<div class="flex items-center gap-3">${icon.check('h-5 w-5 shrink-0 text-green-500')}<span class="${t ? 'text-gray-300' : 'text-gray-700'}">${l}</span></div>`).join('')}
-                ${o.pricingBasic.notIncluded.map((l) => `<div class="flex items-center gap-3 opacity-50">${icon.x('h-5 w-5 shrink-0 text-gray-400')}<span class="${t ? 'text-gray-400' : 'text-gray-500'}">${l}</span></div>`).join('')}
-              </div>
-              <a href="/register" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300/80 bg-transparent px-4 py-3.5 text-sm font-semibold transition ${t ? 'border-slate-600 text-gray-200 hover:bg-slate-800/80' : 'text-slate-700 hover:bg-slate-50'}">
-                ${o.registerCard.button}
-                ${icon.arrowRight('h-5 w-5')}
-              </a>
-            </div>
-          </div>
-          <div class="relative flex flex-col gap-6 rounded-2xl border-2 border-amber-400/90 shadow-lg ring-1 ring-amber-400/20 transition-shadow hover:shadow-xl ${t ? 'bg-slate-900' : 'bg-white'}">
-            <div class="px-6 pt-8 pb-8">
-              <div class="mb-6 text-center">
-                <div class="mb-4 inline-block rounded-full bg-yellow-400 px-4 py-2 text-sm font-bold text-gray-900">${o.pricingPremium.badge}</div>
-                <h3 class="mb-2 text-3xl font-bold ${t ? 'text-white' : 'text-gray-900'}">${o.pricingPremium.name}</h3>
-                <div class="mb-1 text-4xl font-bold ${t ? 'text-white' : 'text-gray-900'}">${o.pricingPremium.price}</div>
-                <p class="text-sm ${t ? 'text-gray-400' : 'text-gray-600'}">${o.pricingPremium.period}</p>
-              </div>
-              <div class="mb-6 space-y-3">
-                ${o.pricingPremium.features.map((l) => `<div class="flex items-center gap-3">${icon.check('h-5 w-5 shrink-0 text-green-500')}<span class="${t ? 'text-gray-300' : 'text-gray-700'}">${l}</span></div>`).join('')}
-              </div>
-              <a href="/register" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-400 px-4 py-3.5 text-sm font-semibold text-gray-900 shadow-sm transition hover:bg-yellow-500">
-                ${o.registerCard.button}
-                ${icon.arrowRight('h-5 w-5')}
-              </a>
-            </div>
-          </div>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">${whyChooseHtml}</div>
+        <div class="mt-10 text-center">
+          <p class="text-base font-medium ${t ? 'text-gray-300' : 'text-gray-700'}">${o.whyChooseCtaTitle}</p>
+          <a href="/register" class="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-yellow-400 px-6 py-3.5 text-sm font-bold text-gray-900 shadow-sm transition hover:bg-yellow-500">
+            ${o.whyChooseCtaButton}
+            ${icon.arrowRight('h-4 w-4')}
+          </a>
         </div>
       </div>
     </section>
