@@ -38,6 +38,12 @@ function cleanPhoneInput(raw) {
     .replace(/[\s().-]/g, '')
 }
 
+const REGISTRATION_PHONE_DIALS = ['+32', '+31', '+352', '+33', '+49', '+44', '+212', '+90']
+
+function dialDigits(dial) {
+  return String(dial || '').replace(/\D/g, '')
+}
+
 function normalizeBelgianPhoneToE164(rawPhone) {
   const clean = cleanPhoneInput(rawPhone)
   if (!clean) return ''
@@ -58,8 +64,31 @@ function normalizeBelgianPhoneToE164(rawPhone) {
   return `+32${nsn}`
 }
 
+function parseRegistrationE164(phone) {
+  const s = String(phone || '').trim()
+  if (!/^\+[1-9]\d{7,14}$/.test(s)) return null
+  const digits = s.slice(1)
+  const allowed = REGISTRATION_PHONE_DIALS.map((d) => dialDigits(d)).sort((a, b) => b.length - a.length)
+  for (const cc of allowed) {
+    if (digits.startsWith(cc)) {
+      return { cc, nsn: digits.slice(cc.length), e164: s }
+    }
+  }
+  return null
+}
+
+function normalizeRegistrationPhoneToE164(rawPhone) {
+  const clean = cleanPhoneInput(rawPhone)
+  if (!clean) return ''
+  if (clean.startsWith('+')) {
+    return parseRegistrationE164(clean)?.e164 || ''
+  }
+  if (clean.startsWith('00')) return normalizeRegistrationPhoneToE164(`+${clean.slice(2)}`)
+  return normalizeBelgianPhoneToE164(clean)
+}
+
 function normalizePhoneForCompare(phone) {
-  return normalizeBelgianPhoneToE164(phone).replace(/\D/g, '')
+  return normalizeRegistrationPhoneToE164(phone).replace(/\D/g, '')
 }
 
 /**
@@ -87,7 +116,10 @@ function isValidEmail(email) {
 }
 
 function isValidPhone(phone) {
-  return isValidBelgianE164(normalizeBelgianPhoneToE164(phone))
+  const parsed = parseRegistrationE164(normalizeRegistrationPhoneToE164(phone))
+  if (!parsed) return false
+  if (parsed.cc === '32') return isValidBelgianNationalNumber(parsed.nsn)
+  return /^[1-9]\d{7,11}$/.test(parsed.nsn)
 }
 
 function isValidBelgianNationalNumber(nsn) {
@@ -197,7 +229,7 @@ export default async function handler(req, res) {
     const formStartedAt = Number(body.formStartedAt || 0)
     const submissionFingerprint = String(body.submissionFingerprint || '').trim().slice(0, 220)
     const normalizedVat = normalizeVatForCompare(vatNumberInput)
-    const normalizedPhoneE164 = normalizeBelgianPhoneToE164(phoneInput)
+    const normalizedPhoneE164 = normalizeRegistrationPhoneToE164(phoneInput)
     const normalizedPhone = normalizePhoneForCompare(phoneInput)
     const ipAddress = getClientIp(req)
     const userAgent = getUserAgent(req)
@@ -240,7 +272,7 @@ export default async function handler(req, res) {
     }
     if (!isValidPhone(phoneInput)) {
       return json(res, 400, {
-        error: 'Please enter a valid Belgian phone number.',
+        error: 'Please enter a valid phone number.',
       })
     }
     if (!isValidBelgianVat(vatNumberInput)) {

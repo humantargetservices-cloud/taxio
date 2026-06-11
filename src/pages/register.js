@@ -14,6 +14,8 @@ const TURNSTILE_FRONT_ENABLED =
     .toLowerCase() === 'true'
 const REG_MIN_SUBMIT_MS = 1000
 
+const PHONE_COUNTRY_DIALS = ['+32', '+31', '+352', '+33', '+49', '+44', '+212', '+90']
+
 function tr() {
   const lang = getLocale()
   return translations[lang]?.registerPage || translations.nl.registerPage
@@ -33,6 +35,64 @@ function cleanPhoneInput(raw) {
   return String(raw || '')
     .trim()
     .replace(/[\s().-]/g, '')
+}
+
+function dialDigits(dial) {
+  return String(dial || '').replace(/\D/g, '')
+}
+
+function normalizeBelgianVat(vatRaw) {
+  const s = String(vatRaw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+  let digits = ''
+  if (s.startsWith('BE')) digits = s.slice(2).replace(/\D/g, '')
+  else digits = s.replace(/\D/g, '')
+  if (digits.length > 10) digits = digits.slice(-10)
+  if (digits.length > 0 && digits.length < 10) digits = digits.padStart(10, '0')
+  return `BE${digits}`
+}
+
+function isValidBelgianVat(vatRaw) {
+  return /^BE\d{10}$/.test(normalizeBelgianVat(vatRaw))
+}
+
+function normalizePhoneToE164(countryDial, localRaw) {
+  const cc = dialDigits(countryDial)
+  if (!cc || !PHONE_COUNTRY_DIALS.includes(`+${cc}`)) return ''
+  let local = cleanPhoneInput(localRaw).replace(/\D/g, '')
+  if (!local) return ''
+  if (cc === '32') {
+    if (local.startsWith('32')) return normalizeBelgianPhoneToE164(`+${local}`)
+    if (local.startsWith('0')) local = local.slice(1)
+    if (!isValidBelgianNationalNumber(local)) return ''
+    return `+32${local}`
+  }
+  if (local.startsWith('0')) local = local.replace(/^0+/, '')
+  if (local.startsWith(cc)) local = local.slice(cc.length)
+  if (!/^[1-9]\d{7,11}$/.test(local)) return ''
+  return `+${cc}${local}`
+}
+
+function parseRegistrationE164(phone) {
+  const s = String(phone || '').trim()
+  if (!/^\+[1-9]\d{7,14}$/.test(s)) return null
+  const digits = s.slice(1)
+  const allowed = PHONE_COUNTRY_DIALS.map((d) => dialDigits(d)).sort((a, b) => b.length - a.length)
+  for (const cc of allowed) {
+    if (digits.startsWith(cc)) {
+      return { cc, nsn: digits.slice(cc.length), e164: s }
+    }
+  }
+  return null
+}
+
+function isValidE164Phone(phone) {
+  const parsed = parseRegistrationE164(phone)
+  if (!parsed) return false
+  if (parsed.cc === '32') return isValidBelgianNationalNumber(parsed.nsn)
+  return /^[1-9]\d{7,11}$/.test(parsed.nsn)
 }
 
 function normalizeBelgianPhoneToE164(rawPhone) {
@@ -116,10 +176,18 @@ export function mountRegister(root) {
             <input id="vatNumber" name="vatNumber" required placeholder="${R.phVat}" class="${ic}" />
           </div>
           <div class="space-y-2">
-            <label for="phone" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.phone} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
-            <div class="relative">
-              <span class="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold ${dark ? 'text-slate-200' : 'text-slate-600'}">+32</span>
-              <input id="phone" name="phone" type="tel" required inputmode="tel" autocomplete="tel" placeholder="470 12 34 56" class="${ic} pl-14" />
+            <label for="phoneLocal" class="text-sm font-semibold ${dark ? 'text-white' : 'text-slate-900'}">${R.phone} <span class="${dark ? 'text-amber-400' : 'text-amber-700'}">*</span></label>
+            <div class="flex gap-2">
+              <select id="phoneCountry" name="phoneCountry" class="w-[9.25rem] shrink-0 rounded-xl border px-2.5 py-3 text-sm font-medium shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 sm:w-[10.5rem] ${dark ? 'border-slate-600 bg-slate-700/90 text-white' : 'border-slate-200 bg-slate-50/80 text-slate-900'}">
+                ${(R.phoneCountries || [])
+                  .filter((c) => PHONE_COUNTRY_DIALS.includes(c.dial))
+                  .map(
+                    (c) =>
+                      `<option value="${c.dial}" ${c.dial === '+32' ? 'selected' : ''}>${c.label}</option>`
+                  )
+                  .join('')}
+              </select>
+              <input id="phoneLocal" name="phoneLocal" type="tel" required inputmode="tel" autocomplete="tel-national" placeholder="${R.phPhoneLocal}" class="${ic} min-w-0 flex-1" />
             </div>
           </div>
           <div class="space-y-2">
@@ -154,11 +222,6 @@ export function mountRegister(root) {
             <label for="terms" class="cursor-pointer text-sm leading-relaxed ${dark ? 'text-gray-300' : 'text-gray-600'}">
               ${R.acceptCompanyLead}<a href="/company-terms" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.acceptCompanyTerms}</a>${R.acceptCompanyAnd}<a href="/privacy" class="font-semibold ${dark ? 'text-yellow-400 hover:text-yellow-300' : 'text-blue-600 hover:text-blue-800'}">${R.acceptCompanyPrivacy}</a>
             </label>
-          </div>
-
-          <div id="human-wrap" class="flex items-start gap-3 rounded-2xl border-2 p-4 sm:p-5 transition-colors ${dark ? 'border-slate-600 bg-slate-700/50' : 'border-slate-200 bg-slate-50/90'}">
-            <input type="checkbox" id="reg-human" name="humanConfirmed" required class="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-yellow-500 focus:ring-yellow-500 dark:border-slate-500 dark:bg-slate-700" />
-            <label for="reg-human" class="cursor-pointer text-sm font-medium leading-relaxed ${dark ? 'text-gray-200' : 'text-gray-700'}">${R.humanConfirmLabel}</label>
           </div>
 
           <p id="reg-err" class="hidden rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800 ring-1 ring-red-100 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900/30"></p>
@@ -228,21 +291,26 @@ export function mountRegister(root) {
   const errEl = root.querySelector('#reg-err')
   const previewEl = root.querySelector('#reg-preview')
   const termsWrap = root.querySelector('#terms-wrap')
-  const humanWrap = root.querySelector('#human-wrap')
   const termsCb = root.querySelector('#terms')
-  const humanCb = root.querySelector('#reg-human')
   const overlay = root.querySelector('#reg-success-overlay')
-  const phoneInput = root.querySelector('#phone')
+  const phoneCountryEl = root.querySelector('#phoneCountry')
+  const phoneLocalEl = root.querySelector('#phoneLocal')
   const minSubmitAt = Date.now() + REG_MIN_SUBMIT_MS
   let turnstileToken = ''
+
+  function currentPhoneE164() {
+    return normalizePhoneToE164(phoneCountryEl?.value, phoneLocalEl?.value)
+  }
 
   function refreshPreviewText() {
     const fd = new FormData(form)
     const cn = fd.get('companyName') || ''
     const slug = slugFromCompanyName(cn)
+    const vatRaw = fd.get('vatNumber') || ''
+    const phoneE164 = currentPhoneE164()
     root.querySelector('#pv-company').textContent = cn || '—'
-    root.querySelector('#pv-vat').textContent = fd.get('vatNumber') || '—'
-    root.querySelector('#pv-phone').textContent = fd.get('phone') || '—'
+    root.querySelector('#pv-vat').textContent = vatRaw ? normalizeBelgianVat(vatRaw) : '—'
+    root.querySelector('#pv-phone').textContent = phoneE164 || '—'
     root.querySelector('#pv-email').textContent = fd.get('email') || '—'
     root.querySelector('#pv-city').textContent = fd.get('city') || '—'
     root.querySelector('#pv-sub').textContent = slug ? `${slug}.taxio.be` : 'companyname.taxio.be'
@@ -263,7 +331,6 @@ export function mountRegister(root) {
 
   function updateTermsStyle() {
     updateLegalCheckboxStyle(termsWrap, termsCb.checked)
-    updateLegalCheckboxStyle(humanWrap, humanCb.checked)
   }
 
   root.querySelector('#btn-preview').addEventListener('click', () => {
@@ -274,13 +341,18 @@ export function mountRegister(root) {
   const submitBtn = root.querySelector('#btn-submit')
   function syncSubmitEnabled() {
     updateTermsStyle()
-    submitBtn.disabled = !(termsCb.checked && humanCb.checked)
+    submitBtn.disabled = !termsCb.checked
   }
   termsCb.addEventListener('change', syncSubmitEnabled)
-  humanCb.addEventListener('change', syncSubmitEnabled)
   syncSubmitEnabled()
 
   form.querySelector('#companyName')?.addEventListener('input', () => {
+    if (!previewEl.classList.contains('hidden')) refreshPreviewText()
+  })
+  phoneCountryEl?.addEventListener('change', () => {
+    if (!previewEl.classList.contains('hidden')) refreshPreviewText()
+  })
+  phoneLocalEl?.addEventListener('input', () => {
     if (!previewEl.classList.contains('hidden')) refreshPreviewText()
   })
 
@@ -306,29 +378,25 @@ export function mountRegister(root) {
       errEl.classList.remove('hidden')
       return
     }
-    if (!humanCb.checked) {
-      errEl.textContent = R.humanError
-      errEl.classList.remove('hidden')
-      return
-    }
     const fd = new FormData(form)
     if (Date.now() < minSubmitAt) {
       errEl.textContent = R.waitBeforeSubmitError
       errEl.classList.remove('hidden')
       return
     }
-    const normalizedPhone = normalizeBelgianPhoneToE164(fd.get('phone'))
-    if (!isValidBelgianE164(normalizedPhone)) {
-      errEl.textContent =
-        'Please enter a valid Belgian phone number (e.g. 0470 12 34 56 or 02 123 45 67).'
+    const countryDial = phoneCountryEl?.value || '+32'
+    const normalizedPhone = normalizePhoneToE164(countryDial, fd.get('phoneLocal'))
+    if (!normalizedPhone || !isValidE164Phone(normalizedPhone)) {
+      errEl.textContent = R.phoneError
       errEl.classList.remove('hidden')
       return
     }
-    const companyName = String(fd.get('companyName') || '').trim().toLowerCase()
-    const vatNumber = String(fd.get('vatNumber') || '')
-      .trim()
-      .toUpperCase()
-      .replace(/\s+/g, '')
+    const vatNumber = normalizeBelgianVat(fd.get('vatNumber'))
+    if (!isValidBelgianVat(vatNumber)) {
+      errEl.textContent = R.vatError
+      errEl.classList.remove('hidden')
+      return
+    }
     if (TURNSTILE_FRONT_ENABLED && TURNSTILE_SITE_KEY && !turnstileToken) {
       errEl.textContent = 'Please complete the security check before submitting.'
       errEl.classList.remove('hidden')
@@ -336,7 +404,7 @@ export function mountRegister(root) {
     }
     const payload = {
       companyName: fd.get('companyName'),
-      vatNumber: fd.get('vatNumber'),
+      vatNumber,
       phone: normalizedPhone,
       email: fd.get('email'),
       city: fd.get('city'),
@@ -354,7 +422,7 @@ export function mountRegister(root) {
     btn.textContent = R.btnSubmitting
     const { data, error } = await registerCompanyOwner(payload)
     btn.textContent = R.btnSubmit
-    btn.disabled = !(termsCb.checked && humanCb.checked)
+    btn.disabled = !termsCb.checked
     if (error) {
       errEl.textContent = error.message || String(error)
       errEl.classList.remove('hidden')
@@ -374,11 +442,6 @@ export function mountRegister(root) {
     overlay.classList.remove('hidden')
     overlay.classList.add('flex')
     overlay.setAttribute('aria-hidden', 'false')
-  })
-
-  phoneInput?.addEventListener('blur', () => {
-    const normalized = normalizeBelgianPhoneToE164(phoneInput.value)
-    if (normalized) phoneInput.value = normalized
   })
 
   function closeSuccess() {
