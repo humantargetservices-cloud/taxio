@@ -423,27 +423,16 @@ export const translations = {
       waitBeforeSubmitError: 'Please wait a moment before submitting.',
       btnSubmit: 'Submit Registration',
       btnSubmitting: 'Submitting...',
-      successTitle: 'Registration Request Submitted!',
-      successThanks: 'Thank you for registering with',
-      successP1:
-        'Your registration has been received successfully. Our team will review it and contact you shortly.',
-      successAddrLabel: 'Reserved address (preview):',
-      successReservedNote: 'Booking page and dashboard unlock after approval.',
-      successBookingLabel: 'Public booking link (this app):',
-      successNextTitle: 'What happens next?',
-      successNext1: 'Our team reviews your company details (VAT, phone, etc.).',
-      successNext2Lead: 'After approval, we email',
-      successNext2Tail:
-        ' with a temporary password plus links to company login and your booking page.',
-      successAfterApprovalTitle: 'After approval (by email)',
-      successAfterBulletEmail: 'Confirmation that your company is approved',
-      successAfterBulletLogin: 'Your login email and a temporary password',
-      successAfterBulletLinks: 'Links to the company login page and your public booking page',
-      successAfterBulletPassword: 'Instructions to change your password on first login',
-      successFoot3: 'Review usually takes about 1–2 business days',
-      successEmailNote:
-        'No login email yet — only our team is notified. Credentials are sent after approval.',
-      gotIt: 'Got it!',
+      successTitle: 'Thank you for applying for your TAXIO website.',
+      successBodyIntro:
+        'After approval, your website will be ready to use. You will receive an email with:',
+      successBullet1: 'your booking website link to share with your customers',
+      successBullet2:
+        'your QR code so customers can scan and book with your company',
+      successBullet3:
+        'your dashboard link to set prices and configure your company portal',
+      successBodyClosing: 'Please follow the instructions in the email.',
+      gotIt: 'Close',
     },
   },
   fr: {
@@ -871,28 +860,17 @@ export const translations = {
       waitBeforeSubmitError: 'Veuillez patienter un instant avant d’envoyer.',
       btnSubmit: "Envoyer l'inscription",
       btnSubmitting: 'Envoi...',
-      successTitle: 'Demande envoyée !',
-      successThanks: 'Merci de vous être inscrit sur',
-      successP1:
-        'Votre inscription a bien été enregistrée. Notre équipe l’examinera et vous contactera sous peu.',
-      successAddrLabel: 'Adresse réservée (aperçu) :',
-      successReservedNote: 'Page publique et tableau de bord après validation.',
-      successBookingLabel: 'Lien de réservation (cette app) :',
-      successNextTitle: 'Et ensuite ?',
-      successNext1: 'Notre équipe vérifie vos informations (TVA, téléphone, etc.).',
-      successNext2Lead: 'Après validation, nous envoyons un e-mail à',
-      successNext2Tail:
-        ' avec un mot de passe temporaire et les liens vers la connexion entreprise et votre page de réservation.',
-      successAfterApprovalTitle: 'Après approbation (par e-mail)',
-      successAfterBulletEmail: 'La confirmation que votre entreprise est approuvée',
-      successAfterBulletLogin: 'Votre e-mail de connexion et un mot de passe temporaire',
-      successAfterBulletLinks:
-        'Les liens vers la page de connexion entreprise et votre page de réservation publique',
-      successAfterBulletPassword: 'La consigne de changer le mot de passe à la première connexion',
-      successFoot3: 'Délai habituel : 1–2 jours ouvrables',
-      successEmailNote:
-        'Pas d’e-mail de connexion pour l’instant — seule notre équipe est notifiée. Identifiants après approbation.',
-      gotIt: "C'est compris !",
+      successTitle: 'Merci pour votre demande de site web TAXIO.',
+      successBodyIntro:
+        'Après approbation, votre site sera prêt à être utilisé. Vous recevrez un e-mail avec :',
+      successBullet1:
+        'le lien de votre site de réservation à partager avec vos clients',
+      successBullet2:
+        'votre QR code pour que les clients puissent scanner et réserver auprès de votre entreprise',
+      successBullet3:
+        'le lien de votre tableau de bord pour définir vos tarifs et configurer votre portail entreprise',
+      successBodyClosing: 'Veuillez suivre les instructions dans l’e-mail.',
+      gotIt: 'Fermer',
     },
   },
   nl: {
@@ -1319,27 +1297,16 @@ export const translations = {
       waitBeforeSubmitError: 'Wacht even voordat u dit verzendt.',
       btnSubmit: 'Registratie verzenden',
       btnSubmitting: 'Bezig met verzenden...',
-      successTitle: 'Registratie ontvangen!',
-      successThanks: 'Bedankt voor uw registratie bij',
-      successP1:
-        'Uw registratie is succesvol ontvangen. Ons team bekijkt ze en neemt spoedig contact met u op.',
-      successAddrLabel: 'Gereserveerd adres (voorbeeld):',
-      successReservedNote: 'Boekingspagina en dashboard na goedkeuring.',
-      successBookingLabel: 'Openbare boekingslink (deze app):',
-      successNextTitle: 'Wat gebeurt er nu?',
-      successNext1: 'Ons team controleert uw gegevens (BTW, telefoon, enz.).',
-      successNext2Lead: 'Na goedkeuring sturen we een e-mail naar',
-      successNext2Tail:
-        ' met een tijdelijk wachtwoord en links naar de bedrijfslogin en uw boekingspagina.',
-      successAfterApprovalTitle: 'Na goedkeuring (per e-mail)',
-      successAfterBulletEmail: 'Bevestiging dat uw bedrijf is goedgekeurd',
-      successAfterBulletLogin: 'Uw inlog-e-mailadres en een tijdelijk wachtwoord',
-      successAfterBulletLinks: 'Links naar de bedrijfslogin en uw openbare boekingspagina',
-      successAfterBulletPassword: 'Instructie om het wachtwoord bij eerste login te wijzigen',
-      successFoot3: 'Dit duurt meestal 1–2 werkdagen',
-      successEmailNote:
-        'Nog geen login-e-mail — alleen ons team wordt verwittigd. Inloggegevens na goedkeuring.',
-      gotIt: 'Begrepen!',
+      successTitle: 'Bedankt voor uw aanvraag voor uw TAXIO-website.',
+      successBodyIntro:
+        'Na goedkeuring is uw website klaar voor gebruik. U ontvangt een e-mail met:',
+      successBullet1: 'uw boekingswebsite om met uw klanten te delen',
+      successBullet2:
+        'uw QR-code waarmee klanten kunnen scannen en boeken bij uw bedrijf',
+      successBullet3:
+        'uw dashboardlink om prijzen in te stellen en uw bedrijfsportaal te configureren',
+      successBodyClosing: 'Volg de instructies in de e-mail.',
+      gotIt: 'Sluiten',
     },
   },
 }

@@ -253,32 +253,14 @@ export function mountRegister(root) {
         </div>
       </div>
       <h2 class="text-center text-2xl font-bold ${dark ? 'text-green-400' : 'text-green-600'}">${R.successTitle}</h2>
-      <div class="mt-4 space-y-4 text-center ${dark ? 'text-gray-300' : 'text-gray-600'}">
-        <p class="text-lg ${dark ? 'text-white' : 'text-slate-900'}">${R.successThanks} <strong class="${dark ? 'text-yellow-400' : 'text-blue-600'}">TAXIO</strong>!</p>
-        <p class="text-sm">${R.successP1}</p>
-        <div class="rounded-xl border-2 p-4 text-left ${dark ? 'border-blue-500/30 bg-slate-700/50' : 'border-blue-200 bg-blue-50'}">
-          <p class="text-xs font-semibold uppercase tracking-wide ${dark ? 'text-gray-400' : 'text-gray-600'}">${R.successAddrLabel}</p>
-          <p id="succ-subdomain" class="mt-2 text-center font-mono text-xl font-bold ${dark ? 'text-yellow-400' : 'text-blue-600'}"></p>
-          <p class="mt-2 text-xs ${dark ? 'text-gray-400' : 'text-gray-600'}">${R.successReservedNote}</p>
-        </div>
-        <div class="rounded-xl border-2 p-4 text-left ${dark ? 'border-slate-600 bg-slate-700/40' : 'border-gray-200 bg-gray-50'}">
-          <p class="mb-2 text-sm font-bold ${dark ? 'text-white' : 'text-slate-900'}">${R.successNextTitle}</p>
-          <ul class="space-y-2 text-left text-sm ${dark ? 'text-gray-300' : 'text-gray-700'}">
-            <li class="flex gap-2"><span>•</span><span>${R.successNext1}</span></li>
-            <li class="flex gap-2"><span>•</span><span>${R.successNext2Lead} <strong id="succ-email-inline" class="${dark ? 'text-yellow-400' : 'text-blue-600'}"></strong>${R.successNext2Tail}</span></li>
-            <li class="flex gap-2 text-xs opacity-90"><span>⏱️</span><span>${R.successFoot3}</span></li>
-          </ul>
-        </div>
-        <div class="rounded-xl border-2 p-4 text-left ${dark ? 'border-amber-700/40 bg-amber-950/30' : 'border-amber-200 bg-amber-50'}">
-          <p class="mb-3 text-sm font-bold ${dark ? 'text-amber-200' : 'text-amber-900'}">📩 ${R.successAfterApprovalTitle}</p>
-          <ul class="space-y-2 text-left text-sm ${dark ? 'text-gray-300' : 'text-gray-700'}">
-            <li class="flex gap-2"><span>•</span><span>${R.successAfterBulletEmail}</span></li>
-            <li class="flex gap-2"><span>•</span><span>${R.successAfterBulletLogin}</span></li>
-            <li class="flex gap-2"><span>•</span><span>${R.successAfterBulletLinks}</span></li>
-            <li class="flex gap-2"><span>•</span><span>${R.successAfterBulletPassword}</span></li>
-          </ul>
-        </div>
-        <p class="text-xs">${R.successEmailNote}</p>
+      <div class="mt-4 space-y-4 text-left ${dark ? 'text-gray-300' : 'text-gray-600'}">
+        <p class="text-sm ${dark ? 'text-gray-300' : 'text-gray-700'}">${R.successBodyIntro}</p>
+        <ul class="space-y-2 text-sm ${dark ? 'text-gray-300' : 'text-gray-700'}">
+          <li class="flex gap-2"><span>•</span><span>${R.successBullet1}</span></li>
+          <li class="flex gap-2"><span>•</span><span>${R.successBullet2}</span></li>
+          <li class="flex gap-2"><span>•</span><span>${R.successBullet3}</span></li>
+        </ul>
+        <p class="text-sm ${dark ? 'text-gray-300' : 'text-gray-700'}">${R.successBodyClosing}</p>
       </div>
       <div class="mt-6 flex justify-center">
         <button type="button" id="succ-gotit" class="rounded-xl px-10 py-3.5 text-sm font-bold text-white shadow-md ${dark ? 'bg-green-500 hover:bg-green-400' : 'bg-green-600 hover:bg-green-700'}">${R.gotIt}</button>
@@ -428,7 +410,6 @@ export function mountRegister(root) {
       errEl.classList.remove('hidden')
       return
     }
-    const slug = data.slug
     // Registration is request submission only; ensure no stale auth session can
     // route user into authenticated flows (dashboard/change-password).
     try {
@@ -436,8 +417,6 @@ export function mountRegister(root) {
     } catch {
       /* no-op */
     }
-    root.querySelector('#succ-subdomain').textContent = `${slug}.taxio.be`
-    root.querySelector('#succ-email-inline').textContent = payload.email
     localStorage.removeItem('pendingRegistration')
     overlay.classList.remove('hidden')
     overlay.classList.add('flex')
