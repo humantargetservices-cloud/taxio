@@ -82,7 +82,7 @@ export function mountLanding(root) {
         <div class="flex flex-col rounded-2xl border shadow-sm transition-shadow hover:shadow-md ${t ? 'border-slate-700/80 bg-slate-800/60' : 'border-slate-200/90 bg-white'}">
           <div class="flex flex-1 flex-col px-6 pt-8 pb-4 text-center">
             <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl shadow-sm ring-1 ring-black/5 ${t ? 'bg-slate-700' : 'bg-slate-100'}">
-              ${icon.building2(`h-7 w-7 ${t ? 'text-yellow-400' : 'text-amber-600'}`)}
+              ${icon.car(`h-7 w-7 ${t ? 'text-yellow-400' : 'text-amber-600'}`)}
             </div>
             <h4 class="mb-2 text-lg font-semibold tracking-tight ${t ? 'text-white' : 'text-gray-900'}">${o.loginCard.title}</h4>
             <p class="text-sm leading-relaxed ${t ? 'text-gray-400' : 'text-gray-600'}">${o.loginCard.desc}</p>
