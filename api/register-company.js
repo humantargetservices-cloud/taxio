@@ -223,7 +223,9 @@ export default async function handler(req, res) {
       if (!Number.isNaN(d.getTime())) companyTermsAcceptedAt = d.toISOString()
     }
     const companyTermsVersion = String(body.termsVersion || '').trim() || null
-    const preferred_locale = normalizeCompanyLocale(body.locale || body.preferred_locale)
+    const preferred_locale = normalizeCompanyLocale(
+      body.locale || body.preferredLanguage || body.preferred_locale,
+    )
     const turnstileToken = String(body.turnstileToken || '').trim()
     const honeypot = String(body.companyWebsite || '').trim()
     const formStartedAt = Number(body.formStartedAt || 0)

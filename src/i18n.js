@@ -423,16 +423,19 @@ export const translations = {
       waitBeforeSubmitError: 'Please wait a moment before submitting.',
       btnSubmit: 'Submit Registration',
       btnSubmitting: 'Submitting...',
-      successTitle: 'Thank you for applying for your TAXIO website.',
-      successBodyIntro:
-        'After approval, your website will be ready to use. You will receive an email with:',
-      successBullet1: 'your booking website link to share with your customers',
-      successBullet2:
-        'your QR code so customers can scan and book with your company',
-      successBullet3:
-        'your dashboard link to set prices and configure your company portal',
-      successBodyClosing: 'Please follow the instructions in the email.',
-      gotIt: 'Close',
+      successTitle: 'Application sent!',
+      successSubtitle: 'Thank you for your registration. We take it from here.',
+      successBookingEyebrow: 'YOUR BOOKING WEBSITE',
+      successBookingNote: 'Will be activated after approval',
+      successNextTitle: 'Next steps',
+      successStep1: 'Our team checks your company details',
+      successStep1Badge: '1–2 working days',
+      successStep2:
+        'You receive an email with your login details and booking website link',
+      successStep3:
+        'You log in, set up your prices and QR code, and start receiving bookings',
+      gotIt: 'Got it!',
+      successBackHome: 'Back to home',
     },
   },
   fr: {
@@ -860,17 +863,19 @@ export const translations = {
       waitBeforeSubmitError: 'Veuillez patienter un instant avant d’envoyer.',
       btnSubmit: "Envoyer l'inscription",
       btnSubmitting: 'Envoi...',
-      successTitle: 'Merci pour votre demande de site web TAXIO.',
-      successBodyIntro:
-        'Après approbation, votre site sera prêt à être utilisé. Vous recevrez un e-mail avec :',
-      successBullet1:
-        'le lien de votre site de réservation à partager avec vos clients',
-      successBullet2:
-        'votre QR code pour que les clients puissent scanner et réserver auprès de votre entreprise',
-      successBullet3:
-        'le lien de votre tableau de bord pour définir vos tarifs et configurer votre portail entreprise',
-      successBodyClosing: 'Veuillez suivre les instructions dans l’e-mail.',
-      gotIt: 'Fermer',
+      successTitle: 'Demande envoyée !',
+      successSubtitle: 'Merci pour votre inscription. Nous nous occupons de la suite.',
+      successBookingEyebrow: 'VOTRE SITE DE RÉSERVATION',
+      successBookingNote: 'Sera activé après approbation',
+      successNextTitle: 'Prochaines étapes',
+      successStep1: 'Notre équipe vérifie les informations de votre entreprise',
+      successStep1Badge: '1–2 jours ouvrables',
+      successStep2:
+        'Vous recevez un e-mail avec vos identifiants et le lien de votre site de réservation',
+      successStep3:
+        'Vous vous connectez, configurez vos tarifs et votre QR code, puis vous pouvez recevoir des réservations',
+      gotIt: 'Compris !',
+      successBackHome: "Retour à l'accueil",
     },
   },
   nl: {
@@ -1297,16 +1302,19 @@ export const translations = {
       waitBeforeSubmitError: 'Wacht even voordat u dit verzendt.',
       btnSubmit: 'Registratie verzenden',
       btnSubmitting: 'Bezig met verzenden...',
-      successTitle: 'Bedankt voor uw aanvraag voor uw TAXIO-website.',
-      successBodyIntro:
-        'Na goedkeuring is uw website klaar voor gebruik. U ontvangt een e-mail met:',
-      successBullet1: 'uw boekingswebsite om met uw klanten te delen',
-      successBullet2:
-        'uw QR-code waarmee klanten kunnen scannen en boeken bij uw bedrijf',
-      successBullet3:
-        'uw dashboardlink om prijzen in te stellen en uw bedrijfsportaal te configureren',
-      successBodyClosing: 'Volg de instructies in de e-mail.',
-      gotIt: 'Sluiten',
+      successTitle: 'Aanvraag verzonden!',
+      successSubtitle: 'Bedankt voor uw registratie. We nemen het van hier over.',
+      successBookingEyebrow: 'UW BOEKINGSWEBSITE',
+      successBookingNote: 'Wordt geactiveerd na goedkeuring',
+      successNextTitle: 'Volgende stappen',
+      successStep1: 'Ons team controleert uw bedrijfsgegevens',
+      successStep1Badge: '1–2 werkdagen',
+      successStep2:
+        'U ontvangt een e-mail met uw inloggegevens en uw boekingswebsite-link',
+      successStep3:
+        'U logt in, stelt uw prijzen en QR-code in, en kunt boekingen ontvangen',
+      gotIt: 'Begrepen!',
+      successBackHome: 'Terug naar home',
     },
   },
 }

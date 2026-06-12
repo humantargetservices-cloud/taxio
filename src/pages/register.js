@@ -244,26 +244,42 @@ export function mountRegister(root) {
     </div>
   </div>
 
-  <div id="reg-success-overlay" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/50 p-4" aria-hidden="true">
-    <div class="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border p-6 shadow-2xl ${dark ? 'border-slate-600 bg-slate-800' : 'border-gray-200 bg-white'}">
-      <button type="button" id="succ-close" class="absolute right-4 top-4 rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700" aria-label="Close">${icon.x('h-5 w-5')}</button>
-      <div class="mb-4 flex justify-center pt-2">
-        <div class="flex h-24 w-24 items-center justify-center rounded-full bg-green-500 shadow-lg ring-4 ring-green-200 dark:ring-green-900/40">
-          ${icon.check('h-14 w-14 text-white stroke-[3]')}
+  <div id="reg-success-overlay" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/60 p-4" aria-hidden="true">
+    <div class="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl sm:p-8">
+      <button type="button" id="succ-close" class="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Close">${icon.x('h-5 w-5')}</button>
+      <div class="mb-5 flex justify-center pt-1">
+        <div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+          ${icon.check('h-8 w-8 text-green-600 stroke-[2.5]')}
         </div>
       </div>
-      <h2 class="text-center text-2xl font-bold ${dark ? 'text-green-400' : 'text-green-600'}">${R.successTitle}</h2>
-      <div class="mt-4 space-y-4 text-left ${dark ? 'text-gray-300' : 'text-gray-600'}">
-        <p class="text-sm ${dark ? 'text-gray-300' : 'text-gray-700'}">${R.successBodyIntro}</p>
-        <ul class="space-y-2 text-sm ${dark ? 'text-gray-300' : 'text-gray-700'}">
-          <li class="flex gap-2"><span>•</span><span>${R.successBullet1}</span></li>
-          <li class="flex gap-2"><span>•</span><span>${R.successBullet2}</span></li>
-          <li class="flex gap-2"><span>•</span><span>${R.successBullet3}</span></li>
-        </ul>
-        <p class="text-sm ${dark ? 'text-gray-300' : 'text-gray-700'}">${R.successBodyClosing}</p>
+      <h2 class="text-center text-2xl font-bold tracking-tight text-slate-900">${R.successTitle}</h2>
+      <p class="mt-2 text-center text-sm leading-relaxed text-slate-600">${R.successSubtitle}</p>
+      <div class="mt-6 rounded-xl bg-slate-900 px-4 py-5 text-center">
+        <p class="text-[10px] font-semibold uppercase tracking-[0.15em] text-amber-400">${R.successBookingEyebrow}</p>
+        <p id="succ-subdomain" class="mt-2 break-all font-mono text-lg font-bold text-white">companyname.taxio.be</p>
+        <p class="mt-2 text-xs text-slate-400">${R.successBookingNote}</p>
       </div>
-      <div class="mt-6 flex justify-center">
-        <button type="button" id="succ-gotit" class="rounded-xl px-10 py-3.5 text-sm font-bold text-white shadow-md ${dark ? 'bg-green-500 hover:bg-green-400' : 'bg-green-600 hover:bg-green-700'}">${R.gotIt}</button>
+      <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p class="mb-4 text-sm font-bold text-slate-900">${R.successNextTitle}</p>
+        <div class="mb-4 flex gap-3">
+          <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">1</div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm leading-snug text-slate-700">${R.successStep1}</p>
+            <span class="mt-1.5 inline-block rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">${R.successStep1Badge}</span>
+          </div>
+        </div>
+        <div class="mb-4 flex gap-3">
+          <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">2</div>
+          <p class="min-w-0 flex-1 text-sm leading-snug text-slate-700">${R.successStep2}</p>
+        </div>
+        <div class="flex gap-3">
+          <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">3</div>
+          <p class="min-w-0 flex-1 text-sm leading-snug text-slate-700">${R.successStep3}</p>
+        </div>
+      </div>
+      <div class="mt-6 flex flex-col gap-3 sm:flex-row">
+        <button type="button" id="succ-gotit" class="inline-flex flex-1 items-center justify-center rounded-xl bg-green-600 px-4 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-green-700">${R.gotIt}</button>
+        <button type="button" id="succ-home" class="inline-flex flex-1 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">${R.successBackHome}</button>
       </div>
     </div>
   </div>
@@ -394,6 +410,7 @@ export function mountRegister(root) {
       termsAcceptedAt: new Date().toISOString(),
       termsVersion: REGISTRATION_TERMS_BUNDLE,
       locale: getLocale(),
+      preferredLanguage: getLocale(),
       turnstileToken: turnstileToken || null,
       companyWebsite: String(fd.get('companyWebsite') || ''),
       formStartedAt: minSubmitAt - REG_MIN_SUBMIT_MS,
@@ -417,6 +434,8 @@ export function mountRegister(root) {
     } catch {
       /* no-op */
     }
+    const slug = data?.slug || slugFromCompanyName(payload.companyName)
+    root.querySelector('#succ-subdomain').textContent = slug ? `${slug}.taxio.be` : 'companyname.taxio.be'
     localStorage.removeItem('pendingRegistration')
     overlay.classList.remove('hidden')
     overlay.classList.add('flex')
@@ -430,6 +449,9 @@ export function mountRegister(root) {
   }
 
   root.querySelector('#succ-gotit').addEventListener('click', () => {
+    closeSuccess()
+  })
+  root.querySelector('#succ-home').addEventListener('click', () => {
     closeSuccess()
     navigate('/')
   })
