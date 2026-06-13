@@ -33,6 +33,21 @@ function bookingCarTypeSeatsLabel(t) {
   return '1–4'
 }
 
+function bookingCarTypeLabel(type, tb) {
+  const s = String(type || '').toLowerCase()
+  if (s.includes('van')) return tb.carTypeVan || 'Van'
+  if (s.includes('lux')) return tb.carTypeLuxury || 'Luxury'
+  return tb.carTypeStandard || 'Standard'
+}
+
+function fillWaTemplate(template, vars) {
+  let s = String(template || '')
+  for (const [key, val] of Object.entries(vars)) {
+    s = s.split(`{${key}}`).join(String(val ?? ''))
+  }
+  return s
+}
+
 /** Icon for booking vehicle type row (HTML string). */
 function bookingCarTypeIconHtml(t, sizeClass) {
   const s = String(t).toLowerCase()
@@ -359,9 +374,6 @@ function normalizeContactPhone(phone) {
   return `+${digits}`
 }
 
-const BK_ERR_NO_WA =
-  'This taxi company has no valid WhatsApp number yet. Please call or email them.'
-
 /** Digits-only international number for https://wa.me/<digits> (no +). */
 function whatsappDigitsForWaMe(rawPhone) {
   const normalized = normalizeContactPhone(rawPhone)
@@ -465,7 +477,7 @@ export async function mountBookCompany(root, slug) {
           const seats = bookingCarTypeSeatsLabel(t)
           const iconH = bookingCarTypeIconHtml(t, 'h-6 w-6')
           const on = t === defaultSelectedCar
-          return `<button type="button" role="option" data-car="${escapeHtml(t)}" aria-selected="${on ? 'true' : 'false'}" class="${bkCarOptBase}${on ? bkCarOptOn : bkCarOptOff}"><span class="flex shrink-0">${iconH}</span><span class="min-w-0 flex-1"><span class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(t)}</span><span class="mt-0.5 block text-xs font-medium text-slate-500 dark:text-slate-400">${escapeHtml(seats)}</span></span></button>`
+          return `<button type="button" role="option" data-car="${escapeHtml(t)}" aria-selected="${on ? 'true' : 'false'}" class="${bkCarOptBase}${on ? bkCarOptOn : bkCarOptOff}"><span class="flex shrink-0">${iconH}</span><span class="min-w-0 flex-1"><span class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(bookingCarTypeLabel(t, tb))}</span><span class="mt-0.5 block text-xs font-medium text-slate-500 dark:text-slate-400">${escapeHtml(seats)}</span></span></button>`
         })
         .join('')
 
@@ -486,7 +498,7 @@ export async function mountBookCompany(root, slug) {
               ? `<button type="button" id="bk-car-trigger" class="mt-2 flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border-2 border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-amber-300/80 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600 dark:bg-slate-800/90 dark:hover:border-amber-400/40 dark:focus:ring-amber-400/25" aria-expanded="false" aria-haspopup="listbox" aria-controls="bk-car-panel">
                   <span id="bk-car-trigger-icon" class="flex shrink-0">${bookingCarTypeIconHtml(defaultSelectedCar, 'h-7 w-7')}</span>
                   <span class="min-w-0 flex-1">
-                    <span id="bk-car-trigger-name" class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(defaultSelectedCar)}</span>
+                    <span id="bk-car-trigger-name" class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(bookingCarTypeLabel(defaultSelectedCar, tb))}</span>
                     <span id="bk-car-trigger-seats" class="mt-0.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">${escapeHtml(bookingCarTypeSeatsLabel(defaultSelectedCar))}</span>
                   </span>
                   <span id="bk-car-chevron" class="shrink-0 text-slate-400 transition-transform duration-200 dark:text-slate-500">${icon.chevronDown('h-5 w-5')}</span>
@@ -494,13 +506,13 @@ export async function mountBookCompany(root, slug) {
                 <div id="bk-car-panel" class="pointer-events-auto absolute left-0 right-0 top-full z-[80] mt-1.5 hidden max-h-[min(22rem,55vh)] overflow-y-auto overflow-x-hidden rounded-xl border border-slate-200 bg-white py-0.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/[0.06] dark:border-slate-600 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/10" role="listbox" aria-label="${escapeHtml(tb.carTypesListAria)}">
                   ${bkCarOptsHtml}
                 </div>`
-              : `<div class="mt-2 flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border-2 border-amber-300/70 bg-amber-50/70 px-4 py-3 text-left shadow-sm ring-1 ring-amber-200/60 dark:border-amber-400/35 dark:bg-amber-400/10 dark:ring-amber-400/15" aria-label="${escapeHtml(defaultSelectedCar)}">
+              : `<div class="mt-2 flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border-2 border-amber-300/70 bg-amber-50/70 px-4 py-3 text-left shadow-sm ring-1 ring-amber-200/60 dark:border-amber-400/35 dark:bg-amber-400/10 dark:ring-amber-400/15" aria-label="${escapeHtml(bookingCarTypeLabel(defaultSelectedCar, tb))}">
                   <span class="flex shrink-0">${bookingCarTypeIconHtml(defaultSelectedCar, 'h-7 w-7')}</span>
                   <span class="min-w-0 flex-1">
-                    <span class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(defaultSelectedCar)}</span>
+                    <span class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(bookingCarTypeLabel(defaultSelectedCar, tb))}</span>
                     <span class="mt-0.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">${escapeHtml(bookingCarTypeSeatsLabel(defaultSelectedCar))}</span>
                   </span>
-                  <span class="shrink-0 rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-900">Selected</span>
+                  <span class="shrink-0 rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-900">${escapeHtml(tb.carSelectedBadge)}</span>
                 </div>`
           }
         </div>`
@@ -814,7 +826,7 @@ export async function mountBookCompany(root, slug) {
     const nameEl = root.querySelector('#bk-car-trigger-name')
     const seatsEl = root.querySelector('#bk-car-trigger-seats')
     const iconEl = root.querySelector('#bk-car-trigger-icon')
-    if (nameEl) nameEl.textContent = selectedCar
+    if (nameEl) nameEl.textContent = bookingCarTypeLabel(selectedCar, tBooking(getLocale()))
     if (seatsEl) seatsEl.textContent = bookingCarTypeSeatsLabel(selectedCar)
     if (iconEl) iconEl.innerHTML = bookingCarTypeIconHtml(selectedCar, 'h-7 w-7')
     root.querySelectorAll('.bk-car-opt').forEach((btn) => {
@@ -826,42 +838,54 @@ export async function mountBookCompany(root, slug) {
   }
 
   function buildWhatsappBookingMessage() {
+    const msgs = tBooking(getLocale())
     const pu = pickupEl.value.trim()
+    const carLabel = bookingCarTypeLabel(selectedCar, msgs)
+
     if (isHourlyMode()) {
       const startRaw = hourlyStartEl?.value || ''
       const hours = Number(hourlyHoursEl?.value)
       const notes = String(hourlyNotesEl?.value || '').trim()
-      const svcLabel = hourlyServiceLabelForLocale(getLocale())
-      const refLine = `from €${hourlyCfg.rateEur}/hour, minimum ${hourlyCfg.minHours} hours`
-      let msg = `Hello ${company.name},
-I would like to request a by-hour taxi service.
-
-Service: By hour / ${svcLabel}
-Pickup: ${pu}
-Start time: ${startRaw}
-Duration: ${hours} hours
-Car type: ${selectedCar}
-Reference price: ${refLine}`
-      if (notes) msg += `\nNotes: ${notes}`
-      msg += `\n\nFinal price to be confirmed with the taxi company.`
-      return msg
+      const lines = [msgs.waHourlyIntro]
+      lines.push(fillWaTemplate(msgs.waLineCompany, { company: company.name }))
+      lines.push(fillWaTemplate(msgs.waLinePickup, { pickup: pu }))
+      lines.push(fillWaTemplate(msgs.waLineStartTime, { startTime: startRaw }))
+      const durationVal = fillWaTemplate(msgs.waDurationHours, {
+        hours: String(Number.isFinite(hours) ? hours : hourlyCfg.minHours),
+      })
+      lines.push(fillWaTemplate(msgs.waLineDuration, { duration: durationVal }))
+      lines.push(fillWaTemplate(msgs.waLineService, { serviceLabel: msgs.byHour }))
+      if (notes) lines.push(fillWaTemplate(msgs.waLineNotes, { notes }))
+      const refPrice = fillWaTemplate(msgs.waHourlyRefPriceValue, {
+        rate: String(hourlyCfg.rateEur),
+        min: String(hourlyCfg.minHours),
+      })
+      if (refPrice) lines.push(fillWaTemplate(msgs.waLineRefPrice, { estimate: refPrice }))
+      return lines.join('\n')
     }
+
     const doff = dropEl.value.trim()
-    const whenLine =
+    const whenText =
       rideMode === 'schedule'
-        ? `Scheduled time: ${scheduleInput?.value || ''}`.trim()
-        : 'Ride: Now'
-    let msg = `Hello, I would like to book a ride.
+        ? scheduleInput?.value
+          ? `${msgs.waWhenScheduled}: ${scheduleInput.value}`
+          : msgs.waWhenScheduled
+        : msgs.waWhenRideNow
 
-Company: ${company.name}
-Pick-up: ${pu}
-Drop-off: ${doff}
-${whenLine}
-Car type: ${selectedCar}`
-    if (latestEstimate) {
-      msg += `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+    const lines = [msgs.waStandardIntro]
+    lines.push(fillWaTemplate(msgs.waLineCompany, { company: company.name }))
+    lines.push(fillWaTemplate(msgs.waLinePickup, { pickup: pu }))
+    lines.push(fillWaTemplate(msgs.waLineDropoff, { dropoff: doff }))
+    lines.push(fillWaTemplate(msgs.waLineWhen, { when: whenText }))
+    lines.push(fillWaTemplate(msgs.waLineCarType, { carType: carLabel }))
+    if (latestEstimate?.estimatedPrice != null) {
+      lines.push(
+        fillWaTemplate(msgs.waLineEstimatedPrice, {
+          estimate: `€${latestEstimate.estimatedPrice}`,
+        })
+      )
     }
-    return msg
+    return lines.join('\n')
   }
 
   function buildMailtoHref() {
@@ -1462,7 +1486,7 @@ Estimate price: ${estimatePrice}`
     const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
 
     if (!companyWhatsAppDigits) {
-      errEl.textContent = BK_ERR_NO_WA
+      errEl.textContent = msgs.errNoPhone
       errEl.classList.remove('hidden')
       return
     }
@@ -1507,7 +1531,7 @@ Estimate price: ${estimatePrice}`
     const bookingMessageText = buildWhatsappBookingMessage()
     const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
     if (!url) {
-      errEl.textContent = BK_ERR_NO_WA
+      errEl.textContent = msgs.errNoPhone
       errEl.classList.remove('hidden')
       return
     }
