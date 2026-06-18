@@ -668,13 +668,6 @@ export async function mountBookCompany(root, slug) {
               </label>
             </div>
 
-            <div class="rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-4 ring-1 ring-slate-900/[0.04] dark:border-slate-700/60 dark:bg-slate-800/40 dark:ring-white/[0.04] sm:px-5 sm:py-5">
-              <label class="flex cursor-pointer items-start gap-3">
-                <input type="checkbox" id="bk-human" required class="mt-0.5 h-[18px] w-[18px] shrink-0 rounded border-slate-300 bg-white text-amber-500 focus:ring-amber-400/40 focus:ring-offset-0 dark:border-slate-500 dark:bg-slate-800 dark:text-amber-400" />
-                <span class="text-sm font-medium leading-relaxed text-slate-700 dark:text-slate-300">${escapeHtml(tb.humanConfirmLabel)}</span>
-              </label>
-            </div>
-
             <p id="bk-err" class="hidden rounded-xl bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800 ring-1 ring-red-200 dark:bg-red-950/60 dark:text-red-200 dark:ring-red-500/30"></p>
             <div id="bk-turnstile-wrap" class="hidden">
               <div id="bk-turnstile-widget"></div>
@@ -772,7 +765,6 @@ export async function mountBookCompany(root, slug) {
     return hourlyOffered && serviceMode === 'hourly'
   }
   const termsEl = root.querySelector('#bk-terms')
-  const humanEl = root.querySelector('#bk-human')
   const waBtn = root.querySelector('#bk-wa')
   const errEl = root.querySelector('#bk-err')
   const estWrap = root.querySelector('#bk-estimate')
@@ -981,11 +973,6 @@ Estimate price: ${estimatePrice}`
       errEl.classList.remove('hidden')
       return false
     }
-    if (!humanEl.checked) {
-      errEl.textContent = msgs.errHuman
-      errEl.classList.remove('hidden')
-      return false
-    }
     if (Date.now() - formStartedAt < BOOK_MIN_SUBMIT_MS) {
       errEl.textContent = msgs.errWaitSubmit
       errEl.classList.remove('hidden')
@@ -1065,7 +1052,6 @@ Estimate price: ${estimatePrice}`
       : puOk && !!dropEl.value.trim()
     const ok =
       termsEl.checked &&
-      humanEl.checked &&
       tripOk &&
       !!companyWhatsAppDigits
     waBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
@@ -1319,7 +1305,7 @@ Estimate price: ${estimatePrice}`
     syncRideTimingUi()
   })
 
-  ;[pickupEl, dropEl, termsEl, humanEl, scheduleInput, hourlyStartEl, hourlyHoursEl, hourlyNotesEl].forEach(
+  ;[pickupEl, dropEl, termsEl, scheduleInput, hourlyStartEl, hourlyHoursEl, hourlyNotesEl].forEach(
     (el) => {
       if (!el) return
       el.addEventListener('input', refreshWaState)
