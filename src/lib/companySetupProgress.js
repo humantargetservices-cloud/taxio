@@ -152,7 +152,7 @@ export function calculateCompanySetupProgress(company, options = {}) {
       key: 'whatsapp',
       completed: hasWhatsApp,
       points: 5,
-      actionId: null,
+      actionId: 'whatsapp',
       meta: {},
     },
     {
