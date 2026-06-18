@@ -638,14 +638,26 @@ export async function mountBookCompany(root, slug) {
               <p class="mt-2 text-[0.6875rem] leading-snug text-slate-500 dark:text-slate-400">${escapeHtml(tb.hourlyRefDisclaimer)}</p>
             </div>
 
+            <div id="bk-estimate-hint" class="hidden items-start gap-2.5 rounded-2xl border border-amber-200/70 bg-amber-50/90 px-3.5 py-3 ring-1 ring-amber-100/80 dark:border-amber-400/20 dark:bg-amber-400/10 dark:ring-amber-400/10">
+              <span class="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400">${icon.helpCircle('h-4 w-4')}</span>
+              <p class="text-xs leading-relaxed text-amber-950/90 dark:text-amber-50/95">${escapeHtml(tb.estimateSelectHint)}</p>
+            </div>
+
+            <div id="bk-estimate-unavail" class="hidden items-start gap-2.5 rounded-2xl border border-slate-200/90 bg-slate-50/95 px-3.5 py-3 ring-1 ring-slate-200/70 dark:border-slate-600/60 dark:bg-slate-800/50 dark:ring-white/[0.04]">
+              <span class="mt-0.5 shrink-0 text-slate-500 dark:text-slate-400">${icon.mapPin('h-4 w-4')}</span>
+              <p class="text-xs leading-relaxed text-slate-600 dark:text-slate-300">${escapeHtml(tb.estimateUnavailable)}</p>
+            </div>
+
             <div id="bk-estimate" class="hidden rounded-2xl border border-amber-300/40 bg-gradient-to-br from-amber-50 via-white to-slate-50 px-4 py-4 shadow-md ring-1 ring-amber-200/50 dark:border-amber-400/20 dark:from-amber-400/10 dark:via-slate-900/40 dark:to-slate-900/80 dark:shadow-lg dark:shadow-black/20 dark:ring-amber-400/15">
-              <p class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.estimateTitle)}</p>
-              <div id="bk-estimate-loading" class="mt-2 text-xs font-medium text-slate-500">${escapeHtml(tb.calculating)}</div>
-              <div id="bk-estimate-body" class="mt-3 hidden space-y-1.5 text-sm text-slate-600 dark:text-slate-300">
-                <p><span class="text-slate-500">${escapeHtml(tb.distance)}</span> <span id="bk-estimate-distance" class="font-semibold text-slate-900 dark:text-white"></span></p>
-                <p><span class="text-slate-500">${escapeHtml(tb.duration)}</span> <span id="bk-estimate-duration" class="font-semibold text-slate-900 dark:text-white"></span></p>
-                <p class="pt-1 text-base"><span class="text-slate-500">${escapeHtml(tb.estPrice)}</span> <span id="bk-estimate-price" class="font-bold text-amber-700 dark:text-amber-300"></span></p>
-                <p class="mt-1.5 text-[0.6875rem] leading-snug text-slate-500 dark:text-slate-400">${escapeHtml(tb.taximeterNote)}</p>
+              <p class="text-xs font-bold uppercase tracking-[0.12em] text-amber-800/80 dark:text-amber-300/90">${escapeHtml(tb.estimateTitle)}</p>
+              <div id="bk-estimate-loading" class="mt-3 text-xs font-medium text-slate-500 dark:text-slate-400">${escapeHtml(tb.calculating)}</div>
+              <div id="bk-estimate-body" class="mt-3 hidden">
+                <p id="bk-estimate-price" class="text-3xl font-bold tracking-tight text-amber-700 dark:text-amber-300"></p>
+                <div class="mt-3 space-y-1 text-sm text-slate-600 dark:text-slate-300">
+                  <p><span class="text-slate-500 dark:text-slate-400">${escapeHtml(tb.distance)}</span> <span id="bk-estimate-distance" class="font-semibold text-slate-900 dark:text-white"></span></p>
+                  <p><span class="text-slate-500 dark:text-slate-400">${escapeHtml(tb.duration)}</span> <span id="bk-estimate-duration" class="font-semibold text-slate-900 dark:text-white"></span></p>
+                </div>
+                <p class="mt-3 text-[0.6875rem] leading-snug text-slate-500 dark:text-slate-400">${escapeHtml(tb.taximeterNote)}</p>
               </div>
             </div>
 
@@ -740,6 +752,8 @@ export async function mountBookCompany(root, slug) {
   let estimateTimer = null
   const pickupEl = root.querySelector('#bk-pickup')
   const dropEl = root.querySelector('#bk-dropoff')
+  const pickupPlacesState = { committed: null, lat: null, lng: null, placeId: null }
+  const dropoffPlacesState = { committed: null, lat: null, lng: null, placeId: null }
   const dropoffWrap = root.querySelector('#bk-dropoff-wrap')
   const whenWrap = root.querySelector('#bk-when-wrap')
   const hourlyWrap = root.querySelector('#bk-hourly-wrap')
@@ -762,6 +776,8 @@ export async function mountBookCompany(root, slug) {
   const waBtn = root.querySelector('#bk-wa')
   const errEl = root.querySelector('#bk-err')
   const estWrap = root.querySelector('#bk-estimate')
+  const estHint = root.querySelector('#bk-estimate-hint')
+  const estUnavail = root.querySelector('#bk-estimate-unavail')
   const estLoading = root.querySelector('#bk-estimate-loading')
   const estBody = root.querySelector('#bk-estimate-body')
   const estDist = root.querySelector('#bk-estimate-distance')
@@ -772,6 +788,8 @@ export async function mountBookCompany(root, slug) {
   const scheduleWrap = root.querySelector('#bk-schedule-wrap')
   const scheduleInput = root.querySelector('#bk-schedule-at')
   let latestEstimate = null
+  const estimateSessionCache = new Map()
+  let estimateRequestId = 0
 
   const mailA = root.querySelector('#bk-mail')
   const callA = root.querySelector('#bk-call')
@@ -1027,7 +1045,9 @@ Estimate price: ${estimatePrice}`
     hourlyRefWrap?.classList.toggle('hidden', !hourly)
     if (hourly) {
       latestEstimate = null
+      cancelPendingEstimate()
       estWrap?.classList.add('hidden')
+      syncEstimateDisplay()
     }
     if (serviceStandardBtn && serviceHourlyBtn) {
       serviceStandardBtn.className = hourly ? bkSegOff : bkSegOn
@@ -1084,56 +1104,176 @@ Estimate price: ${estimatePrice}`
     return typeof c === 'string' && c.length > 0 && v === c
   }
 
-  async function refreshEstimate() {
+  function syncEstimateDisplay() {
     if (isHourlyMode()) {
-      latestEstimate = null
+      estHint?.classList.add('hidden')
+      estHint?.classList.remove('flex')
+      estUnavail?.classList.add('hidden')
+      estUnavail?.classList.remove('flex')
       estWrap?.classList.add('hidden')
-      return
-    }
-    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
-    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
-    if (!pickupOk || !dropoffOk) {
       latestEstimate = null
-      estWrap?.classList.add('hidden')
       return
     }
 
-    const pickupText = pickupEl.value.trim()
-    const dropoffText = dropEl.value.trim()
+    const puText = pickupEl.value.trim()
+    const doText = dropEl.value.trim()
+    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
+    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
+
+    estUnavail?.classList.add('hidden')
+    estUnavail?.classList.remove('flex')
+
+    if (!puText && !doText) {
+      estHint?.classList.add('hidden')
+      estHint?.classList.remove('flex')
+      estWrap?.classList.add('hidden')
+      latestEstimate = null
+      return
+    }
+
+    if (!puText || !doText) {
+      estHint?.classList.add('hidden')
+      estHint?.classList.remove('flex')
+      estWrap?.classList.add('hidden')
+      latestEstimate = null
+      return
+    }
+
+    if (!pickupOk || !dropoffOk) {
+      estHint?.classList.remove('hidden')
+      estHint?.classList.add('flex')
+      estWrap?.classList.add('hidden')
+      latestEstimate = null
+      return
+    }
+
+    estHint?.classList.add('hidden')
+    estHint?.classList.remove('flex')
+  }
+
+  function showEstimateUnavailable(reason, detail) {
+    latestEstimate = null
+    estWrap?.classList.add('hidden')
+    estUnavail?.classList.remove('hidden')
+    estUnavail?.classList.add('flex')
+    estHint?.classList.add('hidden')
+    estHint?.classList.remove('flex')
+    console.warn('[taxio-booking] Route estimate unavailable:', reason || 'unknown', detail || '')
+  }
+
+  function estimateCacheKey() {
+    const pickup = String(pickupPlacesState.committed || pickupEl.value.trim())
+    const dropoff = String(dropoffPlacesState.committed || dropEl.value.trim())
+    return `${pickup}\0${dropoff}\0${selectedCar}`
+  }
+
+  function applyEstimateToUi(trip) {
+    latestEstimate = trip
+    if (estPrice) estPrice.textContent = `€${trip.estimatedPrice}`
+    if (estDist) estDist.textContent = `${trip.distanceKm} km`
+    if (estDur) estDur.textContent = `${trip.durationMin} min`
+    estWrap?.classList.remove('hidden')
+    estUnavail?.classList.add('hidden')
+    estUnavail?.classList.remove('flex')
+    estLoading?.classList.add('hidden')
+    estBody?.classList.remove('hidden')
+  }
+
+  function cancelPendingEstimate() {
+    estimateRequestId += 1
+    if (estimateTimer) {
+      window.clearTimeout(estimateTimer)
+      estimateTimer = null
+    }
+  }
+
+  async function refreshEstimate() {
+    syncEstimateDisplay()
+    if (isHourlyMode()) return
+
+    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
+    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
+    if (!pickupOk || !dropoffOk) return
+
+    const cacheKey = estimateCacheKey()
+    const cached = estimateSessionCache.get(cacheKey)
+    if (cached) {
+      applyEstimateToUi(cached)
+      return
+    }
+
+    const reqId = ++estimateRequestId
+    estWrap?.classList.remove('hidden')
+    estUnavail?.classList.add('hidden')
+    estUnavail?.classList.remove('flex')
+    estLoading?.classList.remove('hidden')
+    estBody?.classList.add('hidden')
+
     const useCoords =
       Number.isFinite(pickupPlacesState.lat) &&
       Number.isFinite(pickupPlacesState.lng) &&
       Number.isFinite(dropoffPlacesState.lat) &&
       Number.isFinite(dropoffPlacesState.lng)
+    const pickupAddress = useCoords
+      ? `${pickupPlacesState.lat},${pickupPlacesState.lng}`
+      : pickupEl.value.trim()
+    const dropoffAddress = useCoords
+      ? `${dropoffPlacesState.lat},${dropoffPlacesState.lng}`
+      : dropEl.value.trim()
 
-    estWrap?.classList.remove('hidden')
-    estLoading?.classList.remove('hidden')
-    estBody?.classList.add('hidden')
+    try {
+      const trip = await estimateTrip({
+        pickupAddress,
+        dropoffAddress,
+        pricing: effectivePricing,
+        carType: selectedCar,
+        apiKey: GOOGLE_API_KEY,
+      })
 
-    const trip = await estimateTrip({
-      pickupAddress: useCoords ? `${pickupPlacesState.lat},${pickupPlacesState.lng}` : pickupText,
-      dropoffAddress: useCoords ? `${dropoffPlacesState.lat},${dropoffPlacesState.lng}` : dropoffText,
-      pricing: effectivePricing,
-      carType: selectedCar,
-      apiKey: GOOGLE_API_KEY,
-    })
+      if (reqId !== estimateRequestId) return
 
-    latestEstimate = trip
-    if (estDist) estDist.textContent = `${trip.distanceKm} km`
-    if (estDur) estDur.textContent = `${trip.durationMin} min`
-    if (estPrice) estPrice.textContent = `€${trip.estimatedPrice}`
-    estLoading?.classList.add('hidden')
-    estBody?.classList.remove('hidden')
+      if (
+        trip?.source !== 'google_distance_matrix' ||
+        trip?.estimatedPrice == null ||
+        trip?.distanceKm == null ||
+        trip?.durationMin == null
+      ) {
+        showEstimateUnavailable('invalid_trip_response', { source: trip?.source })
+        return
+      }
+
+      estimateSessionCache.set(cacheKey, trip)
+      applyEstimateToUi(trip)
+    } catch (err) {
+      if (reqId !== estimateRequestId) return
+      showEstimateUnavailable(err?.message || 'estimate_failed', err)
+    }
   }
 
   function queueEstimate() {
     if (isHourlyMode()) return
+    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
+    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
+    if (!pickupOk || !dropoffOk) return
     if (estimateTimer) window.clearTimeout(estimateTimer)
     estimateTimer = window.setTimeout(() => {
-      refreshEstimate().catch(() => {
-        estWrap?.classList.add('hidden')
+      estimateTimer = null
+      refreshEstimate().catch((err) => {
+        showEstimateUnavailable(err?.message || 'estimate_refresh_failed', err)
       })
     }, 350)
+  }
+
+  function requestEstimateIfReady() {
+    syncEstimateDisplay()
+    if (isHourlyMode()) return
+    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
+    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
+    if (!pickupOk || !dropoffOk) {
+      cancelPendingEstimate()
+      return
+    }
+    queueEstimate()
   }
 
   if (hasMultipleCarTypes && carTriggerEl) {
@@ -1156,7 +1296,7 @@ Estimate price: ${estimatePrice}`
       selectedCar = btn.getAttribute('data-car') || selectedCar
       syncCarUi()
       closeCarPanel()
-      queueEstimate()
+      requestEstimateIfReady()
     })
   })
   syncCarUi()
@@ -1166,7 +1306,7 @@ Estimate price: ${estimatePrice}`
   serviceStandardBtn?.addEventListener('click', () => {
     serviceMode = 'standard'
     syncServiceModeUi()
-    queueEstimate()
+    requestEstimateIfReady()
   })
   serviceHourlyBtn?.addEventListener('click', () => {
     serviceMode = 'hourly'
@@ -1227,12 +1367,18 @@ Estimate price: ${estimatePrice}`
     }, 200)
   }
 
-  const pickupPlacesState = { committed: null, lat: null, lng: null, placeId: null }
-  const dropoffPlacesState = { committed: null, lat: null, lng: null, placeId: null }
-
   function onAddressFieldsUpdated() {
     refreshWaState()
-    queueEstimate()
+    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
+    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
+    if (!pickupOk || !dropoffOk) {
+      cancelPendingEstimate()
+      latestEstimate = null
+    }
+    syncEstimateDisplay()
+    if (pickupOk && dropoffOk && !isHourlyMode()) {
+      queueEstimate()
+    }
   }
 
   const pickupSuggestEl = root.querySelector('#bk-pickup-suggest')
@@ -1257,6 +1403,7 @@ Estimate price: ${estimatePrice}`
     detachPickupCtrl.detach()
     detachDropoffCtrl.detach()
   }
+  syncEstimateDisplay()
 
   function setPickupLocateMessage(text) {
     const el = root.querySelector('#bk-pickup-locate-msg')

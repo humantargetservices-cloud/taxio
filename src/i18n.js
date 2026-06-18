@@ -320,7 +320,12 @@ export const translations = {
       distance: 'Distance',
       duration: 'Duration',
       estPrice: 'Est. price',
-      taximeterNote: 'Taximeter available on request.',
+      taximeterNote:
+        'Final fare may depend on route, waiting time, traffic, or taximeter.',
+      estimateSelectHint:
+        'Select pickup and destination from the address suggestions to see an estimated price.',
+      estimateUnavailable:
+        'Price estimate is not available for this route. You can still send the request by WhatsApp.',
       acceptRiderLead: 'I agree to the ',
       acceptRiderTerms: 'Terms',
       acceptRiderAnd: ' and ',
@@ -779,7 +784,12 @@ export const translations = {
       distance: 'Distance',
       duration: 'Durée',
       estPrice: 'Prix estimé',
-      taximeterNote: 'Taximètre disponible sur demande.',
+      taximeterNote:
+        'Le prix final peut dépendre de l’itinéraire, du temps d’attente, de la circulation ou du taximètre.',
+      estimateSelectHint:
+        'Sélectionnez l’adresse de prise en charge et la destination dans les suggestions pour voir un prix estimé.',
+      estimateUnavailable:
+        'L’estimation du prix n’est pas disponible pour ce trajet. Vous pouvez quand même envoyer la demande via WhatsApp.',
       acceptRiderLead: "J'accepte les ",
       acceptRiderTerms: 'Conditions',
       acceptRiderAnd: ' et la ',
@@ -1240,7 +1250,12 @@ export const translations = {
       distance: 'Afstand',
       duration: 'Duur',
       estPrice: 'Geschatte prijs',
-      taximeterNote: 'Taximeter beschikbaar op aanvraag.',
+      taximeterNote:
+        'Definitieve prijs kan afhangen van route, wachttijd, verkeer of taximeter.',
+      estimateSelectHint:
+        'Selecteer ophaaladres en bestemming uit de adresvoorstellen om een geschatte prijs te zien.',
+      estimateUnavailable:
+        'Prijsinschatting is niet beschikbaar voor deze route. U kunt de aanvraag nog steeds via WhatsApp verzenden.',
       acceptRiderLead: 'Ik ga akkoord met de ',
       acceptRiderTerms: 'Voorwaarden',
       acceptRiderAnd: ' en het ',
