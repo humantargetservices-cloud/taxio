@@ -15,15 +15,31 @@ export function normalizeFleetCarType(raw) {
 }
 
 function pricingObject(rawPricing) {
-  return rawPricing && typeof rawPricing === 'object' ? rawPricing : {}
+  if (!rawPricing || typeof rawPricing !== 'object' || Array.isArray(rawPricing)) return {}
+  return rawPricing
+}
+
+function coerceTruthy(value) {
+  if (value === true || value === 1) return true
+  const s = String(value ?? '')
+    .trim()
+    .toLowerCase()
+  return s === 'true' || s === '1' || s === 'yes'
+}
+
+function pricingFieldOrDefault(cur, field, fallback) {
+  const v = cur?.[field]
+  if (v != null && String(v).trim() !== '') return String(v)
+  return fallback
 }
 
 export function pricingRowForType(pricing, typeName) {
   const direct = pricing?.[typeName]
-  if (direct && typeof direct === 'object') return direct
+  if (direct && typeof direct === 'object' && !Array.isArray(direct)) return direct
   const wanted = normalizeBookingCarTypeKey(typeName)
   for (const [key, row] of Object.entries(pricingObject(pricing))) {
-    if (normalizeBookingCarTypeKey(key) === wanted && row && typeof row === 'object') {
+    if (key === '__hourly') continue
+    if (normalizeBookingCarTypeKey(key) === wanted && row && typeof row === 'object' && !Array.isArray(row)) {
       return row
     }
   }
@@ -32,30 +48,57 @@ export function pricingRowForType(pricing, typeName) {
 
 export function hasExplicitVehicleTypeConfig(rawPricing) {
   const pricing = pricingObject(rawPricing)
-  return BOOKING_CAR_TYPE_ORDER.some((typeName) =>
-    Object.prototype.hasOwnProperty.call(pricingRowForType(pricing, typeName) || {}, 'enabled')
-  )
+  return BOOKING_CAR_TYPE_ORDER.some((typeName) => {
+    const row = pricingRowForType(pricing, typeName)
+    return row && typeof row === 'object' && Object.prototype.hasOwnProperty.call(row, 'enabled')
+  })
 }
 
-/** True only when dashboard explicitly enabled this type (`enabled: true`). */
+/** True when dashboard (or onboarding) explicitly enabled this type. */
 export function pricingTypeIsEnabled(pricing, typeName) {
   const cur = pricingRowForType(pricing, typeName)
   if (!cur || typeof cur !== 'object') return false
-  return cur.enabled === true
+  return coerceTruthy(cur.enabled)
+}
+
+function mergeTypePricing(typeName, rawPricing) {
+  const def = DEFAULT_PRICING[typeName] || DEFAULT_PRICING.Standard
+  const cur = pricingRowForType(rawPricing, typeName)
+  return {
+    start: pricingFieldOrDefault(cur, 'start', def.start),
+    per_km: pricingFieldOrDefault(cur, 'per_km', def.per_km),
+    initial_km: pricingFieldOrDefault(cur, 'initial_km', def.initial_km),
+  }
 }
 
 /**
- * Dashboard Pricing is the source of truth for booking car types.
- * Examples:
- * - { luxury: { enabled: true } } => ['Luxury']
- * - { van: { enabled: true }, luxury: { enabled: true } } => ['Van', 'Luxury']
- * - {} or no enabled pricing rows => ['Standard'] fallback
+ * Booking page source of truth for vehicle types + merged pricing.
+ * Always returns at least Standard.
+ */
+export function resolveBookingVehicleTypes(company) {
+  const rawPricing = pricingObject(company?.pricing ?? company)
+  const hasExplicit = hasExplicitVehicleTypeConfig(rawPricing)
+
+  let types
+  if (!hasExplicit) {
+    types = ['Standard']
+  } else {
+    types = BOOKING_CAR_TYPE_ORDER.filter((typeName) => pricingTypeIsEnabled(rawPricing, typeName))
+    if (types.length === 0) types = ['Standard']
+  }
+
+  return types.map((type) => ({
+    type,
+    enabled: true,
+    pricing: mergeTypePricing(type, rawPricing),
+  }))
+}
+
+/**
+ * @returns {string[]} e.g. ['Standard'] or ['Standard', 'Van']
  */
 export function resolveEnabledBookingCarTypes(company) {
-  const pricing = pricingObject(company?.pricing ?? company)
-  if (!hasExplicitVehicleTypeConfig(pricing)) return ['Standard']
-  const enabled = BOOKING_CAR_TYPE_ORDER.filter((typeName) => pricingTypeIsEnabled(pricing, typeName))
-  return enabled.length > 0 ? enabled : ['Standard']
+  return resolveBookingVehicleTypes(company).map((row) => row.type)
 }
 
 /** Default pricing blob for new companies / empty state. Nothing is auto-enabled. */
@@ -68,17 +111,7 @@ export function effectivePricingForTypes(displayTypes, rawPricing) {
   const pricing = pricingObject(rawPricing)
   const out = {}
   for (const typeName of displayTypes) {
-    const def = DEFAULT_PRICING[typeName] || DEFAULT_PRICING.Standard
-    const cur = pricingRowForType(pricing, typeName)
-    out[typeName] = {
-      start: cur?.start != null && String(cur.start).trim() !== '' ? String(cur.start) : def.start,
-      per_km:
-        cur?.per_km != null && String(cur.per_km).trim() !== '' ? String(cur.per_km) : def.per_km,
-      initial_km:
-        cur?.initial_km != null && String(cur.initial_km).trim() !== ''
-          ? String(cur.initial_km)
-          : def.initial_km,
-    }
+    out[typeName] = mergeTypePricing(typeName, pricing)
   }
   return out
 }

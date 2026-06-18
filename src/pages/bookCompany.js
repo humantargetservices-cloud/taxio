@@ -3,7 +3,7 @@ import {
   createQuickBookingLog,
 } from '../lib/api.js'
 import { TERMS_VERSION_BOOKING_RIDER } from '../lib/legalVersions.js'
-import { effectivePricingForTypes, resolveEnabledBookingCarTypes } from '../lib/bookingCarTypes.js'
+import { hasExplicitVehicleTypeConfig, resolveBookingVehicleTypes } from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
@@ -445,10 +445,16 @@ export async function mountBookCompany(root, slug) {
     return
   }
 
-  const carTypes = resolveEnabledBookingCarTypes(company)
-  const tb = tBooking(getLocale())
-  const effectivePricing = effectivePricingForTypes(carTypes, company.pricing)
+  const bookingVehicles = resolveBookingVehicleTypes(company)
+  const carTypes = bookingVehicles.map((v) => v.type)
+  const effectivePricing = Object.fromEntries(bookingVehicles.map((v) => [v.type, v.pricing]))
+  if (typeof console !== 'undefined' && console.warn) {
+    console.warn('[taxio-booking] resolved vehicle types:', carTypes.join(', ') || 'Standard')
+  }
   const hasMultipleCarTypes = carTypes.length > 1
+  const showCarTypeChooser = hasMultipleCarTypes
+  const showVehicleSection = showCarTypeChooser || hasExplicitVehicleTypeConfig(company.pricing)
+  const tb = tBooking(getLocale())
   const hourlyCfg = companyHourlyFromRecord(company)
   const hourlyOffered = hourlyCfg.enabled && !isDemo
   const hourlyPricingNoteText = formatHourlyPricingNote(
@@ -458,7 +464,7 @@ export async function mountBookCompany(root, slug) {
   )
   const byHourLabel = tBooking(getLocale()).byHour
 
-  const defaultSelectedCar = carTypes[0]
+  const defaultSelectedCar = carTypes.includes('Standard') ? 'Standard' : carTypes[0]
 
   const bkCarOptBase =
     'bk-car-opt flex w-full items-center gap-3 border-0 border-t border-slate-100 px-4 py-3.5 text-left transition first:border-t-0 dark:border-slate-700/80 '
@@ -491,10 +497,11 @@ export async function mountBookCompany(root, slug) {
         </div>`
     : ''
 
-  const vehicleSectionHtml = `<div id="bk-car-wrap" class="relative z-[45]">
-          <p class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.chooseCarType)}</p>
+  const vehicleSectionHtml = showVehicleSection
+    ? `<div id="bk-car-wrap" class="relative z-[45]">
+          ${showCarTypeChooser ? `<p class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.chooseCarType)}</p>` : ''}
           ${
-            hasMultipleCarTypes
+            showCarTypeChooser
               ? `<button type="button" id="bk-car-trigger" class="mt-2 flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border-2 border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-amber-300/80 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600 dark:bg-slate-800/90 dark:hover:border-amber-400/40 dark:focus:ring-amber-400/25" aria-expanded="false" aria-haspopup="listbox" aria-controls="bk-car-panel">
                   <span id="bk-car-trigger-icon" class="flex shrink-0">${bookingCarTypeIconHtml(defaultSelectedCar, 'h-7 w-7')}</span>
                   <span class="min-w-0 flex-1">
@@ -516,6 +523,7 @@ export async function mountBookCompany(root, slug) {
                 </div>`
           }
         </div>`
+    : ''
   const bookingPageUrl =
     typeof window !== 'undefined' && company?.slug
       ? absolutePublicBookingUrl(company.slug)
@@ -739,7 +747,7 @@ export async function mountBookCompany(root, slug) {
     mountBookCompany(root, slug)
   })
 
-  let selectedCar = carTypes[0]
+  let selectedCar = defaultSelectedCar
   let rideMode = 'now'
   let serviceMode = 'standard'
   let estimateTimer = null
