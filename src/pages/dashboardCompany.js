@@ -26,6 +26,13 @@ import {
   resolveEnabledBookingCarTypes,
 } from '../lib/bookingCarTypes.js'
 import { companyHourlyFromRecord, pricingWithHourlyEmbed } from '../lib/companyHourly.js'
+import {
+  SETUP_PREVIEW_STORAGE_KEY,
+  SETUP_QR_STORAGE_KEY,
+  buildQrStickersWaUrl,
+  buildTaxioSupportWaUrl,
+  calculateCompanySetupProgress,
+} from '../lib/companySetupProgress.js'
 
 const dashState = {
   tab: 'overview',
@@ -65,6 +72,116 @@ function overviewCard(opts) {
       <h3 class="text-base font-bold text-gray-900">${title}</h3>
       ${subtitle ? `<p class="mt-1 text-xs text-gray-500">${subtitle}</p>` : ''}
     </button>`
+}
+
+function fillDashTemplate(template, vars) {
+  let s = String(template || '')
+  for (const [key, val] of Object.entries(vars)) {
+    s = s.split(`{${key}}`).join(String(val ?? ''))
+  }
+  return s
+}
+
+function setupItemText(td, item, progress) {
+  const map = {
+    live: {
+      label: td.setupItemLive,
+      description: td.setupItemLiveDesc,
+    },
+    pricing: {
+      label: td.setupItemPricing,
+      description: item.completed
+        ? fillDashTemplate(td.setupItemPricingDone, { types: progress.pricingSummary })
+        : td.setupItemPricingPending,
+    },
+    photo: {
+      label: td.setupItemPhoto,
+      description: item.completed ? td.setupItemPhotoDone : td.setupItemPhotoPending,
+    },
+    motto: {
+      label: td.setupItemMotto,
+      description: item.completed ? td.setupItemMottoDone : td.setupItemMottoPending,
+    },
+    whatsapp: {
+      label: td.setupItemWhatsApp,
+      description: item.completed ? td.setupItemWhatsAppDone : td.setupItemWhatsAppPending,
+    },
+    preview: {
+      label: td.setupItemPreview,
+      description: item.completed ? td.setupItemPreviewDone : td.setupItemPreviewPending,
+    },
+    qr: {
+      label: td.setupItemQr,
+      description: item.completed ? td.setupItemQrDone : td.setupItemQrPending,
+    },
+  }
+  return map[item.key] || { label: item.key, description: '' }
+}
+
+function renderSetupProgressCard(td, progress) {
+  const pct = progress.percent
+  const checklist = progress.items
+    .map((item) => {
+      const { label, description } = setupItemText(td, item, progress)
+      const done = item.completed
+      const statusIcon = done
+        ? `<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">${icon.check('h-4 w-4')}</span>`
+        : `<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-400/15 ring-1 ring-amber-400/30"><span class="h-2 w-2 rounded-full bg-amber-300"></span></span>`
+      const badge = done
+        ? `<span class="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-300">${escapeHtml(td.setupStatusDone)}</span>`
+        : `<span class="shrink-0 rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-200">${escapeHtml(td.setupStatusTodo)}</span>`
+      return `<li class="flex gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 sm:px-4">
+        ${statusIcon}
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-sm font-semibold text-white">${escapeHtml(label)}</p>
+            ${badge}
+          </div>
+          <p class="mt-1 text-xs leading-relaxed text-slate-300">${escapeHtml(description)}</p>
+        </div>
+      </li>`
+    })
+    .join('')
+
+  const actions = [
+    { id: 'pricing', label: td.setupActionPricing, primary: true },
+    { id: 'photo', label: td.setupActionPhoto, primary: false },
+    { id: 'motto', label: td.setupActionMotto, primary: false },
+    { id: 'preview', label: td.setupActionPreview, primary: false },
+    { id: 'qr', label: td.setupActionQr, primary: false },
+    { id: 'support', label: td.setupActionSupport, primary: false },
+  ]
+    .map(
+      (a) =>
+        `<button type="button" data-setup-action="${a.id}" class="inline-flex min-h-[44px] items-center justify-center rounded-xl px-4 py-2.5 text-center text-xs font-bold transition sm:text-sm ${
+          a.primary
+            ? 'bg-amber-400 text-gray-900 shadow-md shadow-amber-400/20 hover:bg-amber-300'
+            : 'border border-white/15 bg-white/10 text-white hover:bg-white/15'
+        }">${escapeHtml(a.label)}</button>`
+    )
+    .join('')
+
+  return `<section class="mb-6 overflow-hidden rounded-2xl border border-gray-800 bg-gradient-to-br from-gray-900 via-[#12151c] to-gray-900 p-5 shadow-lg shadow-gray-900/20 sm:p-6" aria-labelledby="dash-setup-heading">
+    <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0 flex-1">
+        <p class="text-xs font-bold uppercase tracking-[0.14em] text-amber-400/90">${escapeHtml(td.setupLiveTitle)}</p>
+        <h2 id="dash-setup-heading" class="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl">${escapeHtml(fillDashTemplate(td.setupProgress, { percent: String(pct) }))}</h2>
+        <p class="mt-2 text-sm leading-relaxed text-slate-300">${escapeHtml(td.setupSubtitle)}</p>
+        <p class="mt-2 text-xs leading-relaxed text-slate-400">${escapeHtml(td.setupDefaultNote)}</p>
+        <div class="mt-5">
+          <div class="h-2.5 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/10">
+            <div class="h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-300 transition-all duration-500" style="width:${pct}%"></div>
+          </div>
+          <p class="mt-2 text-right text-xs font-semibold text-amber-300/90">${pct}%</p>
+        </div>
+      </div>
+      <div class="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-amber-400/10 ring-1 ring-amber-400/25 lg:h-24 lg:w-24">
+        <span class="text-2xl font-bold text-amber-300 lg:text-3xl">${pct}%</span>
+      </div>
+    </div>
+    <ul class="mt-6 space-y-2">${checklist}</ul>
+    <div class="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">${actions}</div>
+  </section>`
 }
 
 export async function mountDashboardCompany(root) {
@@ -131,6 +248,22 @@ export async function mountDashboardCompany(root) {
     : `${td.vatLine} —`
   const bookPublicUrl = absolutePublicBookingUrl(company.slug)
   const bookingQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(bookPublicUrl)}`
+  let previewDone = false
+  let qrRequested = false
+  try {
+    if (typeof localStorage !== 'undefined') {
+      previewDone = localStorage.getItem(SETUP_PREVIEW_STORAGE_KEY(company.id)) === '1'
+      qrRequested = localStorage.getItem(SETUP_QR_STORAGE_KEY(company.id)) === '1'
+    }
+  } catch {
+    /* private mode */
+  }
+  const setupProgress = calculateCompanySetupProgress(company, {
+    previewDone,
+    qrRequested,
+    bookingUrl: bookPublicUrl,
+  })
+  const setupCardHtml = renderSetupProgressCard(td, setupProgress)
   const pricing = pricingOf(company)
   const avail = company.availability_status || 'available'
   const logoRaw = String(company.logo_url || '').trim()
@@ -172,7 +305,7 @@ export async function mountDashboardCompany(root) {
               <input type="text" readonly value="${escapeHtml(bookPublicUrl)}" class="min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-800 sm:text-sm" id="dash-booking-url-field" />
               <div class="flex flex-wrap gap-2">
                 <button type="button" id="dash-copy-booking-url" class="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-gray-800">${td.copyLink}</button>
-                <a href="${escapeHtml(bookPublicUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50">${icon.eye('h-4 w-4')}${td.openLive}</a>
+                <a id="dash-open-booking-page" href="${escapeHtml(bookPublicUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50">${icon.eye('h-4 w-4')}${td.openLive}</a>
                 <a href="${escapeHtml(bookingQrSrc)}" download="taxio-booking-qr.png" target="_blank" rel="noopener noreferrer" class="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 hover:bg-amber-100">${td.downloadQr}</a>
               </div>
             </div>
@@ -492,6 +625,7 @@ export async function mountDashboardCompany(root) {
 
       <main class="mx-auto max-w-6xl px-4 py-8">
         <p id="dash-msg" class="mb-4 hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+        ${setupCardHtml}
         ${bodyHtml}
       </main>
 
@@ -529,6 +663,65 @@ export async function mountDashboardCompany(root) {
       if (lc) setLocale(lc)
       mountDashboardCompany(root)
     })
+  })
+
+  root.querySelectorAll('[data-setup-action]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const action = btn.getAttribute('data-setup-action')
+      const locale = dashLang
+      if (action === 'pricing') {
+        dashState.tab = 'pricing'
+        mountDashboardCompany(root)
+        return
+      }
+      if (action === 'photo' || action === 'motto') {
+        dashState.tab = 'essential'
+        mountDashboardCompany(root)
+        return
+      }
+      if (action === 'preview') {
+        try {
+          localStorage.setItem(SETUP_PREVIEW_STORAGE_KEY(company.id), '1')
+        } catch {
+          /* ignore */
+        }
+        window.open(bookPublicUrl, '_blank', 'noopener,noreferrer')
+        mountDashboardCompany(root)
+        return
+      }
+      if (action === 'qr') {
+        try {
+          localStorage.setItem(SETUP_QR_STORAGE_KEY(company.id), '1')
+        } catch {
+          /* ignore */
+        }
+        const url = buildQrStickersWaUrl({
+          companyName: company.name,
+          bookingUrl: bookPublicUrl,
+          locale,
+        })
+        window.open(url, '_blank', 'noopener,noreferrer')
+        mountDashboardCompany(root)
+        return
+      }
+      if (action === 'support') {
+        const url = buildTaxioSupportWaUrl({
+          companyName: company.name,
+          bookingUrl: bookPublicUrl,
+          locale,
+        })
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+    })
+  })
+
+  root.querySelector('#dash-open-booking-page')?.addEventListener('click', () => {
+    try {
+      localStorage.setItem(SETUP_PREVIEW_STORAGE_KEY(company.id), '1')
+    } catch {
+      /* ignore */
+    }
+    window.setTimeout(() => mountDashboardCompany(root), 400)
   })
 
   root.querySelector('#dash-copy-booking-url')?.addEventListener('click', async () => {
