@@ -1214,20 +1214,17 @@ Estimate price: ${estimatePrice}`
       Number.isFinite(pickupPlacesState.lng) &&
       Number.isFinite(dropoffPlacesState.lat) &&
       Number.isFinite(dropoffPlacesState.lng)
-    const pickupAddress = useCoords
-      ? `${pickupPlacesState.lat},${pickupPlacesState.lng}`
-      : pickupEl.value.trim()
-    const dropoffAddress = useCoords
-      ? `${dropoffPlacesState.lat},${dropoffPlacesState.lng}`
-      : dropEl.value.trim()
-
     try {
+      if (!useCoords) {
+        showEstimateUnavailable('missing_coordinates')
+        return
+      }
+
       const trip = await estimateTrip({
-        pickupAddress,
-        dropoffAddress,
+        pickup: { lat: pickupPlacesState.lat, lng: pickupPlacesState.lng },
+        dropoff: { lat: dropoffPlacesState.lat, lng: dropoffPlacesState.lng },
         pricing: effectivePricing,
         carType: selectedCar,
-        apiKey: GOOGLE_API_KEY,
       })
 
       if (reqId !== estimateRequestId) return

@@ -28,37 +28,62 @@ function round2(n) {
   return Math.round(n * 100) / 100
 }
 
-async function googleDistanceMatrixEstimate(apiKey, pickup, dropoff) {
-  const url =
-    'https://maps.googleapis.com/maps/api/distancematrix/json' +
-    `?origins=${encodeURIComponent(pickup)}` +
-    `&destinations=${encodeURIComponent(dropoff)}` +
-    '&mode=driving' +
-    `&key=${encodeURIComponent(apiKey)}`
+const apiBase = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 
-  const res = await fetch(url)
-  if (!res.ok) throw new Error('distance_matrix_http_error')
-  const data = await res.json()
-  const el = data?.rows?.[0]?.elements?.[0]
-  if (!el || el.status !== 'OK') throw new Error('distance_matrix_no_route')
-  const meters = Number(el.distance?.value || 0)
-  const sec = Number(el.duration?.value || 0)
-  if (!meters || !sec) throw new Error('distance_matrix_empty')
+function estimateRouteApiUrl() {
+  return `${apiBase}/api/estimate-route`
+}
+
+function validateCoords(point) {
+  const lat = Number(point?.lat)
+  const lng = Number(point?.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null
+  return { lat, lng }
+}
+
+/**
+ * Driving distance/duration via TAXIO /api/estimate-route (server-side Google Distance Matrix).
+ * Never calls maps.googleapis.com from the browser.
+ */
+async function fetchRouteEstimate({ pickup, dropoff }) {
+  const response = await fetch(estimateRouteApiUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pickup, dropoff }),
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const reason = data?.error || `http_${response.status}`
+    console.warn('[taxio-booking] Route estimate unavailable:', reason)
+    throw new Error(reason === 'ROUTE_ESTIMATE_UNAVAILABLE' ? reason : 'ROUTE_ESTIMATE_UNAVAILABLE')
+  }
+
+  if (
+    data?.source !== 'google_distance_matrix' ||
+    !Number.isFinite(data.distanceKm) ||
+    !Number.isFinite(data.durationMin)
+  ) {
+    console.warn('[taxio-booking] Route estimate unavailable: INVALID_RESPONSE')
+    throw new Error('ROUTE_ESTIMATE_UNAVAILABLE')
+  }
+
   return {
-    distanceKm: round2(meters / 1000),
-    durationMin: Math.max(1, Math.round(sec / 60)),
+    distanceKm: data.distanceKm,
+    durationMin: data.durationMin,
     source: 'google_distance_matrix',
   }
 }
 
 /**
- * Driving-route estimate via Google Distance Matrix only.
+ * Driving-route estimate via TAXIO backend only.
  * Throws when the route cannot be resolved — no geocode/haversine/text fallbacks.
  */
-export async function estimateTrip({ pickupAddress, dropoffAddress, pricing, carType, apiKey }) {
-  const pickup = String(pickupAddress || '').trim()
-  const dropoff = String(dropoffAddress || '').trim()
-  if (!pickup || !dropoff) {
+export async function estimateTrip({ pickup, dropoff, pricing, carType }) {
+  const pickupCoords = validateCoords(pickup)
+  const dropoffCoords = validateCoords(dropoff)
+  if (!pickupCoords || !dropoffCoords) {
     return {
       distanceKm: null,
       durationMin: null,
@@ -67,11 +92,10 @@ export async function estimateTrip({ pickupAddress, dropoffAddress, pricing, car
     }
   }
 
-  if (!apiKey) {
-    throw new Error('distance_matrix_no_api_key')
-  }
-
-  const trip = await googleDistanceMatrixEstimate(apiKey, pickup, dropoff)
+  const trip = await fetchRouteEstimate({
+    pickup: pickupCoords,
+    dropoff: dropoffCoords,
+  })
 
   const rate = getPricingForCarType(pricing, carType)
   // Dashboard model: round2(start + max(0, distanceKm - initial_km) * per_km) — no surge/time extras.

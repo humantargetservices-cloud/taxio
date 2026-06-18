@@ -77,6 +77,7 @@ export function taxioApiPlugin() {
           '/api/admin-delete-company': 'api/admin-delete-company.js',
           '/api/admin-dev-cleanup-test-companies': 'api/admin-dev-cleanup-test-companies.js',
           '/api/admin-send-communication-email': 'api/admin-send-communication-email.js',
+          '/api/estimate-route': 'api/estimate-route.js',
         }
         const file = routes[pathname]
         if (!file || req.method !== 'POST') return next()
