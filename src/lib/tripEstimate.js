@@ -28,10 +28,16 @@ function round2(n) {
   return Math.round(n * 100) / 100
 }
 
-const apiBase = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+function getTaxioApiBase() {
+  if (typeof window === 'undefined') return ''
+  const host = window.location.hostname
+  if (host === 'localhost' || host === '127.0.0.1') return ''
+  if (host.endsWith('.taxio.be')) return 'https://www.taxio.be'
+  return ''
+}
 
 function estimateRouteApiUrl() {
-  return `${apiBase}/api/estimate-route`
+  return `${getTaxioApiBase()}/api/estimate-route`
 }
 
 function validateCoords(point) {
@@ -55,9 +61,13 @@ async function fetchRouteEstimate({ pickup, dropoff }) {
 
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const reason = data?.error || `http_${response.status}`
-    console.warn('[taxio-booking] Route estimate unavailable:', reason)
-    throw new Error(reason === 'ROUTE_ESTIMATE_UNAVAILABLE' ? reason : 'ROUTE_ESTIMATE_UNAVAILABLE')
+    const responseStatus = data?.status || data?.error || 'UNKNOWN'
+    console.warn(
+      '[taxio-booking] Route estimate API failed:',
+      response.status,
+      responseStatus
+    )
+    throw new Error('ROUTE_ESTIMATE_UNAVAILABLE')
   }
 
   if (
@@ -65,7 +75,7 @@ async function fetchRouteEstimate({ pickup, dropoff }) {
     !Number.isFinite(data.distanceKm) ||
     !Number.isFinite(data.durationMin)
   ) {
-    console.warn('[taxio-booking] Route estimate unavailable: INVALID_RESPONSE')
+    console.warn('[taxio-booking] Route estimate API failed:', response.status, 'INVALID_RESPONSE')
     throw new Error('ROUTE_ESTIMATE_UNAVAILABLE')
   }
 

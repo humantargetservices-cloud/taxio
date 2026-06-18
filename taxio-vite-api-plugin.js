@@ -65,7 +65,7 @@ export function taxioApiPlugin() {
           mergeEnvFromFiles(root, mode)
         }
 
-        if (req.method === 'OPTIONS') {
+        if (req.method === 'OPTIONS' && pathname !== '/api/estimate-route') {
           res.statusCode = 204
           return res.end()
         }
@@ -80,7 +80,13 @@ export function taxioApiPlugin() {
           '/api/estimate-route': 'api/estimate-route.js',
         }
         const file = routes[pathname]
-        if (!file || req.method !== 'POST') return next()
+        const isEstimateRoute = pathname === '/api/estimate-route'
+        if (
+          !file ||
+          (req.method !== 'POST' && !(isEstimateRoute && req.method === 'OPTIONS'))
+        ) {
+          return next()
+        }
 
         const abs = pathResolve(root, file)
         const href = pathToFileURL(abs).href
