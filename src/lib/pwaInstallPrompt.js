@@ -3,26 +3,39 @@ import { escapeHtml } from './html.js'
 const DISMISS_MS = 14 * 24 * 60 * 60 * 1000
 const SHOW_DELAY_MS = 4000
 const SHOW_AFTER_INTERACT_MS = 1500
+const CHROMIUM_NATIVE_WAIT_MS = 10000
+const DEBUG_CHROMIUM_NATIVE_WAIT_MS = 3000
+const DESKTOP_CHROMIUM_NATIVE_WAIT_MS = 8000
+const PREPARING_BANNER_DELAY_MS = 2000
 
 let deferredInstallPrompt = null
-let pendingBeforeInstall = null
 let beforeInstallBound = false
 let activeCleanup = null
 let pwaManifestReady = false
+let serviceWorkerReady = false
+let serviceWorkerReadyPromise = null
+const installPromptListeners = new Set()
+
+/** @returns {'native'|'preparing'|'fallback'} */
+function resolveInstallButtonMode(platform) {
+  if (deferredInstallPrompt) return 'native'
+  if (platform === 'ios') return 'fallback'
+  if (isChromiumInstallBrowser()) return 'preparing'
+  return 'fallback'
+}
 
 export function setPwaManifestReady(ready = true) {
   if (!ready) {
     pwaManifestReady = false
     deferredInstallPrompt = null
-    pendingBeforeInstall = null
     return
   }
   const firstReady = !pwaManifestReady
   pwaManifestReady = true
   if (firstReady) {
-    pendingBeforeInstall = null
     deferredInstallPrompt = null
   }
+  pwaLog('manifestReady:', true)
 }
 
 export function isPwaManifestReady() {
@@ -32,12 +45,75 @@ export function isPwaManifestReady() {
 export function resetPwaManifestReady() {
   pwaManifestReady = false
   deferredInstallPrompt = null
-  pendingBeforeInstall = null
+}
+
+export function setServiceWorkerReady(ready = true) {
+  serviceWorkerReady = ready
+  pwaLog('serviceWorkerReady:', ready)
+}
+
+export function isServiceWorkerReady() {
+  return serviceWorkerReady
+}
+
+export function waitForServiceWorkerReady() {
+  if (serviceWorkerReady) return Promise.resolve()
+  if (serviceWorkerReadyPromise) return serviceWorkerReadyPromise.then(() => undefined)
+  return Promise.resolve()
+}
+
+/** Register SW and mark ready (or ready-on-failure so install logic is not blocked forever). */
+export function initServiceWorkerRegistration() {
+  if (!('serviceWorker' in navigator)) {
+    setServiceWorkerReady(true)
+    return Promise.resolve(null)
+  }
+  if (serviceWorkerReadyPromise) return serviceWorkerReadyPromise
+
+  serviceWorkerReadyPromise = navigator.serviceWorker
+    .register('/sw.js')
+    .then((reg) => {
+      setServiceWorkerReady(true)
+      return reg
+    })
+    .catch(() => {
+      setServiceWorkerReady(true)
+      return null
+    })
+
+  return serviceWorkerReadyPromise
+}
+
+export function isPwaDebugMode() {
+  if (typeof window === 'undefined') return false
+  try {
+    return new URLSearchParams(window.location.search).get('taxioPwaDebug') === '1'
+  } catch {
+    return false
+  }
+}
+
+function pwaLog(message, detail) {
+  const debug = isPwaDebugMode() || import.meta.env.DEV
+  if (!debug || typeof console === 'undefined') return
+  if (detail !== undefined) console.log(`[taxio-pwa] ${message}`, detail)
+  else console.log(`[taxio-pwa] ${message}`)
 }
 
 /** Call once at app bootstrap — before booking manifest is applied. */
 export function initPwaInstallListener() {
   bindBeforeInstallPrompt()
+}
+
+function notifyInstallPromptCaptured() {
+  pwaLog('beforeinstallprompt captured:', true)
+  installPromptListeners.forEach((cb) => {
+    try {
+      cb()
+    } catch {
+      /* listener error */
+    }
+  })
 }
 
 function bindBeforeInstallPrompt() {
@@ -47,11 +123,10 @@ function bindBeforeInstallPrompt() {
     e.preventDefault()
     if (!pwaManifestReady) return
     deferredInstallPrompt = e
-    pendingBeforeInstall = null
+    notifyInstallPromptCaptured()
   })
   window.addEventListener('appinstalled', () => {
     deferredInstallPrompt = null
-    pendingBeforeInstall = null
     removePromptEl()
   })
 }
@@ -74,6 +149,24 @@ export function detectInstallPlatform() {
   return 'desktop'
 }
 
+/** Android Chrome / Edge / Chromium — browsers that may fire beforeinstallprompt. */
+export function isChromiumInstallBrowser() {
+  if (typeof navigator === 'undefined') return false
+  const platform = detectInstallPlatform()
+  if (platform === 'ios') return false
+  const ua = navigator.userAgent || ''
+  if (platform === 'android') return true
+  if (/Edg\//i.test(ua)) return true
+  if (/Chrome|Chromium/i.test(ua) && !/OPR|Opera/i.test(ua)) return true
+  return false
+}
+
+function chromiumNativeWaitMs(platform) {
+  if (isPwaDebugMode()) return DEBUG_CHROMIUM_NATIVE_WAIT_MS
+  if (platform === 'android') return CHROMIUM_NATIVE_WAIT_MS
+  return DESKTOP_CHROMIUM_NATIVE_WAIT_MS
+}
+
 export function getInstallStorageKey(context, companyIdOrSlug) {
   if (context === 'operator') return 'taxio_pwa_prompt_operator_dismissed'
   const slug = String(companyIdOrSlug || 'default')
@@ -84,6 +177,7 @@ export function getInstallStorageKey(context, companyIdOrSlug) {
 }
 
 export function isPromptDismissed(context, companyIdOrSlug) {
+  if (isPwaDebugMode()) return false
   try {
     const raw = localStorage.getItem(getInstallStorageKey(context, companyIdOrSlug))
     if (!raw) return false
@@ -114,6 +208,7 @@ function pickStrings(strings, variant) {
     title: strings.title || strings[`${v}Title`] || strings.operatorTitle || 'TAXIO',
     body: strings.body || strings[`${v}Body`] || strings.operatorBody || '',
     addShortcut: strings.addShortcut || 'Add shortcut',
+    preparingShortcut: strings.preparingShortcut || 'Preparing shortcut…',
     howToAdd: strings.howToAdd || strings.how || 'How to add',
     notNow: strings.notNow || 'Not now',
     instructionsTitle: strings.instructionsTitle || 'Add to home screen',
@@ -127,6 +222,12 @@ function pickStrings(strings, variant) {
   }
 }
 
+function primaryLabelForMode(strings, mode) {
+  if (mode === 'native') return strings.addShortcut
+  if (mode === 'preparing') return strings.preparingShortcut
+  return strings.howToAdd
+}
+
 function renderPromptIcon(iconUrl) {
   const fallback = !iconUrl || iconUrl.includes('pwa-fallback-icon')
   if (fallback) {
@@ -135,13 +236,34 @@ function renderPromptIcon(iconUrl) {
   return `<img src="${escapeHtml(iconUrl)}" alt="" class="h-11 w-11 shrink-0 rounded-xl object-cover shadow-sm ring-1 ring-gray-200/80 dark:ring-slate-600/60" loading="lazy" decoding="async" />`
 }
 
-function renderBanner({ strings, context, slug, iconUrl, onDismiss }) {
+function applyBannerInstallMode(el, strings, mode) {
+  const btn = el?.querySelector('.taxio-pwa-install')
+  if (!btn) return
+  const label = primaryLabelForMode(strings, mode)
+  btn.textContent = label
+  if (mode === 'preparing') {
+    btn.disabled = true
+    btn.setAttribute('aria-disabled', 'true')
+    btn.classList.add('opacity-80', 'cursor-wait')
+  } else {
+    btn.disabled = false
+    btn.removeAttribute('aria-disabled')
+    btn.classList.remove('opacity-80', 'cursor-wait')
+  }
+  el.dataset.taxioPwaMode = mode
+}
+
+function renderBanner({ strings, context, slug, iconUrl, mode, onDismiss, onInstallClick }) {
   const platform = detectInstallPlatform()
-  const canNative = !!deferredInstallPrompt
-  const primaryLabel = canNative ? strings.addShortcut : strings.howToAdd
+  const resolvedMode = mode || resolveInstallButtonMode(platform)
+  const primaryLabel = primaryLabelForMode(strings, resolvedMode)
+
+  if (resolvedMode === 'native') pwaLog('showing native install button')
+  if (resolvedMode === 'fallback') pwaLog('showing fallback instructions after timeout')
 
   const el = document.createElement('div')
   el.id = 'taxio-pwa-prompt'
+  el.dataset.taxioPwaMode = resolvedMode
   el.className =
     'pointer-events-none fixed bottom-3 left-3 right-3 z-[35] mx-auto max-w-lg translate-y-3 opacity-0 transition-all duration-500 ease-out sm:bottom-4'
   el.setAttribute('role', 'region')
@@ -156,10 +278,14 @@ function renderBanner({ strings, context, slug, iconUrl, onDismiss }) {
         </div>
       </div>
       <div class="mt-3 flex gap-2">
-        <button type="button" class="taxio-pwa-install min-h-[44px] flex-1 rounded-xl bg-yellow-400 px-3 py-2.5 text-sm font-bold text-gray-900 shadow-sm transition hover:bg-yellow-300 active:scale-[0.98] dark:bg-amber-400 dark:hover:bg-amber-300">${escapeHtml(primaryLabel)}</button>
+        <button type="button" class="taxio-pwa-install min-h-[44px] flex-1 rounded-xl bg-yellow-400 px-3 py-2.5 text-sm font-bold text-gray-900 shadow-sm transition hover:bg-yellow-300 active:scale-[0.98] dark:bg-amber-400 dark:hover:bg-amber-300" ${resolvedMode === 'preparing' ? 'disabled aria-disabled="true"' : ''}>${escapeHtml(primaryLabel)}</button>
         <button type="button" class="taxio-pwa-later min-h-[44px] flex-1 rounded-xl border border-gray-200/90 px-3 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">${escapeHtml(strings.notNow)}</button>
       </div>
     </div>`
+
+  if (resolvedMode === 'preparing') {
+    el.querySelector('.taxio-pwa-install')?.classList.add('opacity-80', 'cursor-wait')
+  }
 
   const dismiss = () => {
     setPromptDismissed(context, slug)
@@ -168,30 +294,14 @@ function renderBanner({ strings, context, slug, iconUrl, onDismiss }) {
   }
 
   el.querySelector('.taxio-pwa-later')?.addEventListener('click', dismiss)
-
-  el.querySelector('.taxio-pwa-install')?.addEventListener('click', async () => {
-    if (deferredInstallPrompt) {
-      try {
-        await deferredInstallPrompt.prompt()
-        const choice = await deferredInstallPrompt.userChoice
-        deferredInstallPrompt = null
-        removePromptEl()
-        if (choice?.outcome === 'dismissed') {
-          setPromptDismissed(context, slug)
-        }
-      } catch {
-        renderInstructionsSheet(strings, platform, null)
-      }
-      return
-    }
-    renderInstructionsSheet(strings, platform, null)
-  })
+  el.querySelector('.taxio-pwa-install')?.addEventListener('click', () => onInstallClick(el))
 
   document.body.appendChild(el)
   requestAnimationFrame(() => {
     el.classList.remove('translate-y-3', 'opacity-0')
     el.classList.add('translate-y-0', 'opacity-100')
   })
+  return el
 }
 
 function renderInstructionsSheet(strings, platform, onClose) {
@@ -227,8 +337,29 @@ function renderInstructionsSheet(strings, platform, onClose) {
   document.body.appendChild(sheet)
 }
 
+async function handleInstallClick({ el, strings, context, slug, platform }) {
+  if (el?.dataset?.taxioPwaMode === 'preparing') return
+
+  if (deferredInstallPrompt) {
+    try {
+      await deferredInstallPrompt.prompt()
+      const choice = await deferredInstallPrompt.userChoice
+      deferredInstallPrompt = null
+      removePromptEl()
+      if (choice?.outcome === 'dismissed') {
+        setPromptDismissed(context, slug)
+      }
+    } catch {
+      renderInstructionsSheet(strings, platform, null)
+    }
+    return
+  }
+
+  renderInstructionsSheet(strings, platform, null)
+}
+
 /**
- * @param {{ context: 'operator'|'booking', slug?: string, iconUrl?: string, strings: Record<string,string>, variant?: 'operator'|'booking' }} options
+ * @param {{ context: 'operator'|'booking', slug?: string, iconUrl?: string, strings: Record<string,string>, variant?: 'operator'|'booking', requireManifestReady?: boolean }} options
  */
 export function initPwaInstallPrompt(options) {
   if (document.getElementById('taxio-pwa-prompt')) {
@@ -244,68 +375,185 @@ export function initPwaInstallPrompt(options) {
   const variant = options.variant || context
   const strings = pickStrings(rawStrings, variant)
   const requireManifestReady = options.requireManifestReady !== false
+  const platform = detectInstallPlatform()
+  const chromium = isChromiumInstallBrowser()
+
+  pwaLog('platform:', platform === 'android' && chromium ? 'android/chromium' : platform)
 
   if (isStandaloneMode()) return () => {}
   if (isPromptDismissed(context, slug)) return () => {}
 
   let shown = false
+  let nativeWaitDone = false
+  let prerequisitesMet = false
+  let bannerEl = null
   let timers = []
   let interactHandler = null
+  let visibilityHandler = null
+  let uninstallPromptListener = null
 
-  const show = () => {
-    if (shown) return
-    if (requireManifestReady && !isPwaManifestReady()) return
-    shown = true
+  const clearTimers = () => {
     timers.forEach(clearTimeout)
     timers = []
+  }
+
+  const onInstallClick = (el) => {
+    handleInstallClick({ el, strings, context, slug, platform })
+  }
+
+  const showBanner = (mode) => {
+    if (shown && bannerEl) {
+      applyBannerInstallMode(bannerEl, strings, mode)
+      return bannerEl
+    }
+    if (shown) return bannerEl
+    shown = true
+    clearTimers()
     if (interactHandler) {
       document.removeEventListener('click', interactHandler, true)
       document.removeEventListener('touchstart', interactHandler, true)
       document.removeEventListener('keydown', interactHandler, true)
+      interactHandler = null
     }
-    renderBanner({
+    if (visibilityHandler) {
+      document.removeEventListener('visibilitychange', visibilityHandler)
+      visibilityHandler = null
+    }
+    bannerEl = renderBanner({
       strings,
       context,
       slug,
       iconUrl,
+      mode,
       onDismiss: () => {
         activeCleanup = null
+        bannerEl = null
       },
+      onInstallClick,
     })
+    return bannerEl
   }
 
-  const scheduleAfterInteract = () => {
-    timers.push(window.setTimeout(show, SHOW_AFTER_INTERACT_MS))
+  const upgradeToNative = () => {
+    if (!prerequisitesMet) return
+    showBanner('native')
   }
 
-  const armShowTimers = () => {
-    interactHandler = () => scheduleAfterInteract()
+  const finalizeChromiumMode = () => {
+    if (nativeWaitDone) return
+    nativeWaitDone = true
+    if (deferredInstallPrompt) {
+      upgradeToNative()
+      return
+    }
+    if (shown) {
+      applyBannerInstallMode(bannerEl, strings, 'fallback')
+    } else {
+      showBanner('fallback')
+    }
+  }
+
+  const startChromiumNativeWait = () => {
+    const waitMs = chromiumNativeWaitMs(platform)
+    pwaLog('beforeinstallprompt captured:', !!deferredInstallPrompt)
+
+    if (deferredInstallPrompt) {
+      showBanner('native')
+      return
+    }
+
+    timers.push(
+      window.setTimeout(() => {
+        if (!shown && chromium) {
+          showBanner('preparing')
+        }
+      }, isPwaDebugMode() ? 500 : PREPARING_BANNER_DELAY_MS)
+    )
+
+    timers.push(window.setTimeout(finalizeChromiumMode, waitMs))
+  }
+
+  const startPromptFlow = () => {
+    if (prerequisitesMet) return
+    prerequisitesMet = true
+
+    pwaLog('manifestReady:', isPwaManifestReady())
+    pwaLog('serviceWorkerReady:', isServiceWorkerReady())
+    pwaLog('beforeinstallprompt captured:', !!deferredInstallPrompt)
+
+    uninstallPromptListener = () => {
+      if (deferredInstallPrompt) upgradeToNative()
+    }
+    installPromptListeners.add(uninstallPromptListener)
+
+    if (platform === 'ios') {
+      showBanner('fallback')
+      return
+    }
+
+    if (chromium) {
+      startChromiumNativeWait()
+      return
+    }
+
+    timers.push(
+      window.setTimeout(() => {
+        showBanner(deferredInstallPrompt ? 'native' : 'fallback')
+      }, DESKTOP_CHROMIUM_NATIVE_WAIT_MS)
+    )
+  }
+
+  const maybeStartAfterPrerequisites = () => {
+    if (prerequisitesMet) return
+    if (requireManifestReady && !isPwaManifestReady()) return
+    if (!isServiceWorkerReady()) return
+    if (document.visibilityState === 'hidden') return
+    startPromptFlow()
+  }
+
+  const onUserEngagement = () => {
+    timers.push(window.setTimeout(maybeStartAfterPrerequisites, SHOW_AFTER_INTERACT_MS))
+  }
+
+  const armEngagementListeners = () => {
+    interactHandler = () => onUserEngagement()
     document.addEventListener('click', interactHandler, { once: true, capture: true })
     document.addEventListener('touchstart', interactHandler, { once: true, capture: true, passive: true })
     document.addEventListener('keydown', interactHandler, { once: true, capture: true })
-    timers.push(window.setTimeout(show, SHOW_DELAY_MS))
+
+    visibilityHandler = () => {
+      if (document.visibilityState === 'visible') maybeStartAfterPrerequisites()
+    }
+    document.addEventListener('visibilitychange', visibilityHandler)
+
+    timers.push(window.setTimeout(maybeStartAfterPrerequisites, SHOW_DELAY_MS))
   }
 
-  if (requireManifestReady && !isPwaManifestReady()) {
-    const waitForManifest = () => {
-      if (isPwaManifestReady()) {
-        armShowTimers()
-        return
-      }
-      timers.push(window.setTimeout(waitForManifest, 80))
+  const waitForPrerequisites = () => {
+    if (requireManifestReady && !isPwaManifestReady()) {
+      timers.push(window.setTimeout(waitForPrerequisites, 80))
+      return
     }
-    waitForManifest()
-  } else {
-    armShowTimers()
+    waitForServiceWorkerReady().then(() => {
+      armEngagementListeners()
+      maybeStartAfterPrerequisites()
+    })
   }
+
+  waitForPrerequisites()
 
   const cleanup = () => {
-    timers.forEach(clearTimeout)
-    timers = []
+    clearTimers()
     if (interactHandler) {
       document.removeEventListener('click', interactHandler, true)
       document.removeEventListener('touchstart', interactHandler, true)
       document.removeEventListener('keydown', interactHandler, true)
+    }
+    if (visibilityHandler) {
+      document.removeEventListener('visibilitychange', visibilityHandler)
+    }
+    if (uninstallPromptListener) {
+      installPromptListeners.delete(uninstallPromptListener)
     }
     if (!shown) removePromptEl()
     if (activeCleanup === cleanup) activeCleanup = null
