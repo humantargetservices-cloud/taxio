@@ -7,7 +7,7 @@ import { hasExplicitVehicleTypeConfig, resolveBookingVehicleTypes } from '../lib
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
-import { tBooking } from '../i18n.js'
+import { tBooking, tPwa } from '../i18n.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 import { getDemoBookingCompany, isDemoBookingSlug } from '../lib/demoBookingCompany.js'
@@ -18,6 +18,7 @@ import {
   HOURLY_DROPOFF_PLACEHOLDER,
   hourlyServiceLabelForLocale,
 } from '../lib/companyHourly.js'
+import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const TURNSTILE_FRONT_ENABLED =
@@ -1709,5 +1710,12 @@ Estimate price: ${estimatePrice}`
         console.warn('[createQuickBookingLog]', bookingErr.message || bookingErr)
       }
     })
+  })
+
+  initPwaInstallPrompt({
+    context: 'booking',
+    slug,
+    variant: 'booking',
+    strings: tPwa(getLocale()),
   })
 }

@@ -496,6 +496,23 @@ export const translations = {
         'The demo page cannot send bookings. Use a company’s real booking page from the directory to book a ride.',
       defaultSlogan: 'Your Ride, Your Way, Anytime!',
     },
+    pwa: {
+      operatorTitle: 'Add TAXIO to your home screen',
+      operatorBody: 'Open your operator dashboard faster next time.',
+      bookingTitle: 'Save this taxi page',
+      bookingBody: 'Add it to your home screen for faster future bookings.',
+      addShortcut: 'Add shortcut',
+      notNow: 'Not now',
+      how: 'How?',
+      instructionsTitle: 'Add to home screen',
+      iosStep1: 'Tap the Share button',
+      iosStep2: 'Tap Add to Home Screen',
+      iosStep3: 'Tap Add',
+      androidStep1: 'Tap the browser menu ⋮',
+      androidStep2: 'Tap Add to Home screen or Install app',
+      androidStep3: 'Confirm',
+      close: 'Close',
+    },
     registerPage: {
       registerEyebrow: 'B2B',
       title: 'Taxi Company Registration',
@@ -1058,6 +1075,23 @@ export const translations = {
       demoNoWhatsapp:
         'La page de démo ne permet pas d’envoyer de réservation. Utilisez la page de réservation réelle d’une entreprise (annuaire) pour réserver.',
       defaultSlogan: 'Votre trajet, à votre façon, à tout moment !',
+    },
+    pwa: {
+      operatorTitle: 'Ajoutez TAXIO à votre écran d’accueil',
+      operatorBody: 'Ouvrez votre tableau de bord plus rapidement la prochaine fois.',
+      bookingTitle: 'Enregistrez cette page taxi',
+      bookingBody: 'Ajoutez-la à votre écran d’accueil pour réserver plus vite.',
+      addShortcut: 'Ajouter le raccourci',
+      notNow: 'Pas maintenant',
+      how: 'Comment ?',
+      instructionsTitle: 'Ajouter à l’écran d’accueil',
+      iosStep1: 'Appuyez sur le bouton Partager',
+      iosStep2: 'Appuyez sur Sur l’écran d’accueil',
+      iosStep3: 'Appuyez sur Ajouter',
+      androidStep1: 'Appuyez sur le menu du navigateur ⋮',
+      androidStep2: 'Appuyez sur Ajouter à l’écran d’accueil ou Installer',
+      androidStep3: 'Confirmez',
+      close: 'Fermer',
     },
     registerPage: {
       registerEyebrow: 'B2B',
@@ -1622,6 +1656,23 @@ export const translations = {
         'De demopagina kan geen boekingen versturen. Gebruik de echte boekingspagina van een bedrijf (uit het overzicht) om een rit te boeken.',
       defaultSlogan: 'Jouw rit, jouw keuze, wanneer jij wilt!',
     },
+    pwa: {
+      operatorTitle: 'Zet TAXIO op je startscherm',
+      operatorBody: 'Open je dashboard sneller de volgende keer.',
+      bookingTitle: 'Bewaar deze taxipagina',
+      bookingBody: 'Zet ze op je startscherm voor snellere boekingen.',
+      addShortcut: 'Snelkoppeling toevoegen',
+      notNow: 'Niet nu',
+      how: 'Hoe?',
+      instructionsTitle: 'Toevoegen aan startscherm',
+      iosStep1: 'Tik op de Deel-knop',
+      iosStep2: 'Tik op Zet op beginscherm',
+      iosStep3: 'Tik op Voeg toe',
+      androidStep1: 'Tik op het browsermenu ⋮',
+      androidStep2: 'Tik op Toevoegen aan startscherm of App installeren',
+      androidStep3: 'Bevestig',
+      close: 'Sluiten',
+    },
     registerPage: {
       registerEyebrow: 'B2B',
       title: 'Taxi Bedrijf Registratie',
@@ -1689,6 +1740,13 @@ export const translations = {
       successBackHome: 'Terug naar home',
     },
   },
+}
+
+export function tPwa(lang) {
+  const L = normalizeLocale(lang)
+  const base = translations.en.pwa || {}
+  const loc = translations[L]?.pwa || {}
+  return { ...base, ...loc }
 }
 
 export function tDashboard(lang) {

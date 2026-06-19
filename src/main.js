@@ -6,3 +6,9 @@ import { initRouter } from './router.js'
 syncDocumentLang(getLocale())
 syncPublicThemeClass()
 initRouter()
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}

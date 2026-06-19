@@ -1,5 +1,5 @@
 import { navigate } from '../nav.js'
-import { translations, tDashboard } from '../i18n.js'
+import { translations, tDashboard, tPwa } from '../i18n.js'
 import {
   getSession,
   getMyProfile,
@@ -34,6 +34,7 @@ import {
   buildTaxioSupportWaUrl,
   calculateCompanySetupProgress,
 } from '../lib/companySetupProgress.js'
+import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
 
 const dashState = {
   tab: 'overview',
@@ -1295,4 +1296,10 @@ export async function mountDashboardCompany(root) {
       b.addEventListener('click', () => openCarModal(b.getAttribute('data-edit-car')))
     })
   }
+
+  initPwaInstallPrompt({
+    context: 'operator',
+    variant: 'operator',
+    strings: tPwa(dashLang),
+  })
 }

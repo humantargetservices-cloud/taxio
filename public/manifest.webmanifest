@@ -1,0 +1,24 @@
+{
+  "name": "TAXIO",
+  "short_name": "TAXIO",
+  "description": "TAXIO — your taxi smart business card.",
+  "display": "standalone",
+  "start_url": "/",
+  "scope": "/",
+  "theme_color": "#facc15",
+  "background_color": "#020617",
+  "icons": [
+    {
+      "src": "/taxio-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/taxio-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
