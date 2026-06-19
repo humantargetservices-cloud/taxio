@@ -39,6 +39,8 @@ const dashState = {
   tab: 'overview',
   modal: null,
   editingCarId: null,
+  drawerOpen: false,
+  qrOpen: false,
 }
 
 const DASH_SHELL = 'min-h-screen bg-[#eef0f3] pb-12 dark:bg-slate-950'
@@ -68,10 +70,210 @@ function pricingOf(company) {
   return out
 }
 
-function tabClass(active) {
-  return active
-    ? 'rounded-full bg-white px-4 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-gray-200 dark:bg-slate-800 dark:text-slate-100 dark:ring-slate-600'
-    : 'rounded-full px-4 py-2 text-sm font-medium text-gray-600 hover:bg-white/60 dark:text-slate-400 dark:hover:bg-slate-800/50'
+function setupHealthStatusSummary(td, progress, pendingCount) {
+  if (progress.percent >= 100) return td.setupAllSet
+  if (pendingCount > 0) {
+    return fillDashTemplate(td.setupStepsRemaining, { count: String(pendingCount) })
+  }
+  return setupHealthSubtitle(td, progress.percent)
+}
+
+function renderPendingTaskRow(td, item) {
+  const action = setupItemActionId(item)
+  const label = setupActionButtonLabel(td, action)
+  return `<button type="button" data-setup-action="${escapeHtml(action)}"
+    class="flex w-full items-center justify-between gap-3 rounded-xl border border-amber-200/70 bg-amber-50/60 px-3.5 py-3 text-left transition active:scale-[0.99] dark:border-amber-500/25 dark:bg-amber-950/30 dark:hover:bg-amber-950/50">
+    <span class="text-sm font-semibold text-gray-900 dark:text-slate-100">${escapeHtml(label)}</span>
+    ${icon.arrowRight('h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400')}
+  </button>`
+}
+
+function manageTile(opts) {
+  const { id, title, subtitle, iconHtml, iconBg } = opts
+  return `<button type="button" data-overview-card="${id}" class="flex w-full items-center gap-3 rounded-2xl border border-gray-200/90 bg-white p-4 text-left shadow-sm transition active:scale-[0.99] dark:border-slate-700/60 dark:bg-slate-800/90 dark:hover:border-slate-600">
+    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconBg}">${iconHtml}</div>
+    <div class="min-w-0 flex-1">
+      <p class="font-bold ${DASH_TEXT}">${title}</p>
+      ${subtitle ? `<p class="mt-0.5 text-xs ${DASH_MUTED}">${subtitle}</p>` : ''}
+    </div>
+    ${icon.arrowRight('h-4 w-4 shrink-0 text-gray-300 dark:text-slate-600')}
+  </button>`
+}
+
+function drawerNavItem(tabId, label, current) {
+  const active = tabId === current
+  return `<button type="button" data-dash-tab="${tabId}" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+    active
+      ? 'bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30'
+      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+  }">${escapeHtml(label)}</button>`
+}
+
+function renderDrawer(td, currentTab, companyName, avail, open) {
+  const workspace = [
+    { id: 'overview', label: td.tabOverview },
+    { id: 'cars', label: td.tabCars },
+    { id: 'pricing', label: td.tabPricing },
+    { id: 'essential', label: td.tabEssential },
+  ]
+  const operations = [
+    { id: 'drivers', label: td.tabDrivers },
+    { id: 'ride-requests', label: td.tabRides },
+    { id: 'license', label: td.tabLicense },
+  ]
+  const availLabel =
+    avail === 'available' ? td.availAvailable : avail === 'busy' ? td.availBusy : td.availOffline
+
+  return `<div id="dash-drawer-root" class="${open ? '' : 'pointer-events-none'}">
+    <div id="dash-drawer-backdrop" class="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm transition-opacity ${open ? 'opacity-100' : 'opacity-0'}" aria-hidden="true"></div>
+    <aside id="dash-drawer" class="fixed left-0 top-0 z-50 flex h-full w-[min(100%,18rem)] flex-col bg-slate-900 shadow-2xl transition-transform duration-300 ease-out ${open ? 'translate-x-0' : '-translate-x-full'}" aria-label="${escapeHtml(td.drawerNavLabel)}">
+      <div class="border-b border-slate-700/80 px-5 py-5">
+        <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-400/90">TAXIO</p>
+        <p class="mt-1 truncate text-lg font-bold text-white">${escapeHtml(companyName)}</p>
+        <p class="text-xs text-slate-400">${escapeHtml(td.dashOperatorLabel)}</p>
+      </div>
+      <nav class="flex-1 overflow-y-auto px-3 py-4">
+        <p class="mb-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">${escapeHtml(td.drawerWorkspace)}</p>
+        <div class="space-y-1">${workspace.map((item) => drawerNavItem(item.id, item.label, currentTab)).join('')}</div>
+        <p class="mb-2 mt-5 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">${escapeHtml(td.drawerOperations)}</p>
+        <div class="space-y-1">${operations.map((item) => drawerNavItem(item.id, item.label, currentTab)).join('')}</div>
+      </nav>
+      <div class="border-t border-slate-700/80 p-4 space-y-3">
+        <label class="block">
+          <span class="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500">${escapeHtml(td.availLabel)}</span>
+          <select id="co-avail" class="w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-100">
+            <option value="available" ${avail === 'available' ? 'selected' : ''}>● ${td.availAvailable}</option>
+            <option value="busy" ${avail === 'busy' ? 'selected' : ''}>${td.availBusy}</option>
+            <option value="offline" ${avail === 'offline' ? 'selected' : ''}>${td.availOffline}</option>
+          </select>
+        </label>
+        <button type="button" id="co-logout" class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-600 px-3 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800">${icon.logOut('h-4 w-4')}${td.logout}</button>
+      </div>
+    </aside>
+  </div>`
+}
+
+function renderQrSheet(td, bookPublicUrl, bookingQrSrc, open) {
+  return `<div id="dash-qr-sheet" class="fixed inset-0 z-[60] ${open ? '' : 'pointer-events-none hidden'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(td.shareQrTitle)}">
+    <div id="dash-qr-backdrop" class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"></div>
+    <div class="absolute bottom-0 left-0 right-0 mx-auto max-w-lg rounded-t-3xl border border-gray-200/80 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:p-6">
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <h2 class="text-lg font-bold ${DASH_TEXT}">${escapeHtml(td.shareQrTitle)}</h2>
+        <button type="button" id="dash-qr-close" class="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-600 dark:border-slate-600 dark:text-slate-300" aria-label="${escapeHtml(td.closeQr)}">${icon.x('h-4 w-4')}</button>
+      </div>
+      <div class="flex flex-col items-center gap-4">
+        <div class="rounded-2xl border border-gray-100 bg-white p-3 shadow-inner dark:border-slate-700 dark:bg-slate-950">
+          <img src="${escapeHtml(bookingQrSrc)}" width="200" height="200" alt="" class="h-48 w-48 rounded-xl" loading="lazy" decoding="async" />
+        </div>
+        <input type="text" readonly value="${escapeHtml(bookPublicUrl)}" id="dash-booking-url-field" class="w-full ${DASH_INPUT} px-3 py-2.5 text-xs sm:text-sm" />
+        <div class="flex w-full flex-wrap gap-2">
+          <button type="button" data-dash-copy class="flex-1 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white dark:bg-amber-400 dark:text-gray-900">${td.copyLink}</button>
+          <a href="${escapeHtml(bookingQrSrc)}" download="taxio-booking-qr.png" target="_blank" rel="noopener noreferrer" class="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-center text-sm font-semibold text-gray-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">${td.downloadQr}</a>
+        </div>
+        <button type="button" data-setup-action="qr" class="w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-200">${td.setupBtnQr}</button>
+        <p id="dash-copy-feedback" class="hidden text-xs font-medium text-emerald-600 dark:text-emerald-400">${td.copied}</p>
+      </div>
+    </div>
+  </div>`
+}
+
+function renderHeroCard(td, ctx) {
+  const { progress, bookPublicUrl, availLabel, availDotClass } = ctx
+  const pct = progress.percent
+  const optionalItems = progress.items.filter((item) => item.key !== 'live')
+  const pendingItems = optionalItems.filter((item) => !item.completed)
+  const completedItems = [
+    ...(progress.live ? [progress.items.find((i) => i.key === 'live')].filter(Boolean) : []),
+    ...optionalItems.filter((item) => item.completed),
+  ]
+  const statusSummary = setupHealthStatusSummary(td, progress, pendingItems.length)
+
+  const pendingHtml =
+    pendingItems.length > 0
+      ? `<div class="space-y-2">${pendingItems.map((item) => renderPendingTaskRow(td, item)).join('')}</div>`
+      : `<p class="rounded-xl border border-emerald-200/80 bg-emerald-50/80 px-3.5 py-3 text-sm font-semibold text-emerald-800 dark:border-emerald-800/50 dark:bg-emerald-950/40 dark:text-emerald-300">${escapeHtml(td.setupAllSet)}</p>`
+
+  const completedHtml =
+    completedItems.length > 0
+      ? `<details class="mt-3 group">
+          <summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(td.setupCompletedSection)} (${completedItems.length})</summary>
+          <div class="mt-2 flex flex-wrap gap-2">${completedItems.map((item) => renderSetupActionCard(td, item, progress, 'completed')).join('')}</div>
+        </details>`
+      : ''
+
+  return `<section id="dash-hero-card" class="relative ${DASH_CARD} p-5 sm:p-6">
+    <button type="button" id="dash-qr-open" class="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-xl border border-amber-200/80 bg-amber-50 text-amber-700 shadow-sm transition hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300" aria-label="${escapeHtml(td.shareQrTitle)}">${icon.qrCode('h-5 w-5')}</button>
+    <div class="flex items-start gap-4 pr-12">
+      ${renderSetupHealthRing(pct, 'sm')}
+      <div class="min-w-0 flex-1 pt-1">
+        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(td.setupHealthTitle)}</p>
+        <p class="mt-1 text-lg font-bold ${DASH_TEXT}">${escapeHtml(statusSummary)}</p>
+        <p class="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold ${availDotClass}">
+          <span class="h-2 w-2 rounded-full bg-current"></span>
+          ${escapeHtml(availLabel)}
+        </p>
+      </div>
+    </div>
+    <div class="mt-4">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-slate-500">${escapeHtml(td.bookingUrlLabel)}</p>
+      <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-slate-300 sm:text-sm">${escapeHtml(bookPublicUrl)}</p>
+    </div>
+    <div class="mt-4 flex flex-wrap gap-2">
+      <button type="button" data-setup-action="preview" class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-yellow-400 px-4 py-2.5 text-sm font-bold text-gray-900 shadow-sm hover:bg-yellow-300 dark:bg-amber-400 dark:hover:bg-amber-300 sm:flex-none">${icon.eye('h-4 w-4')}${td.previewPage}</button>
+      <button type="button" data-dash-copy-hero class="inline-flex flex-1 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 sm:flex-none">${td.copyLink}</button>
+    </div>
+    <p id="dash-hero-copy-feedback" class="mt-2 hidden text-xs font-medium text-emerald-600 dark:text-emerald-400">${td.copied}</p>
+    <div class="mt-5 border-t border-gray-100 pt-4 dark:border-slate-700/60">
+      <p class="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(td.setupNextActions)}</p>
+      ${pendingHtml}
+      ${completedHtml}
+    </div>
+  </section>`
+}
+
+function renderOverviewBody(td, ctx) {
+  const { bookingStats } = ctx
+
+  const activityHtml =
+    bookingStats.total === 0
+      ? `<p class="text-sm ${DASH_MUTED}">${escapeHtml(td.requestsEmptyHint)}</p>`
+      : `<div class="grid grid-cols-3 gap-2">
+          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
+            <p class="text-xl font-bold ${DASH_TEXT}">${bookingStats.today}</p>
+            <p class="mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsToday)}</p>
+          </div>
+          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
+            <p class="text-xl font-bold text-amber-600 dark:text-amber-400">${bookingStats.pending}</p>
+            <p class="mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsPending)}</p>
+          </div>
+          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
+            <p class="text-xl font-bold ${DASH_TEXT}">${bookingStats.total}</p>
+            <p class="mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsTotal)}</p>
+          </div>
+        </div>`
+
+  return `<div class="space-y-5">
+    ${renderHeroCard(td, ctx)}
+
+    <section class="${DASH_CARD} p-5 sm:p-6">
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="text-base font-bold ${DASH_TEXT}">${escapeHtml(td.todayActivityTitle)}</h2>
+        <button type="button" data-overview-card="requests" class="text-xs font-semibold text-amber-700 dark:text-amber-400">${escapeHtml(td.viewRequests)} →</button>
+      </div>
+      <div class="mt-3">${activityHtml}</div>
+    </section>
+
+    <section>
+      <h2 class="mb-3 text-sm font-bold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.manageTitle)}</h2>
+      <div class="grid gap-2 sm:grid-cols-2">
+        ${manageTile({ id: 'add-car', title: td.cardAddCar, iconBg: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400', iconHtml: icon.plus('h-5 w-5') })}
+        ${manageTile({ id: 'pricing', title: td.cardPricing, iconBg: 'bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400', iconHtml: `<span class="text-lg font-bold">€</span>` })}
+        ${manageTile({ id: 'customize', title: td.cardCustomize, iconBg: 'bg-yellow-400/20 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300', iconHtml: icon.palette('h-5 w-5') })}
+        ${manageTile({ id: 'company', title: td.cardEssential, iconBg: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400', iconHtml: icon.building2('h-5 w-5') })}
+        ${manageTile({ id: 'vehicle-types', title: td.cardCarTypes, iconBg: 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400', iconHtml: icon.car('h-5 w-5') })}
+      </div>
+    </section>
+  </div>`
 }
 
 function computeBookingStats(bookings) {
@@ -87,18 +289,6 @@ function computeBookingStats(bookings) {
     if (String(b.status || 'new') === 'new') pending += 1
   }
   return { today, pending, total: bookings.length }
-}
-
-function quickActionCard(opts) {
-  const { id, iconHtml, iconBg, title, desc, status } = opts
-  return `<button type="button" data-overview-card="${id}" class="group flex w-full items-start gap-4 ${DASH_CARD} p-4 text-left transition hover:border-amber-200/80 hover:shadow-md dark:hover:border-amber-500/30 sm:p-5">
-    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconBg}">${iconHtml}</div>
-    <div class="min-w-0 flex-1">
-      <p class="font-bold ${DASH_TEXT}">${title}</p>
-      <p class="mt-0.5 text-sm leading-snug ${DASH_MUTED}">${desc}</p>
-      ${status ? `<p class="mt-2 text-xs font-semibold text-amber-700 dark:text-amber-400">${status}</p>` : ''}
-    </div>
-  </button>`
 }
 
 function fillDashTemplate(template, vars) {
@@ -185,205 +375,6 @@ function renderSetupActionCard(td, item, progress, variant) {
     ${escapeHtml(label)}
     <span class="text-emerald-600">${icon.check('h-3 w-3')}</span>
   </button>`
-}
-
-function renderSetupUtilityCard(td, action, label) {
-  return `<button type="button" data-setup-action="${escapeHtml(action)}"
-    class="inline-flex items-center gap-2 rounded-2xl border border-amber-200/80 bg-gradient-to-b from-amber-50 to-amber-100/60 px-4 py-2.5 text-sm font-semibold text-amber-950 shadow-sm transition hover:border-amber-300 hover:from-amber-100 hover:to-amber-50 hover:shadow-md active:scale-[0.98] dark:border-amber-500/30 dark:from-amber-950/40 dark:to-amber-900/20 dark:text-amber-100 dark:hover:border-amber-400/40">
-    ${escapeHtml(label)}
-  </button>`
-}
-
-function renderSetupProgressCard(td, progress) {
-  const pct = progress.percent
-  const optionalItems = progress.items.filter((item) => item.key !== 'live')
-  const pendingItems = optionalItems.filter((item) => !item.completed)
-  const completedItems = [
-    ...(progress.live ? [progress.items.find((i) => i.key === 'live')].filter(Boolean) : []),
-    ...optionalItems.filter((item) => item.completed),
-  ]
-
-  const healthLine = setupHealthSubtitle(td, pct)
-  const showDefaultNote = pct < 100 && pct <= 55
-
-  const nextActionsHtml =
-    pendingItems.length > 0
-      ? pendingItems
-          .map((item) => renderSetupActionCard(td, item, progress, 'pending'))
-          .join('')
-      : (() => {
-          const completedKeys = new Set(completedItems.map((item) => item.key))
-          const utilities = []
-          if (!completedKeys.has('preview')) {
-            utilities.push(renderSetupUtilityCard(td, 'preview', td.previewPage))
-          }
-          utilities.push(renderSetupUtilityCard(td, 'qr', td.setupBtnQrMore))
-          utilities.push(renderSetupUtilityCard(td, 'support', td.setupHelpShort))
-          return utilities.join('')
-        })()
-
-  const completedHtml = completedItems
-    .map((item) => renderSetupActionCard(td, item, progress, 'completed'))
-    .join('')
-
-  const completedSection =
-    completedItems.length > 0
-      ? `<div class="mt-5 border-t border-gray-100/80 pt-4 dark:border-slate-700/60">
-          <p class="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(td.setupCompletedSection)}</p>
-          <div class="flex flex-wrap gap-2">${completedHtml}</div>
-        </div>`
-      : ''
-
-  const helpFooter =
-    pendingItems.length > 0
-      ? `<p class="mt-4 border-t border-gray-100/80 pt-3 text-center dark:border-slate-700/60">
-          <button type="button" data-setup-action="support" class="text-xs font-semibold text-gray-600 underline decoration-gray-300 underline-offset-2 transition hover:text-gray-900 dark:text-slate-400 dark:decoration-slate-600 dark:hover:text-slate-200">${escapeHtml(td.setupHelpLink)}</button>
-        </p>`
-      : ''
-
-  return `<section id="dash-setup-card" class="${DASH_CARD} p-5 sm:p-6" aria-labelledby="dash-setup-heading">
-    <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-8">
-      <div class="flex items-center gap-4 lg:min-w-[15rem] lg:flex-col lg:items-start lg:gap-3">
-        ${renderSetupHealthRing(pct, 'sm')}
-        <div class="min-w-0">
-          <h2 id="dash-setup-heading" class="text-lg font-bold tracking-tight ${DASH_TEXT} sm:text-xl">${escapeHtml(td.setupHealthTitle)}</h2>
-          <p class="mt-1 text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(healthLine)}</p>
-          ${showDefaultNote ? `<p class="mt-1.5 text-xs ${DASH_MUTED}">${escapeHtml(td.setupDefaultNote)}</p>` : ''}
-        </div>
-      </div>
-      <div class="min-w-0 flex-1">
-        <p class="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(td.setupNextActions)}</p>
-        <div class="flex flex-wrap gap-2">${nextActionsHtml}</div>
-      </div>
-    </div>
-    ${completedSection}
-    ${helpFooter}
-  </section>`
-}
-
-function renderOverviewBody(td, ctx) {
-  const {
-    progress,
-    bookPublicUrl,
-    bookingQrSrc,
-    avail,
-    availLabel,
-    availDotClass,
-    bookingStats,
-    pricingStatus,
-  } = ctx
-  const setupCard = renderSetupProgressCard(td, progress)
-
-  const requestsBody =
-    bookingStats.total === 0
-      ? `<p class="text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.requestsEmptyHint)}</p>`
-      : `<div class="mt-4 grid grid-cols-3 gap-3">
-          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
-            <p class="text-2xl font-bold ${DASH_TEXT}">${bookingStats.today}</p>
-            <p class="mt-0.5 text-[11px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsToday)}</p>
-          </div>
-          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
-            <p class="text-2xl font-bold text-amber-600 dark:text-amber-400">${bookingStats.pending}</p>
-            <p class="mt-0.5 text-[11px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsPending)}</p>
-          </div>
-          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-3 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
-            <p class="text-2xl font-bold ${DASH_TEXT}">${bookingStats.total}</p>
-            <p class="mt-0.5 text-[11px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsTotal)}</p>
-          </div>
-        </div>`
-
-  return `<div class="space-y-5">
-    <section class="${DASH_CARD} p-5 sm:p-6">
-      <p class="inline-flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-        <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">${icon.check('h-3 w-3')}</span>
-        ${escapeHtml(td.heroLiveTitle)}
-      </p>
-      <p class="mt-2 text-sm ${DASH_MUTED}">${escapeHtml(td.heroLiveSub)}</p>
-      <p class="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold ${availDotClass}">
-        <span class="h-2 w-2 rounded-full bg-current"></span>
-        ${escapeHtml(availLabel)}
-      </p>
-    </section>
-
-    ${setupCard}
-
-    <div class="grid gap-5 lg:grid-cols-2">
-      <section class="${DASH_CARD} p-5 sm:p-6">
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <h2 class="text-base font-bold ${DASH_TEXT}">${escapeHtml(td.requestsOverviewTitle)}</h2>
-            <p class="mt-0.5 text-sm ${DASH_MUTED}">${escapeHtml(td.ridesSub)}</p>
-          </div>
-          ${icon.messageCircle('h-6 w-6 text-amber-500')}
-        </div>
-        ${requestsBody}
-        <button type="button" data-overview-card="requests" class="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-yellow-400 px-4 py-2.5 text-sm font-bold text-gray-900 shadow-sm transition hover:bg-yellow-300 dark:bg-amber-400 dark:hover:bg-amber-300">${escapeHtml(td.viewRequests)}</button>
-      </section>
-
-      <section id="dash-share-card" class="${DASH_CARD} p-5 sm:p-6">
-        <h2 class="text-base font-bold ${DASH_TEXT}">${escapeHtml(td.shareTitle)}</h2>
-        <p class="mt-0.5 text-sm ${DASH_MUTED}">${escapeHtml(td.shareSubtitle)}</p>
-        <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start">
-          <div class="mx-auto shrink-0 rounded-xl border border-gray-100 bg-white p-2 shadow-inner dark:border-slate-700 dark:bg-slate-900/50 sm:mx-0">
-            <img src="${escapeHtml(bookingQrSrc)}" width="140" height="140" alt="" class="h-36 w-36 rounded-lg" loading="lazy" decoding="async" />
-          </div>
-          <div class="min-w-0 flex-1 space-y-2">
-            <input type="text" readonly value="${escapeHtml(bookPublicUrl)}" id="dash-booking-url-field" class="w-full ${DASH_INPUT} px-3 py-2 text-xs sm:text-sm" />
-            <div class="flex flex-wrap gap-2">
-              <button type="button" data-dash-copy class="rounded-xl bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-800 dark:bg-amber-400 dark:text-gray-900 dark:hover:bg-amber-300">${td.copyLink}</button>
-              <button type="button" id="dash-share-preview" data-setup-action="preview" class="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700">${icon.eye('h-3.5 w-3.5')}${td.previewPage}</button>
-              <a href="${escapeHtml(bookingQrSrc)}" download="taxio-booking-qr.png" target="_blank" rel="noopener noreferrer" class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">${td.downloadQr}</a>
-              <button type="button" data-setup-action="qr" class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">${td.setupBtnQr}</button>
-            </div>
-            <p id="dash-copy-feedback" class="hidden text-xs font-medium text-emerald-600 dark:text-emerald-400">${td.copied}</p>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <section>
-      <h2 class="mb-3 text-sm font-bold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.quickActionsTitle)}</h2>
-      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        ${quickActionCard({
-          id: 'pricing',
-          iconBg: 'bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400',
-          iconHtml: `<span class="text-lg font-bold">€</span>`,
-          title: td.qaPricingTitle,
-          desc: td.qaPricingDesc,
-          status: pricingStatus,
-        })}
-        ${quickActionCard({
-          id: 'vehicles',
-          iconBg: 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400',
-          iconHtml: icon.car('h-5 w-5'),
-          title: td.qaFleetTitle,
-          desc: td.qaFleetDesc,
-          status: fillDashTemplate(td.qaFleetStatus, { count: String(ctx.carCount) }),
-        })}
-        ${quickActionCard({
-          id: 'company',
-          iconBg: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400',
-          iconHtml: icon.building2('h-5 w-5'),
-          title: td.qaCompanyTitle,
-          desc: td.qaCompanyDesc,
-        })}
-        ${quickActionCard({
-          id: 'share-page',
-          iconBg: 'bg-yellow-400/20 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
-          iconHtml: icon.qrCode('h-5 w-5'),
-          title: td.qaShareTitle,
-          desc: td.qaShareDesc,
-        })}
-        ${quickActionCard({
-          id: 'help',
-          iconBg: 'bg-slate-500/10 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300',
-          iconHtml: icon.messageCircle('h-5 w-5'),
-          title: td.qaHelpTitle,
-          desc: td.qaHelpDesc,
-        })}
-      </div>
-    </section>
-  </div>`
 }
 
 export async function mountDashboardCompany(root) {
@@ -485,27 +476,6 @@ export async function mountDashboardCompany(root) {
   const logoOk = /^https?:\/\//i.test(logoRaw)
   const logoSrcEsc = logoOk ? escapeHtml(logoRaw) : ''
 
-  const tabsR1 = [
-    { id: 'overview', label: td.tabOverview },
-    { id: 'cars', label: td.tabCars },
-    { id: 'pricing', label: td.tabPricing },
-    { id: 'essential', label: td.tabEssential },
-  ]
-  const tabsR2 = [
-    { id: 'drivers', label: td.tabDrivers },
-    { id: 'ride-requests', label: td.tabRides },
-    { id: 'license', label: td.tabLicense },
-  ]
-
-  function tabRowHtml(row, current) {
-    return `<div class="flex flex-wrap justify-center gap-2">${row
-      .map(
-        (t) =>
-          `<button type="button" data-dash-tab="${t.id}" class="${tabClass(current === t.id)}">${t.label}</button>`
-      )
-      .join('')}</div>`
-  }
-
   let bodyHtml = ''
   const t = dashState.tab
 
@@ -528,16 +498,16 @@ export async function mountDashboardCompany(root) {
         : cars
             .map(
               (c) => `
-      <div class="flex items-center gap-4 rounded-xl border border-gray-200 bg-gray-50/80 p-4">
-        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+      <div class="flex items-center gap-4 rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-slate-700/60 dark:bg-slate-900/40">
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400">
           ${icon.car('h-6 w-6')}
         </div>
         <div class="min-w-0 flex-1">
-          <p class="font-bold text-gray-900">${escapeHtml(c.model)}</p>
-          <p class="text-xs text-gray-600">${escapeHtml(c.license_plate)} · ${escapeHtml(String(c.year || ''))}${c.driver_name ? ` · ${escapeHtml(c.driver_name)}` : ''}</p>
+          <p class="font-bold text-gray-900 dark:text-slate-100">${escapeHtml(c.model)}</p>
+          <p class="text-xs text-gray-600 dark:text-slate-400">${escapeHtml(c.license_plate)} · ${escapeHtml(String(c.year || ''))}${c.driver_name ? ` · ${escapeHtml(c.driver_name)}` : ''}</p>
         </div>
         <span class="rounded-full bg-yellow-400 px-3 py-0.5 text-xs font-bold text-gray-900">${escapeHtml(c.car_type)}</span>
-        <button type="button" data-edit-car="${escapeHtml(c.id)}" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-white">
+        <button type="button" data-edit-car="${escapeHtml(c.id)}" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-white dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
           ${icon.pencil('h-3.5 w-3.5')}
           ${td.edit}
         </button>
@@ -751,55 +721,32 @@ export async function mountDashboardCompany(root) {
 
   root.innerHTML = `
     <div class="${DASH_SHELL}">
-      <header class="${DASH_HEADER}">
-        <div class="mx-auto flex max-w-6xl flex-wrap items-start justify-between gap-4 px-4 py-4">
-          <div class="flex gap-3">
-            ${
-              logoOk
-                ? `<div class="relative flex h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-gray-100 shadow-sm ring-1 ring-gray-200/80 dark:bg-slate-800 dark:ring-slate-600/60">
-              <img src="${logoSrcEsc}" alt="" class="dash-header-logo-img h-full w-full object-cover" decoding="async" />
-              <div class="dash-header-logo-fallback absolute inset-0 hidden items-center justify-center bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-400">${icon.building2('h-8 w-8')}</div>
-            </div>`
-                : `<div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-500 shadow-sm ring-1 ring-gray-200/80 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-600/60">
-              ${icon.building2('h-8 w-8')}
-            </div>`
-            }
-            <div>
-              <h1 class="text-xl font-bold ${DASH_TEXT}">${escapeHtml(company.name)}</h1>
-              <p class="text-xs ${DASH_MUTED}">${td.dashBadge}</p>
-              <p class="mt-1 text-xs font-medium text-gray-600 dark:text-slate-300">${vatLine}</p>
-            </div>
+      ${renderDrawer(td, t, company.name, avail, dashState.drawerOpen)}
+      <header class="sticky top-0 z-30 border-b border-gray-200/90 bg-white/95 backdrop-blur-md dark:border-slate-700/70 dark:bg-slate-900/95">
+        <div class="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3">
+          <button type="button" id="dash-menu-btn" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" aria-label="${escapeHtml(dashState.drawerOpen ? td.closeMenu : td.openMenu)}">${icon.menu('h-5 w-5')}</button>
+          <div class="min-w-0 flex-1 px-2 text-center">
+            <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-600 dark:text-amber-400">${escapeHtml(td.dashOperatorLabel)}</p>
+            <p class="truncate text-sm font-bold ${DASH_TEXT}">${escapeHtml(company.name)}</p>
           </div>
-          <div class="flex flex-col items-end gap-2">
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              <button type="button" id="co-toggle-dark" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 dark:border-slate-600/50 dark:bg-slate-800 dark:text-amber-200/90 dark:hover:bg-slate-700" title="${escapeHtml(td.themeToggle)}" aria-label="${escapeHtml(td.themeToggle)}">
-                ${dashDark ? icon.moon('h-4 w-4') : icon.sun('h-4 w-4')}
-              </button>
-              <div class="flex rounded-full border border-gray-200 bg-white p-0.5 shadow-sm dark:border-slate-600 dark:bg-slate-800">
-                ${['nl', 'fr', 'en']
-                  .map(
-                    (lc) =>
-                      `<button type="button" data-dash-lang="${lc}" class="rounded-full px-2.5 py-1.5 text-xs font-semibold ${dashLang === lc ? 'bg-gray-900 text-white dark:bg-amber-400 dark:text-gray-900' : 'text-gray-600 hover:bg-gray-50 dark:text-slate-300 dark:hover:bg-slate-700'}">${lc.toUpperCase()}</button>`
-                  )
-                  .join('')}
-              </div>
-              <button type="button" data-help class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">${icon.helpCircle('h-4 w-4')}${td.help}</button>
-              <button type="button" id="co-logout" class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">${icon.logOut('h-4 w-4')}${td.logout}</button>
+          <div class="flex shrink-0 items-center gap-1">
+            <div class="flex rounded-full border border-gray-200 bg-white p-0.5 shadow-sm dark:border-slate-600 dark:bg-slate-800">
+              ${['nl', 'fr', 'en']
+                .map(
+                  (lc) =>
+                    `<button type="button" data-dash-lang="${lc}" class="rounded-full px-1.5 py-1 text-[10px] font-bold sm:px-2 sm:py-1 sm:text-xs ${dashLang === lc ? 'bg-gray-900 text-white dark:bg-amber-400 dark:text-gray-900' : 'text-gray-600 hover:bg-gray-50 dark:text-slate-300 dark:hover:bg-slate-700'}">${lc.toUpperCase()}</button>`
+                )
+                .join('')}
             </div>
-            <select id="co-avail" class="rounded-full border border-gray-200 bg-white py-1.5 pl-3 pr-8 text-xs font-semibold text-gray-800 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">
-              <option value="available" ${avail === 'available' ? 'selected' : ''}>● ${td.availAvailable}</option>
-              <option value="busy" ${avail === 'busy' ? 'selected' : ''}>${td.availBusy}</option>
-              <option value="offline" ${avail === 'offline' ? 'selected' : ''}>${td.availOffline}</option>
-            </select>
+            <button type="button" id="co-toggle-dark" class="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 dark:border-slate-600/50 dark:bg-slate-800 dark:text-amber-200/90 dark:hover:bg-slate-700" title="${escapeHtml(td.themeToggle)}" aria-label="${escapeHtml(td.themeToggle)}">
+              ${dashDark ? icon.moon('h-4 w-4') : icon.sun('h-4 w-4')}
+            </button>
+            <button type="button" data-help class="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" aria-label="${escapeHtml(td.help)}">${icon.helpCircle('h-4 w-4')}</button>
           </div>
-        </div>
-        <div class="mx-auto max-w-6xl space-y-2 ${DASH_TAB_BAR} px-4 py-3">
-          ${tabRowHtml(tabsR1, t)}
-          ${tabRowHtml(tabsR2, t)}
         </div>
       </header>
 
-      <main class="mx-auto max-w-6xl px-4 py-6">
+      <main class="mx-auto max-w-6xl px-4 py-5 sm:py-6">
         <p id="dash-msg" class="mb-4 hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"></p>
         ${bodyHtml}
       </main>
@@ -812,6 +759,7 @@ export async function mountDashboardCompany(root) {
         <p class="mt-2 font-medium text-amber-700/90 dark:text-amber-400/90">${td.footerPowered}</p>
       </footer>
 
+      ${renderQrSheet(td, bookPublicUrl, bookingQrSrc, dashState.qrOpen)}
       <div id="dash-modal-root"></div>
     </div>`
 
@@ -819,8 +767,34 @@ export async function mountDashboardCompany(root) {
     btn.addEventListener('click', () => {
       dashState.tab = btn.getAttribute('data-dash-tab')
       dashState.modal = null
+      dashState.drawerOpen = false
       mountDashboardCompany(root)
     })
+  })
+
+  root.querySelector('#dash-menu-btn')?.addEventListener('click', () => {
+    dashState.drawerOpen = !dashState.drawerOpen
+    mountDashboardCompany(root)
+  })
+
+  root.querySelector('#dash-drawer-backdrop')?.addEventListener('click', () => {
+    dashState.drawerOpen = false
+    mountDashboardCompany(root)
+  })
+
+  root.querySelector('#dash-qr-open')?.addEventListener('click', () => {
+    dashState.qrOpen = true
+    mountDashboardCompany(root)
+  })
+
+  root.querySelector('#dash-qr-close')?.addEventListener('click', () => {
+    dashState.qrOpen = false
+    mountDashboardCompany(root)
+  })
+
+  root.querySelector('#dash-qr-backdrop')?.addEventListener('click', () => {
+    dashState.qrOpen = false
+    mountDashboardCompany(root)
   })
 
   root.querySelector('#co-toggle-dark')?.addEventListener('click', () => {
@@ -850,11 +824,13 @@ export async function mountDashboardCompany(root) {
     const locale = dashLang
     if (action === 'pricing') {
       dashState.tab = 'pricing'
+      dashState.drawerOpen = false
       mountDashboardCompany(root)
       return
     }
     if (action === 'photo' || action === 'motto' || action === 'whatsapp') {
       dashState.tab = 'essential'
+      dashState.drawerOpen = false
       mountDashboardCompany(root)
       return
     }
@@ -893,24 +869,30 @@ export async function mountDashboardCompany(root) {
     }
   }
 
-  root.querySelector('main')?.addEventListener('click', (e) => {
+  root.onclick = (e) => {
     const el = e.target.closest('[data-setup-action]')
     if (!el) return
     e.preventDefault()
     handleSetupAction(el.getAttribute('data-setup-action'))
-  })
+  }
 
-  async function copyBookingUrl() {
+  async function copyBookingUrl(feedbackId) {
     const el = root.querySelector('#dash-booking-url-field')
-    const fb = root.querySelector('#dash-copy-feedback')
+    const fb = feedbackId ? root.querySelector(feedbackId) : root.querySelector('#dash-copy-feedback')
     const url = el?.value || bookPublicUrl
     try {
       await navigator.clipboard.writeText(url)
       fb?.classList.remove('hidden')
       window.setTimeout(() => fb?.classList.add('hidden'), 2000)
     } catch {
-      el?.select()
-      document.execCommand('copy')
+      if (el) {
+        el.removeAttribute('readonly')
+        el.select()
+        document.execCommand('copy')
+        el.setAttribute('readonly', '')
+      } else {
+        await navigator.clipboard.writeText(url).catch(() => {})
+      }
       fb?.classList.remove('hidden')
       window.setTimeout(() => fb?.classList.add('hidden'), 2000)
     }
@@ -919,6 +901,8 @@ export async function mountDashboardCompany(root) {
   root.querySelectorAll('[data-dash-copy]').forEach((btn) => {
     btn.addEventListener('click', () => copyBookingUrl())
   })
+
+  root.querySelector('[data-dash-copy-hero]')?.addEventListener('click', () => copyBookingUrl('#dash-hero-copy-feedback'))
 
   root.querySelector('#co-avail')?.addEventListener('change', async (e) => {
     const v = e.target.value
@@ -937,26 +921,27 @@ export async function mountDashboardCompany(root) {
       const id = btn.getAttribute('data-overview-card')
       if (id === 'requests') {
         dashState.tab = 'ride-requests'
+        dashState.drawerOpen = false
         mountDashboardCompany(root)
         return
       }
-      if (id === 'vehicles') {
+      if (id === 'add-car') {
         dashState.tab = 'cars'
+        dashState.modal = 'add-car'
+        dashState.drawerOpen = false
         mountDashboardCompany(root)
         return
       }
-      if (id === 'pricing') {
+      if (id === 'pricing' || id === 'vehicle-types') {
         dashState.tab = 'pricing'
+        dashState.drawerOpen = false
         mountDashboardCompany(root)
         return
       }
-      if (id === 'company') {
+      if (id === 'company' || id === 'customize') {
         dashState.tab = 'essential'
+        dashState.drawerOpen = false
         mountDashboardCompany(root)
-        return
-      }
-      if (id === 'share-page') {
-        root.querySelector('#dash-share-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         return
       }
       if (id === 'help') {
