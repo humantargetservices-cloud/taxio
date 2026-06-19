@@ -1,8 +1,26 @@
-import { absolutePublicBookingUrl } from './tenant.js'
+import { absolutePublicBookingUrl, parseTenantSlugFromHostname } from './tenant.js'
+import { setPwaManifestReady } from './pwaInstallPrompt.js'
 
 export const PWA_FALLBACK_ICON = '/pwa-fallback-icon.svg'
 
 const IMAGE_FIELDS = ['logo_url', 'logo', 'image_url', 'photo_url']
+
+function bookingRootDomain() {
+  return String(import.meta.env.VITE_TAXIO_BOOKING_ROOT_DOMAIN || '')
+    .trim()
+    .toLowerCase()
+}
+
+/** Manifest API origin: tenant booking hosts use www apex so install identity is consistent. */
+export function manifestApiOrigin() {
+  if (typeof window === 'undefined') return ''
+  const root = bookingRootDomain()
+  const tenantSlug = parseTenantSlugFromHostname(window.location.hostname)
+  if (tenantSlug && root) {
+    return `https://www.${root}`
+  }
+  return window.location.origin
+}
 
 export function pickCompanyImageUrl(company) {
   if (!company || typeof company !== 'object') return null
@@ -66,13 +84,55 @@ export function buildPwaPromptStrings(tpwa, variant, companyName) {
   }
 }
 
+export function buildManifestVersion(company, slug) {
+  const updated = company?.updated_at
+  if (updated) {
+    return String(updated)
+      .replace(/[:.TZ]/gi, '')
+      .slice(0, 24)
+  }
+  if (company?.id) return String(company.id)
+  const s = String(slug || company?.slug || '').trim().toLowerCase()
+  if (s) return s.replace(/[^a-z0-9]/g, '')
+  return 'taxio'
+}
+
 export function buildCompanyManifestHref({ context, company, slug }) {
   const params = new URLSearchParams()
   params.set('context', context === 'booking' ? 'booking' : 'dashboard')
   if (company?.id) params.set('companyId', String(company.id))
   const s = String(slug || company?.slug || '').trim()
   if (s) params.set('slug', s)
-  return `/api/company-manifest?${params.toString()}`
+  const v = buildManifestVersion(company, s)
+  if (v) params.set('v', v)
+  const base = manifestApiOrigin() || (typeof window !== 'undefined' ? window.location.origin : '')
+  return `${base}/api/company-manifest?${params.toString()}`
+}
+
+/** Remove every rel=manifest link so only one identity is active (fixes static TAXIO manifest winning). */
+export function removeAllManifestLinks() {
+  if (typeof document === 'undefined') return
+  document.querySelectorAll('link[rel="manifest"]').forEach((el) => el.remove())
+}
+
+export function setCompanyManifestLink(href) {
+  if (typeof document === 'undefined') return
+  removeAllManifestLinks()
+  const el = document.createElement('link')
+  el.id = 'taxio-company-manifest'
+  el.rel = 'manifest'
+  el.href = href
+  document.head.appendChild(el)
+}
+
+export function ensureGenericSiteManifest() {
+  if (typeof document === 'undefined') return
+  removeAllManifestLinks()
+  const el = document.createElement('link')
+  el.id = 'taxio-site-manifest'
+  el.rel = 'manifest'
+  el.href = '/manifest.webmanifest'
+  document.head.appendChild(el)
 }
 
 function setOrCreateMeta(name, content) {
@@ -86,16 +146,50 @@ function setOrCreateMeta(name, content) {
   el.setAttribute('content', content)
 }
 
-function setOrCreateLink(rel, href, id) {
+function setOrCreateAppleTouchIcon(href) {
   if (typeof document === 'undefined') return
-  let el = id ? document.getElementById(id) : document.querySelector(`link[rel="${rel}"]`)
+  document.querySelectorAll('link[rel="apple-touch-icon"]').forEach((el) => {
+    if (el.id !== 'taxio-apple-touch-icon') el.remove()
+  })
+  let el = document.getElementById('taxio-apple-touch-icon')
   if (!el) {
     el = document.createElement('link')
-    el.rel = rel
-    if (id) el.id = id
+    el.id = 'taxio-apple-touch-icon'
+    el.rel = 'apple-touch-icon'
     document.head.appendChild(el)
   }
   el.href = href
+}
+
+function logPwaDev(message, detail) {
+  if (!import.meta.env.DEV || typeof console === 'undefined') return
+  if (detail !== undefined) console.log(`[taxio-pwa] ${message}`, detail)
+  else console.log(`[taxio-pwa] ${message}`)
+}
+
+/**
+ * Sync: point manifest at company booking identity before async company fetch.
+ * Call from router as early as possible on booking routes.
+ */
+export function primeBookingPwaManifest(slug) {
+  const href = buildCompanyManifestHref({ context: 'booking', slug })
+  setCompanyManifestLink(href)
+  logPwaDev('manifest href:', href)
+  return prefetchCompanyManifest(href, slug)
+}
+
+/** Fetch manifest so Chrome registers company identity before install prompt. */
+export async function prefetchCompanyManifest(href, label) {
+  try {
+    const res = await fetch(href, { cache: 'no-store', credentials: 'omit', mode: 'cors' })
+    if (res.ok) {
+      const manifest = await res.json()
+      logPwaDev(`manifest applied for: ${manifest?.name || label || 'booking'}`)
+    }
+  } catch (err) {
+    logPwaDev('manifest prefetch failed', err?.message || err)
+  }
+  setPwaManifestReady(true)
 }
 
 /**
@@ -108,8 +202,9 @@ export function applyCompanyPwaIdentity(opts) {
   const iconUrl = resolvePwaIconUrl(company)
   const manifestHref = buildCompanyManifestHref({ context, company, slug })
 
-  setOrCreateLink('manifest', manifestHref, 'taxio-company-manifest')
-  setOrCreateLink('apple-touch-icon', iconUrl, 'taxio-apple-touch-icon')
+  setCompanyManifestLink(manifestHref)
+  setOrCreateAppleTouchIcon(iconUrl)
+  logPwaDev('manifest href:', manifestHref)
 
   if (context === 'dashboard') {
     const title = companyName ? `${companyName} Dashboard` : 'My Dashboard'

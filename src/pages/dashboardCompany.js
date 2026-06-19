@@ -35,7 +35,7 @@ import {
   calculateCompanySetupProgress,
 } from '../lib/companySetupProgress.js'
 import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
-import { applyCompanyPwaIdentity, buildPwaPromptStrings, resolvePwaIconUrl } from '../lib/companyPwa.js'
+import { applyCompanyPwaIdentity, buildPwaPromptStrings, prefetchCompanyManifest, resolvePwaIconUrl } from '../lib/companyPwa.js'
 
 const dashState = {
   tab: 'overview',
@@ -449,7 +449,8 @@ export async function mountDashboardCompany(root) {
     return
   }
 
-  applyCompanyPwaIdentity({ context: 'dashboard', company })
+  const pwaIdentity = applyCompanyPwaIdentity({ context: 'dashboard', company })
+  await prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
 
   let cars = []
   let bookings = []
@@ -1306,5 +1307,6 @@ export async function mountDashboardCompany(root) {
     slug: company.slug,
     iconUrl: resolvePwaIconUrl(company),
     strings: buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name),
+    requireManifestReady: true,
   })
 }

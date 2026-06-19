@@ -92,15 +92,30 @@ function dashboardManifest(origin, company) {
   }
 }
 
+function bookingManifestScope(startUrl) {
+  const start = String(startUrl || '')
+  if (start.startsWith('https://')) {
+    try {
+      const u = new URL(start)
+      return `${u.origin}/`
+    } catch {
+      /* fall through */
+    }
+  }
+  return '/'
+}
+
 function bookingManifest(origin, company, slug, hostHeader) {
   const name = String(company?.name || '').trim()
   const resolvedSlug = slugFromCompanyName(slug || company?.slug)
+  const start_url = bookingStartUrl({ slug: resolvedSlug, origin, hostHeader })
   return {
     name: name || 'Taxi booking',
     short_name: shortenShortName(name) || 'Taxi',
     description: name ? `Book a taxi with ${name}` : 'Taxi booking page',
-    start_url: bookingStartUrl({ slug: resolvedSlug, origin, hostHeader }),
-    scope: '/',
+    start_url,
+    scope: bookingManifestScope(start_url),
+    id: resolvedSlug ? `taxio-booking-${resolvedSlug}` : 'taxio-booking',
     display: 'standalone',
     theme_color: THEME_COLOR,
     background_color: BACKGROUND_COLOR,
@@ -124,14 +139,16 @@ function genericDashboardManifest(origin) {
 
 function genericBookingManifest(origin, slug, hostHeader) {
   const resolvedSlug = slugFromCompanyName(slug)
+  const start_url = resolvedSlug
+    ? bookingStartUrl({ slug: resolvedSlug, origin, hostHeader })
+    : `${origin}/`
   return {
     name: 'Taxi booking',
     short_name: 'Taxi',
     description: 'Taxi booking page',
-    start_url: resolvedSlug
-      ? bookingStartUrl({ slug: resolvedSlug, origin, hostHeader })
-      : `${origin}/`,
-    scope: '/',
+    start_url,
+    scope: bookingManifestScope(start_url),
+    id: resolvedSlug ? `taxio-booking-${resolvedSlug}` : 'taxio-booking',
     display: 'standalone',
     theme_color: THEME_COLOR,
     background_color: BACKGROUND_COLOR,
@@ -140,7 +157,7 @@ function genericBookingManifest(origin, slug, hostHeader) {
 }
 
 async function fetchCompany({ supabase, companyId, slug }) {
-  const select = 'id, name, slug, logo_url, status'
+  const select = 'id, name, slug, logo_url, status, updated_at'
   if (companyId) {
     const { data, error } = await supabase
       .from('companies')
@@ -162,6 +179,20 @@ async function fetchCompany({ supabase, companyId, slug }) {
 }
 
 export default async function handler(req, res) {
+  if (req.method === 'OPTIONS') {
+    const origin = req.headers.origin || '*'
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+    res.setHeader('Access-Control-Max-Age', '86400')
+    if (typeof res.status === 'function') {
+      res.status(204).end()
+    } else {
+      res.statusCode = 204
+      res.end()
+    }
+    return
+  }
+
   if (req.method !== 'GET') {
     json(res, 405, { error: 'Method not allowed' })
     return
@@ -210,17 +241,23 @@ export default async function handler(req, res) {
         : genericBookingManifest(origin, slug || hostSlug, hostHeader)
   }
 
+  const manifestHeaders = (res) => {
+    const origin = req.headers.origin
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Vary', 'Origin')
+    }
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8')
+    res.setHeader('Cache-Control', 'public, max-age=60, must-revalidate')
+  }
+
   if (typeof res.status === 'function') {
-    res
-      .status(200)
-      .setHeader('Content-Type', 'application/manifest+json; charset=utf-8')
-      .setHeader('Cache-Control', 'public, max-age=300')
-    res.end(JSON.stringify(manifest))
+    manifestHeaders(res)
+    res.status(200).end(JSON.stringify(manifest))
     return
   }
 
+  manifestHeaders(res)
   res.statusCode = 200
-  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8')
-  res.setHeader('Cache-Control', 'public, max-age=300')
   res.end(JSON.stringify(manifest))
 }

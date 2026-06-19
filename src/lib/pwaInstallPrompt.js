@@ -5,18 +5,53 @@ const SHOW_DELAY_MS = 4000
 const SHOW_AFTER_INTERACT_MS = 1500
 
 let deferredInstallPrompt = null
+let pendingBeforeInstall = null
 let beforeInstallBound = false
 let activeCleanup = null
+let pwaManifestReady = false
+
+export function setPwaManifestReady(ready = true) {
+  if (!ready) {
+    pwaManifestReady = false
+    deferredInstallPrompt = null
+    pendingBeforeInstall = null
+    return
+  }
+  const firstReady = !pwaManifestReady
+  pwaManifestReady = true
+  if (firstReady) {
+    pendingBeforeInstall = null
+    deferredInstallPrompt = null
+  }
+}
+
+export function isPwaManifestReady() {
+  return pwaManifestReady
+}
+
+export function resetPwaManifestReady() {
+  pwaManifestReady = false
+  deferredInstallPrompt = null
+  pendingBeforeInstall = null
+}
+
+/** Call once at app bootstrap — before booking manifest is applied. */
+export function initPwaInstallListener() {
+  bindBeforeInstallPrompt()
+}
 
 function bindBeforeInstallPrompt() {
   if (beforeInstallBound || typeof window === 'undefined') return
   beforeInstallBound = true
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault()
+    if (!pwaManifestReady) return
     deferredInstallPrompt = e
+    pendingBeforeInstall = null
   })
   window.addEventListener('appinstalled', () => {
     deferredInstallPrompt = null
+    pendingBeforeInstall = null
     removePromptEl()
   })
 }
@@ -205,11 +240,10 @@ export function initPwaInstallPrompt(options) {
 
   if (typeof window === 'undefined' || typeof document === 'undefined') return () => {}
 
-  bindBeforeInstallPrompt()
-
   const { context, slug, strings: rawStrings, iconUrl } = options
   const variant = options.variant || context
   const strings = pickStrings(rawStrings, variant)
+  const requireManifestReady = options.requireManifestReady !== false
 
   if (isStandaloneMode()) return () => {}
   if (isPromptDismissed(context, slug)) return () => {}
@@ -220,6 +254,7 @@ export function initPwaInstallPrompt(options) {
 
   const show = () => {
     if (shown) return
+    if (requireManifestReady && !isPwaManifestReady()) return
     shown = true
     timers.forEach(clearTimeout)
     timers = []
@@ -243,12 +278,26 @@ export function initPwaInstallPrompt(options) {
     timers.push(window.setTimeout(show, SHOW_AFTER_INTERACT_MS))
   }
 
-  interactHandler = () => scheduleAfterInteract()
-  document.addEventListener('click', interactHandler, { once: true, capture: true })
-  document.addEventListener('touchstart', interactHandler, { once: true, capture: true, passive: true })
-  document.addEventListener('keydown', interactHandler, { once: true, capture: true })
+  const armShowTimers = () => {
+    interactHandler = () => scheduleAfterInteract()
+    document.addEventListener('click', interactHandler, { once: true, capture: true })
+    document.addEventListener('touchstart', interactHandler, { once: true, capture: true, passive: true })
+    document.addEventListener('keydown', interactHandler, { once: true, capture: true })
+    timers.push(window.setTimeout(show, SHOW_DELAY_MS))
+  }
 
-  timers.push(window.setTimeout(show, SHOW_DELAY_MS))
+  if (requireManifestReady && !isPwaManifestReady()) {
+    const waitForManifest = () => {
+      if (isPwaManifestReady()) {
+        armShowTimers()
+        return
+      }
+      timers.push(window.setTimeout(waitForManifest, 80))
+    }
+    waitForManifest()
+  } else {
+    armShowTimers()
+  }
 
   const cleanup = () => {
     timers.forEach(clearTimeout)

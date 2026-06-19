@@ -28,7 +28,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return
 
   const url = new URL(request.url)
-  // Never cache API manifests, booking data, or Supabase.
+  // Never cache API manifests (/api/company-manifest), booking data, or Supabase.
   if (url.pathname.startsWith('/api')) return
   if (/supabase/i.test(url.hostname)) return
 

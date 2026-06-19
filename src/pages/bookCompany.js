@@ -19,7 +19,7 @@ import {
   hourlyServiceLabelForLocale,
 } from '../lib/companyHourly.js'
 import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
-import { applyCompanyPwaIdentity, buildPwaPromptStrings, pickCompanyImageUrl, resolvePwaIconUrl } from '../lib/companyPwa.js'
+import { applyCompanyPwaIdentity, buildPwaPromptStrings, pickCompanyImageUrl, prefetchCompanyManifest, resolvePwaIconUrl } from '../lib/companyPwa.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const TURNSTILE_FRONT_ENABLED =
@@ -445,7 +445,17 @@ export async function mountBookCompany(root, slug) {
     return
   }
 
-  applyCompanyPwaIdentity({ context: 'booking', company, slug })
+  const pwaIdentity = applyCompanyPwaIdentity({ context: 'booking', company, slug })
+  await prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName || slug)
+
+  initPwaInstallPrompt({
+    context: 'booking',
+    slug,
+    variant: 'booking',
+    iconUrl: resolvePwaIconUrl(company),
+    strings: buildPwaPromptStrings(tPwa(getLocale()), 'booking', company.name),
+    requireManifestReady: true,
+  })
 
   const bookingVehicles = resolveBookingVehicleTypes(company)
   const carTypes = bookingVehicles.map((v) => v.type)
@@ -1711,13 +1721,5 @@ Estimate price: ${estimatePrice}`
         console.warn('[createQuickBookingLog]', bookingErr.message || bookingErr)
       }
     })
-  })
-
-  initPwaInstallPrompt({
-    context: 'booking',
-    slug,
-    variant: 'booking',
-    iconUrl: resolvePwaIconUrl(company),
-    strings: buildPwaPromptStrings(tPwa(getLocale()), 'booking', company.name),
   })
 }
