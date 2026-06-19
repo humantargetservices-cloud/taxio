@@ -693,7 +693,7 @@ export async function countCarsByCompanyIdsAdmin() {
 export async function listApprovedCompaniesDirectory() {
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name, slug, city, country, availability_status')
+    .select('id, name, slug, city, country, availability_status, logo_url')
     .eq('status', 'approved')
     .order('name', { ascending: true })
   if (error) throw error

@@ -19,6 +19,7 @@ import {
   hourlyServiceLabelForLocale,
 } from '../lib/companyHourly.js'
 import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
+import { applyCompanyPwaIdentity, buildPwaPromptStrings, pickCompanyImageUrl, resolvePwaIconUrl } from '../lib/companyPwa.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const TURNSTILE_FRONT_ENABLED =
@@ -399,9 +400,7 @@ function openWaMeUrl(url) {
 
 /** Optional company logo (if column / field exists). Safe fallback when missing or broken. */
 function bookingCompanyPhotoHtml(company) {
-  const raw = String(company?.logo_url || company?.logo || company?.image_url || '').trim()
-  const allowed = /^https?:\/\//i.test(raw) || (raw.startsWith('/') && !raw.startsWith('//'))
-  const src = allowed ? raw : ''
+  const src = pickCompanyImageUrl(company) || ''
   if (!src) {
     return `<div class="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500 shadow-[0_12px_40px_rgba(251,191,36,0.25)] ring-2 ring-amber-400/35 sm:h-32 sm:w-32">${icon.image('h-14 w-14 text-slate-900/80 sm:h-16 sm:w-16')}</div>`
   }
@@ -445,6 +444,8 @@ export async function mountBookCompany(root, slug) {
       </div>`
     return
   }
+
+  applyCompanyPwaIdentity({ context: 'booking', company, slug })
 
   const bookingVehicles = resolveBookingVehicleTypes(company)
   const carTypes = bookingVehicles.map((v) => v.type)
@@ -1716,6 +1717,7 @@ Estimate price: ${estimatePrice}`
     context: 'booking',
     slug,
     variant: 'booking',
-    strings: tPwa(getLocale()),
+    iconUrl: resolvePwaIconUrl(company),
+    strings: buildPwaPromptStrings(tPwa(getLocale()), 'booking', company.name),
   })
 }

@@ -35,6 +35,7 @@ import {
   calculateCompanySetupProgress,
 } from '../lib/companySetupProgress.js'
 import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
+import { applyCompanyPwaIdentity, buildPwaPromptStrings, resolvePwaIconUrl } from '../lib/companyPwa.js'
 
 const dashState = {
   tab: 'overview',
@@ -447,6 +448,8 @@ export async function mountDashboardCompany(root) {
     navigate('/pending-approval')
     return
   }
+
+  applyCompanyPwaIdentity({ context: 'dashboard', company })
 
   let cars = []
   let bookings = []
@@ -1300,6 +1303,8 @@ export async function mountDashboardCompany(root) {
   initPwaInstallPrompt({
     context: 'operator',
     variant: 'operator',
-    strings: tPwa(dashLang),
+    slug: company.slug,
+    iconUrl: resolvePwaIconUrl(company),
+    strings: buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name),
   })
 }

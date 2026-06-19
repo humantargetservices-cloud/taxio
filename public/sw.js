@@ -1,6 +1,6 @@
 /** Minimal TAXIO service worker — installability only; no API or booking data caching. */
 const SHELL_CACHE = 'taxio-shell-v1'
-const PRECACHE_URLS = ['/', '/index.html', '/taxio-logo.png', '/manifest.webmanifest']
+const PRECACHE_URLS = ['/', '/index.html', '/taxio-logo.png', '/manifest.webmanifest', '/pwa-fallback-icon.svg']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -28,6 +28,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return
 
   const url = new URL(request.url)
+  // Never cache API manifests, booking data, or Supabase.
   if (url.pathname.startsWith('/api')) return
   if (/supabase/i.test(url.hostname)) return
 

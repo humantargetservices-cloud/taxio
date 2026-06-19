@@ -6,6 +6,7 @@ import { icon } from '../lib/icons.js'
 import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 import { absolutePublicBookingUrl, bookPathFromSlug } from '../lib/tenant.js'
+import { companyInitials, pickCompanyImageUrl } from '../lib/companyPwa.js'
 
 const DIRECTORY_VIEW_KEY = 'directoryView'
 
@@ -69,6 +70,22 @@ function viewToggleBtnClass(active) {
     : 'rounded-full px-3 py-1.5 text-xs font-bold text-slate-500 transition hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
 }
 
+function dirCompanyAvatarHtml(c, size = 'grid') {
+  const src = pickCompanyImageUrl(c)
+  const initials = escapeHtml(companyInitials(c.name))
+  const sizeCls =
+    size === 'list'
+      ? 'h-11 w-11 rounded-xl ring-1'
+      : 'h-14 w-14 rounded-2xl ring-2 sm:h-[3.25rem] sm:w-[3.25rem]'
+  if (src) {
+    return `<div class="relative flex ${sizeCls} shrink-0 overflow-hidden bg-slate-200 shadow-md ring-amber-400/25 ring-offset-2 ring-offset-white dark:bg-slate-800 dark:ring-offset-slate-900">
+      <img src="${escapeHtml(src)}" alt="" class="dir-company-photo h-full w-full object-cover" loading="lazy" decoding="async" />
+      <div class="dir-company-photo-fallback absolute inset-0 hidden items-center justify-center bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500 text-sm font-bold text-slate-900">${initials}</div>
+    </div>`
+  }
+  return `<div class="flex ${sizeCls} shrink-0 items-center justify-center bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500 text-sm font-bold text-slate-900 shadow-md ring-amber-400/25 ring-offset-2 ring-offset-white dark:ring-offset-slate-900">${initials}</div>`
+}
+
 function renderCompanyGridItem(c, d, tb) {
   const loc = [c.city, c.country].filter(Boolean).join(', ') || '—'
   const bookUrl = companyBookingHref(c.slug)
@@ -77,7 +94,7 @@ function renderCompanyGridItem(c, d, tb) {
   return `<li class="flex h-full min-h-[14.5rem] flex-col rounded-2xl border border-slate-200/90 bg-white p-6 shadow-sm ring-1 ring-slate-900/[0.04] transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700/80 dark:bg-slate-800/50 dark:ring-white/[0.06] dark:hover:bg-slate-800/70">
     <div class="flex flex-1 flex-col gap-5">
       <div class="flex items-start gap-4">
-        <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500 shadow-md ring-2 ring-amber-400/25 ring-offset-2 ring-offset-white dark:ring-offset-slate-900">${icon.building2('h-7 w-7 text-slate-900')}</div>
+        ${dirCompanyAvatarHtml(c)}
         <div class="min-w-0 flex-1 text-left">
           <div class="flex flex-wrap items-start justify-between gap-2">
             <p class="text-lg font-bold leading-tight tracking-tight text-slate-900 dark:text-white">${escapeHtml(c.name)}</p>
@@ -101,7 +118,7 @@ function renderCompanyRow(c, d, tb) {
   const { label: statusLabel, dot } = dirCompanyStatus(c, tb)
   return `<li class="flex flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white px-5 py-4 shadow-sm ring-1 ring-slate-900/[0.03] transition hover:border-amber-200/90 hover:shadow dark:border-slate-700/80 dark:bg-slate-800/40 dark:ring-white/[0.05] sm:flex-row sm:items-center sm:justify-between sm:gap-5">
     <div class="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
-      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 via-amber-300 to-yellow-500 ring-1 ring-amber-400/30">${icon.building2('h-6 w-6 text-slate-900')}</div>
+      ${dirCompanyAvatarHtml(c, 'list')}
       <div class="min-w-0 flex-1 text-left">
         <p class="font-bold tracking-tight text-slate-900 dark:text-white">${escapeHtml(c.name)}</p>
         <p class="mt-0.5 text-sm font-medium text-slate-600 dark:text-slate-400">${escapeHtml(loc)}</p>
@@ -213,6 +230,16 @@ export async function mountTaxiDirectory(root) {
     const vm = getViewMode()
     const wrap = root.querySelector('#dir-results')
     if (wrap) wrap.innerHTML = renderResults(companies, list, vm, dirCopy(), tBooking(getLocale()))
+    root.querySelectorAll('.dir-company-photo').forEach((img) => {
+      img.addEventListener('error', () => {
+        img.classList.add('hidden')
+        const fb = img.parentElement?.querySelector('.dir-company-photo-fallback')
+        if (fb) {
+          fb.classList.remove('hidden')
+          fb.classList.add('flex')
+        }
+      })
+    })
     const g = root.querySelector('#dir-view-grid')
     const l = root.querySelector('#dir-view-list')
     if (g) g.className = viewToggleBtnClass(vm === 'grid')
