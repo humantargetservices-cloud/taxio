@@ -43,16 +43,25 @@ const dashState = {
   qrOpen: false,
 }
 
-const DASH_SHELL = 'min-h-screen bg-[#eef0f3] pb-12 dark:bg-slate-950'
-const DASH_HEADER = 'border-b border-gray-200 bg-white shadow-sm dark:border-slate-700/80 dark:bg-slate-900'
+const DASH_SHELL =
+  'min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200/70 pb-10 dark:from-[#06080f] dark:via-slate-950 dark:to-[#0a0f1a]'
+const DASH_HEADER =
+  'border-b border-gray-200/80 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04)] backdrop-blur-lg dark:border-slate-800/80 dark:bg-slate-950/90 dark:shadow-[0_1px_0_rgba(255,255,255,0.04)]'
 const DASH_TAB_BAR = 'border-t border-gray-100 bg-[#eef0f3] dark:border-slate-700/60 dark:bg-slate-900/50'
 const DASH_CARD =
-  'rounded-2xl border border-gray-200/90 bg-white shadow-sm dark:border-slate-700/60 dark:bg-slate-800/90 dark:shadow-black/20'
-const DASH_PANEL = `${DASH_CARD} p-6 shadow-md`
-const DASH_TEXT = 'text-gray-900 dark:text-slate-100'
+  'rounded-2xl border border-gray-200/60 bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_32px_rgba(15,23,42,0.05)] backdrop-blur-sm dark:border-slate-700/40 dark:bg-slate-900/70 dark:shadow-[0_8px_40px_rgba(0,0,0,0.35)]'
+const DASH_HERO =
+  'relative overflow-hidden rounded-2xl border border-gray-200/60 bg-gradient-to-br from-white via-white to-amber-50/35 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_40px_rgba(15,23,42,0.06)] dark:border-slate-700/40 dark:from-slate-900 dark:via-slate-900/95 dark:to-amber-950/20 dark:shadow-[0_12px_48px_rgba(0,0,0,0.4)]'
+const DASH_PANEL = `${DASH_CARD} p-5 sm:p-6`
+const DASH_TEXT = 'text-gray-900 dark:text-slate-50'
 const DASH_MUTED = 'text-gray-500 dark:text-slate-400'
 const DASH_INPUT =
-  'rounded-xl border border-gray-200 bg-gray-50 text-gray-800 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-200'
+  'rounded-xl border border-gray-200/80 bg-gray-50/90 text-gray-800 shadow-inner transition-colors dark:border-slate-600/60 dark:bg-slate-950/60 dark:text-slate-200'
+const DASH_FOCUS =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950'
+const DASH_ICON_BTN = `flex shrink-0 items-center justify-center rounded-xl border border-gray-200/80 bg-white/90 text-gray-600 shadow-sm transition-all duration-200 hover:border-gray-300 hover:bg-white hover:shadow-md dark:border-slate-600/60 dark:bg-slate-800/90 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800 active:scale-[0.97] ${DASH_FOCUS}`
+const DASH_BTN_PRIMARY = `inline-flex items-center justify-center gap-2 rounded-xl bg-yellow-400 px-4 py-2.5 text-sm font-bold text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.06),0_4px_14px_rgba(234,179,8,0.28)] transition-all duration-200 hover:bg-yellow-300 hover:shadow-[0_4px_18px_rgba(234,179,8,0.38)] active:scale-[0.98] dark:bg-amber-400 dark:text-gray-900 dark:hover:bg-amber-300 ${DASH_FOCUS}`
+const DASH_BTN_SECONDARY = `inline-flex items-center justify-center rounded-xl border border-gray-200/90 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 active:scale-[0.98] dark:border-slate-600/70 dark:bg-slate-800/80 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-700/80 ${DASH_FOCUS}`
 
 function pricingOf(company) {
   const p = company?.pricing && typeof company.pricing === 'object' ? company.pricing : {}
@@ -82,30 +91,30 @@ function renderPendingTaskRow(td, item) {
   const action = setupItemActionId(item)
   const label = setupActionButtonLabel(td, action)
   return `<button type="button" data-setup-action="${escapeHtml(action)}"
-    class="flex w-full items-center justify-between gap-3 rounded-xl border border-amber-200/70 bg-amber-50/60 px-3.5 py-3 text-left transition active:scale-[0.99] dark:border-amber-500/25 dark:bg-amber-950/30 dark:hover:bg-amber-950/50">
+    class="group flex w-full items-center justify-between gap-3 rounded-xl border border-amber-200/60 bg-gradient-to-r from-amber-50/80 to-white px-3.5 py-3 text-left shadow-sm transition-all duration-200 hover:border-amber-300/80 hover:shadow-md active:scale-[0.99] dark:border-amber-500/20 dark:from-amber-950/30 dark:to-slate-900/40 dark:hover:border-amber-400/30 dark:hover:from-amber-950/50 ${DASH_FOCUS}">
     <span class="text-sm font-semibold text-gray-900 dark:text-slate-100">${escapeHtml(label)}</span>
-    ${icon.arrowRight('h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400')}
+    <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-100/80 text-amber-700 transition-colors group-hover:bg-amber-200/90 dark:bg-amber-400/10 dark:text-amber-300 dark:group-hover:bg-amber-400/20">${icon.arrowRight('h-3.5 w-3.5')}</span>
   </button>`
 }
 
 function manageTile(opts) {
   const { id, title, subtitle, iconHtml, iconBg } = opts
-  return `<button type="button" data-overview-card="${id}" class="flex w-full items-center gap-3 rounded-2xl border border-gray-200/90 bg-white p-4 text-left shadow-sm transition active:scale-[0.99] dark:border-slate-700/60 dark:bg-slate-800/90 dark:hover:border-slate-600">
-    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconBg}">${iconHtml}</div>
+  return `<button type="button" data-overview-card="${id}" class="group flex w-full items-center gap-3.5 rounded-2xl border border-gray-200/70 bg-white/95 p-4 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04),0_4px_16px_rgba(15,23,42,0.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-300/80 hover:shadow-[0_4px_20px_rgba(15,23,42,0.08)] active:scale-[0.99] dark:border-slate-700/50 dark:bg-slate-900/60 dark:hover:border-slate-600/70 dark:hover:shadow-[0_8px_28px_rgba(0,0,0,0.35)] ${DASH_FOCUS}">
+    <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ring-1 ring-black/[0.04] transition-transform duration-200 group-hover:scale-105 dark:ring-white/[0.06] ${iconBg}">${iconHtml}</div>
     <div class="min-w-0 flex-1">
-      <p class="font-bold ${DASH_TEXT}">${title}</p>
-      ${subtitle ? `<p class="mt-0.5 text-xs ${DASH_MUTED}">${subtitle}</p>` : ''}
+      <p class="text-[15px] font-semibold leading-snug ${DASH_TEXT}">${title}</p>
+      ${subtitle ? `<p class="mt-0.5 text-xs leading-relaxed ${DASH_MUTED}">${subtitle}</p>` : ''}
     </div>
-    ${icon.arrowRight('h-4 w-4 shrink-0 text-gray-300 dark:text-slate-600')}
+    <span class="text-gray-300 transition-transform duration-200 group-hover:translate-x-0.5 dark:text-slate-600">${icon.arrowRight('h-4 w-4 shrink-0')}</span>
   </button>`
 }
 
 function drawerNavItem(tabId, label, current) {
   const active = tabId === current
-  return `<button type="button" data-dash-tab="${tabId}" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+  return `<button type="button" data-dash-tab="${tabId}" class="flex w-full items-center gap-3 rounded-xl py-2.5 pl-3 pr-3 text-left text-[15px] font-medium transition-all duration-200 ${DASH_FOCUS} ${
     active
-      ? 'bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30'
-      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+      ? 'border-l-[3px] border-amber-400 bg-gradient-to-r from-amber-400/15 to-transparent pl-[calc(0.75rem-3px)] font-semibold text-amber-200'
+      : 'border-l-[3px] border-transparent text-slate-400 hover:bg-slate-800/60 hover:text-slate-100'
   }">${escapeHtml(label)}</button>`
 }
 
@@ -125,29 +134,29 @@ function renderDrawer(td, currentTab, companyName, avail, open) {
     avail === 'available' ? td.availAvailable : avail === 'busy' ? td.availBusy : td.availOffline
 
   return `<div id="dash-drawer-root" class="${open ? '' : 'pointer-events-none'}">
-    <div id="dash-drawer-backdrop" class="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm transition-opacity ${open ? 'opacity-100' : 'opacity-0'}" aria-hidden="true"></div>
-    <aside id="dash-drawer" class="fixed left-0 top-0 z-50 flex h-full w-[min(100%,18rem)] flex-col bg-slate-900 shadow-2xl transition-transform duration-300 ease-out ${open ? 'translate-x-0' : '-translate-x-full'}" aria-label="${escapeHtml(td.drawerNavLabel)}">
-      <div class="border-b border-slate-700/80 px-5 py-5">
-        <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-400/90">TAXIO</p>
-        <p class="mt-1 truncate text-lg font-bold text-white">${escapeHtml(companyName)}</p>
-        <p class="text-xs text-slate-400">${escapeHtml(td.dashOperatorLabel)}</p>
+    <div id="dash-drawer-backdrop" class="fixed inset-0 z-40 bg-slate-950/55 backdrop-blur-[2px] transition-opacity duration-300 ${open ? 'opacity-100' : 'opacity-0'}" aria-hidden="true"></div>
+    <aside id="dash-drawer" class="fixed left-0 top-0 z-50 flex h-full w-[min(100%,19rem)] flex-col border-r border-slate-800/80 bg-gradient-to-b from-slate-900 via-slate-900 to-[#0a0f1a] shadow-[4px_0_48px_rgba(0,0,0,0.45)] transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${open ? 'translate-x-0' : '-translate-x-full'}" aria-label="${escapeHtml(td.drawerNavLabel)}">
+      <div class="border-b border-slate-800/90 px-5 py-5">
+        <p class="text-[11px] font-bold tracking-[0.18em] text-amber-400">TAXIO</p>
+        <p class="mt-1.5 truncate text-lg font-bold tracking-tight text-white">${escapeHtml(companyName)}</p>
+        <p class="mt-0.5 text-sm text-slate-500">${escapeHtml(td.dashOperatorLabel)}</p>
       </div>
-      <nav class="flex-1 overflow-y-auto px-3 py-4">
-        <p class="mb-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">${escapeHtml(td.drawerWorkspace)}</p>
-        <div class="space-y-1">${workspace.map((item) => drawerNavItem(item.id, item.label, currentTab)).join('')}</div>
-        <p class="mb-2 mt-5 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">${escapeHtml(td.drawerOperations)}</p>
-        <div class="space-y-1">${operations.map((item) => drawerNavItem(item.id, item.label, currentTab)).join('')}</div>
+      <nav class="flex-1 overflow-y-auto px-3 py-5">
+        <p class="mb-2.5 px-3 text-xs font-semibold text-slate-500">${escapeHtml(td.drawerWorkspace)}</p>
+        <div class="space-y-0.5">${workspace.map((item) => drawerNavItem(item.id, item.label, currentTab)).join('')}</div>
+        <p class="mb-2.5 mt-6 px-3 text-xs font-semibold text-slate-500">${escapeHtml(td.drawerOperations)}</p>
+        <div class="space-y-0.5">${operations.map((item) => drawerNavItem(item.id, item.label, currentTab)).join('')}</div>
       </nav>
-      <div class="border-t border-slate-700/80 p-4 space-y-3">
+      <div class="space-y-3 border-t border-slate-800/90 p-5">
         <label class="block">
-          <span class="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500">${escapeHtml(td.availLabel)}</span>
-          <select id="co-avail" class="w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-100">
+          <span class="mb-2 block text-xs font-semibold text-slate-500">${escapeHtml(td.availLabel)}</span>
+          <select id="co-avail" class="w-full rounded-xl border border-slate-700/80 bg-slate-800/80 px-3.5 py-2.5 text-sm font-medium text-slate-100 shadow-inner transition-colors focus:border-amber-400/50 focus:outline-none focus:ring-2 focus:ring-amber-400/30">
             <option value="available" ${avail === 'available' ? 'selected' : ''}>● ${td.availAvailable}</option>
             <option value="busy" ${avail === 'busy' ? 'selected' : ''}>${td.availBusy}</option>
             <option value="offline" ${avail === 'offline' ? 'selected' : ''}>${td.availOffline}</option>
           </select>
         </label>
-        <button type="button" id="co-logout" class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-600 px-3 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800">${icon.logOut('h-4 w-4')}${td.logout}</button>
+        <button type="button" id="co-logout" class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-slate-800/50 px-3.5 py-2.5 text-sm font-semibold text-slate-300 transition-all duration-200 hover:border-slate-600 hover:bg-slate-800 hover:text-white active:scale-[0.98] ${DASH_FOCUS}">${icon.logOut('h-4 w-4')}${td.logout}</button>
       </div>
     </aside>
   </div>`
@@ -155,22 +164,29 @@ function renderDrawer(td, currentTab, companyName, avail, open) {
 
 function renderQrSheet(td, bookPublicUrl, bookingQrSrc, open) {
   return `<div id="dash-qr-sheet" class="fixed inset-0 z-[60] ${open ? '' : 'pointer-events-none hidden'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(td.shareQrTitle)}">
-    <div id="dash-qr-backdrop" class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"></div>
-    <div class="absolute bottom-0 left-0 right-0 mx-auto max-w-lg rounded-t-3xl border border-gray-200/80 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:p-6">
-      <div class="mb-4 flex items-center justify-between gap-3">
-        <h2 class="text-lg font-bold ${DASH_TEXT}">${escapeHtml(td.shareQrTitle)}</h2>
-        <button type="button" id="dash-qr-close" class="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-600 dark:border-slate-600 dark:text-slate-300" aria-label="${escapeHtml(td.closeQr)}">${icon.x('h-4 w-4')}</button>
+    <div id="dash-qr-backdrop" class="absolute inset-0 bg-slate-950/60 backdrop-blur-[3px] transition-opacity"></div>
+    <div class="absolute bottom-0 left-0 right-0 mx-auto max-w-lg rounded-t-[1.75rem] border border-gray-200/70 bg-white/98 p-5 shadow-[0_-8px_40px_rgba(15,23,42,0.12)] backdrop-blur-xl dark:border-slate-700/60 dark:bg-slate-900/98 dark:shadow-[0_-12px_48px_rgba(0,0,0,0.5)] sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+      <div class="mx-auto mb-4 h-1 w-10 rounded-full bg-gray-200 dark:bg-slate-700" aria-hidden="true"></div>
+      <div class="mb-5 flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(td.shareQrTitle)}</h2>
+          <p class="mt-0.5 text-xs ${DASH_MUTED}">${escapeHtml(td.shareSubtitle)}</p>
+        </div>
+        <button type="button" id="dash-qr-close" class="${DASH_ICON_BTN} h-9 w-9" aria-label="${escapeHtml(td.closeQr)}">${icon.x('h-4 w-4')}</button>
       </div>
       <div class="flex flex-col items-center gap-4">
-        <div class="rounded-2xl border border-gray-100 bg-white p-3 shadow-inner dark:border-slate-700 dark:bg-slate-950">
-          <img src="${escapeHtml(bookingQrSrc)}" width="200" height="200" alt="" class="h-48 w-48 rounded-xl" loading="lazy" decoding="async" />
+        <div class="rounded-2xl border border-gray-100/90 bg-gradient-to-b from-white to-gray-50/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_4px_24px_rgba(15,23,42,0.06)] dark:border-slate-700/60 dark:from-slate-800 dark:to-slate-950">
+          <img src="${escapeHtml(bookingQrSrc)}" width="200" height="200" alt="" class="h-44 w-44 rounded-xl sm:h-48 sm:w-48" loading="lazy" decoding="async" />
         </div>
-        <input type="text" readonly value="${escapeHtml(bookPublicUrl)}" id="dash-booking-url-field" class="w-full ${DASH_INPUT} px-3 py-2.5 text-xs sm:text-sm" />
-        <div class="flex w-full flex-wrap gap-2">
-          <button type="button" data-dash-copy class="flex-1 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white dark:bg-amber-400 dark:text-gray-900">${td.copyLink}</button>
-          <a href="${escapeHtml(bookingQrSrc)}" download="taxio-booking-qr.png" target="_blank" rel="noopener noreferrer" class="flex-1 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-center text-sm font-semibold text-gray-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">${td.downloadQr}</a>
+        <div class="w-full">
+          <p class="mb-1.5 text-xs font-medium ${DASH_MUTED}">${escapeHtml(td.bookingUrlLabel)}</p>
+          <input type="text" readonly value="${escapeHtml(bookPublicUrl)}" id="dash-booking-url-field" class="w-full ${DASH_INPUT} px-3.5 py-2.5 text-xs sm:text-sm" />
         </div>
-        <button type="button" data-setup-action="qr" class="w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-200">${td.setupBtnQr}</button>
+        <div class="flex w-full flex-col gap-2 sm:flex-row">
+          <button type="button" data-dash-copy class="${DASH_BTN_PRIMARY} min-h-[44px] flex-1">${td.copyLink}</button>
+          <a href="${escapeHtml(bookingQrSrc)}" download="taxio-booking-qr.png" target="_blank" rel="noopener noreferrer" class="${DASH_BTN_SECONDARY} min-h-[44px] flex-1 text-center">${td.downloadQr}</a>
+        </div>
+        <button type="button" data-setup-action="qr" class="w-full min-h-[44px] rounded-xl border border-amber-200/80 bg-gradient-to-r from-amber-50 to-amber-100/60 px-4 py-2.5 text-sm font-semibold text-amber-950 transition-all duration-200 hover:border-amber-300 hover:from-amber-100 active:scale-[0.98] dark:border-amber-500/25 dark:from-amber-950/40 dark:to-amber-900/20 dark:text-amber-200 dark:hover:border-amber-400/35 ${DASH_FOCUS}">${td.setupBtnQr}</button>
         <p id="dash-copy-feedback" class="hidden text-xs font-medium text-emerald-600 dark:text-emerald-400">${td.copied}</p>
       </div>
     </div>
@@ -191,40 +207,41 @@ function renderHeroCard(td, ctx) {
   const pendingHtml =
     pendingItems.length > 0
       ? `<div class="space-y-2">${pendingItems.map((item) => renderPendingTaskRow(td, item)).join('')}</div>`
-      : `<p class="rounded-xl border border-emerald-200/80 bg-emerald-50/80 px-3.5 py-3 text-sm font-semibold text-emerald-800 dark:border-emerald-800/50 dark:bg-emerald-950/40 dark:text-emerald-300">${escapeHtml(td.setupAllSet)}</p>`
+      : `<p class="rounded-xl border border-emerald-200/70 bg-gradient-to-r from-emerald-50/90 to-white px-3.5 py-3 text-sm font-semibold text-emerald-800 dark:border-emerald-800/40 dark:from-emerald-950/40 dark:to-slate-900/40 dark:text-emerald-300">${escapeHtml(td.setupAllSet)}</p>`
 
   const completedHtml =
     completedItems.length > 0
-      ? `<details class="mt-3 group">
-          <summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(td.setupCompletedSection)} (${completedItems.length})</summary>
-          <div class="mt-2 flex flex-wrap gap-2">${completedItems.map((item) => renderSetupActionCard(td, item, progress, 'completed')).join('')}</div>
+      ? `<details class="group mt-3">
+          <summary class="cursor-pointer text-xs font-medium text-gray-500 transition-colors hover:text-gray-700 dark:text-slate-500 dark:hover:text-slate-300">${escapeHtml(td.setupCompletedSection)} (${completedItems.length})</summary>
+          <div class="mt-2.5 flex flex-wrap gap-2">${completedItems.map((item) => renderSetupActionCard(td, item, progress, 'completed')).join('')}</div>
         </details>`
       : ''
 
-  return `<section id="dash-hero-card" class="relative ${DASH_CARD} p-5 sm:p-6">
-    <button type="button" id="dash-qr-open" class="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-xl border border-amber-200/80 bg-amber-50 text-amber-700 shadow-sm transition hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300" aria-label="${escapeHtml(td.shareQrTitle)}">${icon.qrCode('h-5 w-5')}</button>
-    <div class="flex items-start gap-4 pr-12">
+  return `<section id="dash-hero-card" class="${DASH_HERO} p-5 sm:p-6">
+    <div class="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-amber-400/10 blur-2xl dark:bg-amber-400/5" aria-hidden="true"></div>
+    <button type="button" id="dash-qr-open" class="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-xl border border-amber-200/70 bg-white/90 text-amber-700 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-amber-300 hover:bg-amber-50 hover:shadow-md active:scale-[0.97] dark:border-amber-500/25 dark:bg-slate-800/90 dark:text-amber-300 dark:hover:bg-amber-950/50 ${DASH_FOCUS}" aria-label="${escapeHtml(td.shareQrTitle)}">${icon.qrCode('h-[18px] w-[18px]')}</button>
+    <div class="relative flex items-start gap-4 pr-11 sm:pr-12">
       ${renderSetupHealthRing(pct, 'sm')}
-      <div class="min-w-0 flex-1 pt-1">
-        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(td.setupHealthTitle)}</p>
-        <p class="mt-1 text-lg font-bold ${DASH_TEXT}">${escapeHtml(statusSummary)}</p>
-        <p class="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold ${availDotClass}">
-          <span class="h-2 w-2 rounded-full bg-current"></span>
+      <div class="min-w-0 flex-1 pt-0.5">
+        <p class="text-xs font-medium text-gray-500 dark:text-slate-400">${escapeHtml(td.setupHealthTitle)}</p>
+        <p class="mt-1 text-lg font-bold leading-tight tracking-tight ${DASH_TEXT} sm:text-xl">${escapeHtml(statusSummary)}</p>
+        <p class="mt-2 inline-flex items-center gap-1.5 rounded-full bg-gray-100/80 px-2.5 py-1 text-xs font-medium dark:bg-slate-800/80 ${availDotClass}">
+          <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
           ${escapeHtml(availLabel)}
         </p>
       </div>
     </div>
-    <div class="mt-4">
-      <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-slate-500">${escapeHtml(td.bookingUrlLabel)}</p>
-      <p class="mt-1 truncate font-mono text-xs text-gray-700 dark:text-slate-300 sm:text-sm">${escapeHtml(bookPublicUrl)}</p>
+    <div class="relative mt-4 rounded-xl border border-gray-100/90 bg-gray-50/60 px-3.5 py-2.5 dark:border-slate-700/50 dark:bg-slate-950/40">
+      <p class="text-xs font-medium text-gray-500 dark:text-slate-500">${escapeHtml(td.bookingUrlLabel)}</p>
+      <p class="mt-0.5 truncate font-mono text-xs text-gray-700 dark:text-slate-300 sm:text-sm">${escapeHtml(bookPublicUrl)}</p>
     </div>
-    <div class="mt-4 flex flex-wrap gap-2">
-      <button type="button" data-setup-action="preview" class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-yellow-400 px-4 py-2.5 text-sm font-bold text-gray-900 shadow-sm hover:bg-yellow-300 dark:bg-amber-400 dark:hover:bg-amber-300 sm:flex-none">${icon.eye('h-4 w-4')}${td.previewPage}</button>
-      <button type="button" data-dash-copy-hero class="inline-flex flex-1 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 sm:flex-none">${td.copyLink}</button>
+    <div class="relative mt-4 flex flex-wrap gap-2">
+      <button type="button" data-setup-action="preview" class="${DASH_BTN_PRIMARY} min-h-[44px] flex-1 sm:flex-none">${icon.eye('h-4 w-4')}${td.previewPage}</button>
+      <button type="button" data-dash-copy-hero class="${DASH_BTN_SECONDARY} min-h-[44px] flex-1 sm:flex-none">${td.copyLink}</button>
     </div>
-    <p id="dash-hero-copy-feedback" class="mt-2 hidden text-xs font-medium text-emerald-600 dark:text-emerald-400">${td.copied}</p>
-    <div class="mt-5 border-t border-gray-100 pt-4 dark:border-slate-700/60">
-      <p class="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(td.setupNextActions)}</p>
+    <p id="dash-hero-copy-feedback" class="relative mt-2 hidden text-xs font-medium text-emerald-600 dark:text-emerald-400">${td.copied}</p>
+    <div class="relative mt-5 border-t border-gray-100/90 pt-4 dark:border-slate-700/50">
+      <p class="mb-2.5 text-xs font-semibold text-gray-600 dark:text-slate-400">${escapeHtml(td.setupNextActions)}</p>
       ${pendingHtml}
       ${completedHtml}
     </div>
@@ -236,41 +253,41 @@ function renderOverviewBody(td, ctx) {
 
   const activityHtml =
     bookingStats.total === 0
-      ? `<p class="text-sm ${DASH_MUTED}">${escapeHtml(td.requestsEmptyHint)}</p>`
-      : `<div class="grid grid-cols-3 gap-2">
-          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
-            <p class="text-xl font-bold ${DASH_TEXT}">${bookingStats.today}</p>
-            <p class="mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsToday)}</p>
+      ? `<p class="text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.requestsEmptyHint)}</p>`
+      : `<div class="grid grid-cols-3 gap-2.5 sm:gap-3">
+          <div class="rounded-xl border border-gray-100/90 bg-gradient-to-b from-gray-50/90 to-white px-2 py-3.5 text-center shadow-sm dark:border-slate-700/50 dark:from-slate-800/50 dark:to-slate-900/40">
+            <p class="text-2xl font-bold tabular-nums tracking-tight ${DASH_TEXT}">${bookingStats.today}</p>
+            <p class="mt-1 text-xs font-medium ${DASH_MUTED}">${escapeHtml(td.requestsToday)}</p>
           </div>
-          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
-            <p class="text-xl font-bold text-amber-600 dark:text-amber-400">${bookingStats.pending}</p>
-            <p class="mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsPending)}</p>
+          <div class="rounded-xl border border-amber-200/60 bg-gradient-to-b from-amber-50/80 to-white px-2 py-3.5 text-center shadow-sm dark:border-amber-500/20 dark:from-amber-950/30 dark:to-slate-900/40">
+            <p class="text-2xl font-bold tabular-nums tracking-tight text-amber-600 dark:text-amber-400">${bookingStats.pending}</p>
+            <p class="mt-1 text-xs font-medium ${DASH_MUTED}">${escapeHtml(td.requestsPending)}</p>
           </div>
-          <div class="rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-3 text-center dark:border-slate-700/60 dark:bg-slate-900/40">
-            <p class="text-xl font-bold ${DASH_TEXT}">${bookingStats.total}</p>
-            <p class="mt-0.5 text-[10px] font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.requestsTotal)}</p>
+          <div class="rounded-xl border border-gray-100/90 bg-gradient-to-b from-gray-50/90 to-white px-2 py-3.5 text-center shadow-sm dark:border-slate-700/50 dark:from-slate-800/50 dark:to-slate-900/40">
+            <p class="text-2xl font-bold tabular-nums tracking-tight ${DASH_TEXT}">${bookingStats.total}</p>
+            <p class="mt-1 text-xs font-medium ${DASH_MUTED}">${escapeHtml(td.requestsTotal)}</p>
           </div>
         </div>`
 
-  return `<div class="space-y-5">
+  return `<div class="mx-auto max-w-3xl space-y-4 sm:space-y-5">
     ${renderHeroCard(td, ctx)}
 
     <section class="${DASH_CARD} p-5 sm:p-6">
       <div class="flex items-center justify-between gap-3">
-        <h2 class="text-base font-bold ${DASH_TEXT}">${escapeHtml(td.todayActivityTitle)}</h2>
-        <button type="button" data-overview-card="requests" class="text-xs font-semibold text-amber-700 dark:text-amber-400">${escapeHtml(td.viewRequests)} →</button>
+        <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(td.todayActivityTitle)}</h2>
+        <button type="button" data-overview-card="requests" class="rounded-lg px-2 py-1 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-950/30 dark:hover:text-amber-300 ${DASH_FOCUS}">${escapeHtml(td.viewRequests)} →</button>
       </div>
-      <div class="mt-3">${activityHtml}</div>
+      <div class="mt-3.5">${activityHtml}</div>
     </section>
 
     <section>
-      <h2 class="mb-3 text-sm font-bold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.manageTitle)}</h2>
-      <div class="grid gap-2 sm:grid-cols-2">
-        ${manageTile({ id: 'add-car', title: td.cardAddCar, iconBg: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400', iconHtml: icon.plus('h-5 w-5') })}
-        ${manageTile({ id: 'pricing', title: td.cardPricing, iconBg: 'bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400', iconHtml: `<span class="text-lg font-bold">€</span>` })}
-        ${manageTile({ id: 'customize', title: td.cardCustomize, iconBg: 'bg-yellow-400/20 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300', iconHtml: icon.palette('h-5 w-5') })}
-        ${manageTile({ id: 'company', title: td.cardEssential, iconBg: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400', iconHtml: icon.building2('h-5 w-5') })}
-        ${manageTile({ id: 'vehicle-types', title: td.cardCarTypes, iconBg: 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400', iconHtml: icon.car('h-5 w-5') })}
+      <h2 class="mb-3 text-base font-semibold tracking-tight ${DASH_TEXT}">${escapeHtml(td.manageTitle)}</h2>
+      <div class="grid gap-2.5 sm:grid-cols-2">
+        ${manageTile({ id: 'add-car', title: td.cardAddCar, subtitle: td.carsSub, iconBg: 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400', iconHtml: icon.plus('h-5 w-5') })}
+        ${manageTile({ id: 'pricing', title: td.cardPricing, subtitle: td.qaPricingDesc, iconBg: 'bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400', iconHtml: `<span class="text-lg font-bold">€</span>` })}
+        ${manageTile({ id: 'customize', title: td.cardCustomize, subtitle: td.qaCompanyDesc, iconBg: 'bg-yellow-400/20 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300', iconHtml: icon.palette('h-5 w-5') })}
+        ${manageTile({ id: 'company', title: td.cardEssential, subtitle: td.essentialSub, iconBg: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400', iconHtml: icon.building2('h-5 w-5') })}
+        ${manageTile({ id: 'vehicle-types', title: td.cardCarTypes, subtitle: td.pricingSub, iconBg: 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400', iconHtml: icon.car('h-5 w-5') })}
       </div>
     </section>
   </div>`
@@ -336,24 +353,32 @@ function setupHealthSubtitle(td, pct) {
 }
 
 function renderSetupHealthRing(pct, size = 'md') {
-  const track = isPublicDarkMode() ? '#334155' : '#f3f4f6'
-  const textCls = isPublicDarkMode() ? 'text-slate-100' : 'text-gray-900'
-  const mutedCls = isPublicDarkMode() ? 'text-slate-500' : 'text-gray-500'
+  const dark = isPublicDarkMode()
+  const track = dark ? '#1e293b' : '#e8eaee'
+  const glow = dark ? 'shadow-[0_0_24px_rgba(250,204,21,0.12)]' : 'shadow-[0_0_20px_rgba(250,204,21,0.22)]'
+  const textCls = dark ? 'text-slate-50' : 'text-gray-900'
+  const mutedCls = dark ? 'text-slate-500' : 'text-gray-400'
   const dim =
     size === 'sm'
-      ? 'relative h-16 w-16 shrink-0'
-      : 'relative h-[5.5rem] w-[5.5rem] shrink-0 sm:h-24 sm:w-24'
+      ? `relative h-[4.5rem] w-[4.5rem] shrink-0 rounded-full bg-white/60 ring-1 ring-gray-200/60 dark:bg-slate-800/40 dark:ring-slate-700/50 ${glow}`
+      : `relative h-[5.5rem] w-[5.5rem] shrink-0 rounded-full sm:h-24 sm:w-24 ${glow}`
   const pctCls = size === 'sm' ? 'text-xl font-bold' : 'text-2xl font-bold sm:text-[1.65rem]'
   return `<div class="${dim}" aria-hidden="true">
     <svg class="h-full w-full -rotate-90" viewBox="0 0 36 36">
-      <circle cx="18" cy="18" r="15.915" fill="none" stroke="${track}" stroke-width="2.5" />
-      <circle cx="18" cy="18" r="15.915" fill="none" stroke="#facc15" stroke-width="2.5"
+      <defs>
+        <linearGradient id="dash-ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#fde047" />
+          <stop offset="100%" stop-color="#f59e0b" />
+        </linearGradient>
+      </defs>
+      <circle cx="18" cy="18" r="15.915" fill="none" stroke="${track}" stroke-width="2.75" />
+      <circle cx="18" cy="18" r="15.915" fill="none" stroke="url(#dash-ring-grad)" stroke-width="2.75"
         stroke-dasharray="${pct} ${100 - pct}" pathLength="100" stroke-linecap="round"
         class="transition-all duration-700 ease-out" />
     </svg>
     <span class="absolute inset-0 flex flex-col items-center justify-center ${textCls}">
-      <span class="${pctCls} leading-none tracking-tight">${pct}</span>
-      <span class="mt-0.5 text-[10px] font-bold uppercase tracking-wider ${mutedCls}">%</span>
+      <span class="${pctCls} leading-none tracking-tight tabular-nums">${pct}</span>
+      <span class="mt-0.5 text-[10px] font-semibold ${mutedCls}">%</span>
     </span>
   </div>`
 }
@@ -722,31 +747,31 @@ export async function mountDashboardCompany(root) {
   root.innerHTML = `
     <div class="${DASH_SHELL}">
       ${renderDrawer(td, t, company.name, avail, dashState.drawerOpen)}
-      <header class="sticky top-0 z-30 border-b border-gray-200/90 bg-white/95 backdrop-blur-md dark:border-slate-700/70 dark:bg-slate-900/95">
-        <div class="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2 px-3">
-          <button type="button" id="dash-menu-btn" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-700 shadow-sm transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" aria-label="${escapeHtml(dashState.drawerOpen ? td.closeMenu : td.openMenu)}">${icon.menu('h-5 w-5')}</button>
-          <div class="min-w-0 flex-1 px-2 text-center">
-            <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-600 dark:text-amber-400">${escapeHtml(td.dashOperatorLabel)}</p>
-            <p class="truncate text-sm font-bold ${DASH_TEXT}">${escapeHtml(company.name)}</p>
+      <header class="${DASH_HEADER} sticky top-0 z-30">
+        <div class="mx-auto flex h-[3.25rem] max-w-6xl items-center justify-between gap-1.5 px-3 sm:h-14 sm:gap-2 sm:px-4">
+          <button type="button" id="dash-menu-btn" class="${DASH_ICON_BTN} h-10 w-10" aria-label="${escapeHtml(dashState.drawerOpen ? td.closeMenu : td.openMenu)}">${icon.menu('h-5 w-5')}</button>
+          <div class="min-w-0 flex-1 px-1 text-center sm:px-2">
+            <p class="text-[10px] font-semibold tracking-wide text-amber-600 dark:text-amber-400 sm:text-[11px]">${escapeHtml(td.dashOperatorLabel)}</p>
+            <p class="truncate text-sm font-bold leading-tight tracking-tight ${DASH_TEXT}">${escapeHtml(company.name)}</p>
           </div>
-          <div class="flex shrink-0 items-center gap-1">
-            <div class="flex rounded-full border border-gray-200 bg-white p-0.5 shadow-sm dark:border-slate-600 dark:bg-slate-800">
+          <div class="flex shrink-0 items-center gap-0.5 sm:gap-1">
+            <div class="flex rounded-full border border-gray-200/80 bg-white/90 p-0.5 shadow-sm dark:border-slate-600/60 dark:bg-slate-800/90">
               ${['nl', 'fr', 'en']
                 .map(
                   (lc) =>
-                    `<button type="button" data-dash-lang="${lc}" class="rounded-full px-1.5 py-1 text-[10px] font-bold sm:px-2 sm:py-1 sm:text-xs ${dashLang === lc ? 'bg-gray-900 text-white dark:bg-amber-400 dark:text-gray-900' : 'text-gray-600 hover:bg-gray-50 dark:text-slate-300 dark:hover:bg-slate-700'}">${lc.toUpperCase()}</button>`
+                    `<button type="button" data-dash-lang="${lc}" class="rounded-full px-1.5 py-1 text-[10px] font-bold transition-colors sm:px-2 sm:py-1 sm:text-xs ${dashLang === lc ? 'bg-gray-900 text-white shadow-sm dark:bg-amber-400 dark:text-gray-900' : 'text-gray-500 hover:bg-gray-50 dark:text-slate-400 dark:hover:bg-slate-700'} ${DASH_FOCUS}">${lc.toUpperCase()}</button>`
                 )
                 .join('')}
             </div>
-            <button type="button" id="co-toggle-dark" class="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 dark:border-slate-600/50 dark:bg-slate-800 dark:text-amber-200/90 dark:hover:bg-slate-700" title="${escapeHtml(td.themeToggle)}" aria-label="${escapeHtml(td.themeToggle)}">
+            <button type="button" id="co-toggle-dark" class="${DASH_ICON_BTN} h-9 w-9" title="${escapeHtml(td.themeToggle)}" aria-label="${escapeHtml(td.themeToggle)}">
               ${dashDark ? icon.moon('h-4 w-4') : icon.sun('h-4 w-4')}
             </button>
-            <button type="button" data-help class="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" aria-label="${escapeHtml(td.help)}">${icon.helpCircle('h-4 w-4')}</button>
+            <button type="button" data-help class="${DASH_ICON_BTN} h-9 w-9" aria-label="${escapeHtml(td.help)}">${icon.helpCircle('h-4 w-4')}</button>
           </div>
         </div>
       </header>
 
-      <main class="mx-auto max-w-6xl px-4 py-5 sm:py-6">
+      <main class="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
         <p id="dash-msg" class="mb-4 hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"></p>
         ${bodyHtml}
       </main>
