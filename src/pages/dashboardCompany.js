@@ -46,9 +46,6 @@ const dashState = {
   qrOpen: false,
 }
 
-/** One PWA prompt init per dashboard page load — remounts must not cancel timers. */
-let companyDashboardPwaInit = false
-
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
 const DASH_SHELL =
   `min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200/70 pb-[calc(${DASH_MOBILE_NAV_HEIGHT}+env(safe-area-inset-bottom,0px)+1.5rem)] sm:pb-10 dark:from-[#06080f] dark:via-slate-950 dark:to-[#0a0f1a]`
@@ -76,6 +73,18 @@ const DASH_SUBCARD = 'rounded-xl border border-gray-100 bg-gray-50/80 dark:borde
 const DASH_EDIT_BTN =
   'inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
 const DASH_PRICING_INPUT = `${DASH_INPUT} mt-1 w-full px-2 py-2 text-sm`
+
+function startCompanyDashboardPwaPrompt(company, lang) {
+  initPwaInstallPrompt({
+    context: 'operator',
+    variant: 'operator',
+    slug: company.slug,
+    iconUrl: resolvePwaIconUrl(company),
+    strings: buildPwaPromptStrings(tPwa(lang), 'operator', company.name),
+    requireManifestReady: true,
+    fixedBottomClass: DASH_PWA_PROMPT_BOTTOM,
+  })
+}
 
 function pricingOf(company) {
   const p = company?.pricing && typeof company.pricing === 'object' ? company.pricing : {}
@@ -500,6 +509,7 @@ export async function mountDashboardCompany(root) {
 
   const pwaIdentity = applyCompanyPwaIdentity({ context: 'dashboard', company })
   await prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
+  startCompanyDashboardPwaPrompt(company, getLocale())
 
   let cars = []
   let bookings = []
@@ -1367,19 +1377,6 @@ export async function mountDashboardCompany(root) {
     root.querySelector('#open-add-car')?.addEventListener('click', () => openCarModal(null))
     root.querySelectorAll('[data-edit-car]').forEach((b) => {
       b.addEventListener('click', () => openCarModal(b.getAttribute('data-edit-car')))
-    })
-  }
-
-  if (!companyDashboardPwaInit) {
-    companyDashboardPwaInit = true
-    initPwaInstallPrompt({
-      context: 'operator',
-      variant: 'operator',
-      slug: company.slug,
-      iconUrl: resolvePwaIconUrl(company),
-      strings: buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name),
-      requireManifestReady: true,
-      fixedBottomClass: DASH_PWA_PROMPT_BOTTOM,
     })
   }
 }

@@ -3,11 +3,15 @@ import { escapeHtml } from './html.js'
 const DISMISS_MS = 14 * 24 * 60 * 60 * 1000
 const OPERATOR_SNOOZE_MS = 8 * 60 * 60 * 1000
 const SHOW_DELAY_MS = 4000
+const DEBUG_SHOW_DELAY_MS = 1000
 const SHOW_AFTER_INTERACT_MS = 1500
+const DEBUG_SHOW_AFTER_INTERACT_MS = 300
 const CHROMIUM_NATIVE_WAIT_MS = 10000
-const DEBUG_CHROMIUM_NATIVE_WAIT_MS = 3000
+const DEBUG_CHROMIUM_NATIVE_WAIT_MS = 1000
 const DESKTOP_CHROMIUM_NATIVE_WAIT_MS = 8000
 const PREPARING_BANNER_DELAY_MS = 2000
+const DEBUG_PREPARING_BANNER_DELAY_MS = 300
+const PREREQUISITE_POLL_MS = 100
 
 let deferredInstallPrompt = null
 let pendingInstallPrompt = null
@@ -104,10 +108,54 @@ export function isPwaDebugMode() {
 }
 
 function pwaLog(message, detail) {
-  const debug = isPwaDebugMode() || import.meta.env.DEV
-  if (!debug || typeof console === 'undefined') return
+  if (!isPwaDebugMode() || typeof console === 'undefined') return
   if (detail !== undefined) console.log(`[taxio-pwa] ${message}`, detail)
   else console.log(`[taxio-pwa] ${message}`)
+}
+
+function showDelayMs() {
+  return isPwaDebugMode() ? DEBUG_SHOW_DELAY_MS : SHOW_DELAY_MS
+}
+
+function showAfterInteractMs() {
+  return isPwaDebugMode() ? DEBUG_SHOW_AFTER_INTERACT_MS : SHOW_AFTER_INTERACT_MS
+}
+
+function preparingBannerDelayMs() {
+  return isPwaDebugMode() ? DEBUG_PREPARING_BANNER_DELAY_MS : PREPARING_BANNER_DELAY_MS
+}
+
+export function isMobileInstallTarget() {
+  const platform = detectInstallPlatform()
+  return platform === 'ios' || platform === 'android'
+}
+
+function getDismissDebugInfo(context, companyIdOrSlug) {
+  const key = getInstallStorageKey(context, companyIdOrSlug)
+  if (context === 'operator') {
+    const raw = sessionStorage.getItem(key)
+    return { key, store: 'sessionStorage', raw, snoozed: isPromptDismissed(context, companyIdOrSlug) }
+  }
+  const raw = localStorage.getItem(key)
+  return { key, store: 'localStorage', raw, snoozed: isPromptDismissed(context, companyIdOrSlug) }
+}
+
+function logPromptAudit(context, slug, reason, extra) {
+  if (!isPwaDebugMode() || typeof console === 'undefined') return
+  console.log('[taxio-pwa] audit:', reason, {
+    isStandalone: isStandaloneMode(),
+    platform: detectInstallPlatform(),
+    isIOS: detectInstallPlatform() === 'ios',
+    isMobile: isMobileInstallTarget(),
+    hasBeforeInstallPrompt: !!deferredInstallPrompt,
+    hasPendingBeforeInstallPrompt: !!pendingInstallPrompt,
+    manifestReady: isPwaManifestReady(),
+    serviceWorkerReady: isServiceWorkerReady(),
+    dismiss: getDismissDebugInfo(context, slug),
+    activeInitSignature,
+    hasActiveCleanup: !!activeCleanup,
+    ...extra,
+  })
 }
 
 /** Call once at app bootstrap — before booking manifest is applied. */
@@ -336,8 +384,10 @@ function renderBanner({ strings, context, slug, iconUrl, mode, onDismiss, onInst
 
   document.body.appendChild(el)
   requestAnimationFrame(() => {
-    el.classList.remove('translate-y-3', 'opacity-0')
-    el.classList.add('translate-y-0', 'opacity-100')
+    requestAnimationFrame(() => {
+      el.classList.remove('translate-y-3', 'opacity-0')
+      el.classList.add('translate-y-0', 'opacity-100')
+    })
   })
   return el
 }
@@ -400,14 +450,25 @@ async function handleInstallClick({ el, strings, context, slug, platform }) {
  * @param {{ context: 'operator'|'booking', slug?: string, iconUrl?: string, strings: Record<string,string>, variant?: 'operator'|'booking', requireManifestReady?: boolean }} options
  */
 export function initPwaInstallPrompt(options) {
+  const sig = `${options.context}:${options.slug || ''}:${options.requireManifestReady !== false}`
+
   if (document.getElementById('taxio-pwa-prompt')) {
+    logPromptAudit(options.context, options.slug, 'skip:banner-already-in-dom')
     return () => {}
   }
 
-  const sig = `${options.context}:${options.slug || ''}:${options.requireManifestReady !== false}`
   if (activeInitSignature === sig) {
-    if (activeCleanup) return activeCleanup
-    return () => {}
+    if (activeCleanup) {
+      logPromptAudit(options.context, options.slug, 'reuse:in-flight-init')
+      return activeCleanup
+    }
+    if (!isPromptDismissed(options.context, options.slug || '')) {
+      logPromptAudit(options.context, options.slug, 'restart:prior-init-ended-without-banner')
+      activeInitSignature = null
+    } else {
+      logPromptAudit(options.context, options.slug, 'skip:snoozed')
+      return () => {}
+    }
   }
 
   activeCleanup?.()
@@ -423,6 +484,7 @@ export function initPwaInstallPrompt(options) {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     activeInitSignature = null
     activeCleanup = null
+    logPromptAudit(options.context, options.slug, 'abort:no-window')
     return () => {}
   }
 
@@ -432,17 +494,31 @@ export function initPwaInstallPrompt(options) {
   const requireManifestReady = options.requireManifestReady !== false
   const platform = detectInstallPlatform()
   const chromium = isChromiumInstallBrowser()
+  const mobile = isMobileInstallTarget()
 
-  pwaLog('platform:', platform === 'android' && chromium ? 'android/chromium' : platform)
+  logPromptAudit(context, slug, 'init:start', {
+    sig,
+    requireManifestReady,
+    chromium,
+    fixedBottomClass: fixedBottomClass || null,
+  })
 
   if (isStandaloneMode()) {
     activeInitSignature = null
     activeCleanup = null
+    logPromptAudit(context, slug, 'abort:standalone')
     return () => {}
   }
   if (isPromptDismissed(context, slug)) {
     activeInitSignature = null
     activeCleanup = null
+    logPromptAudit(context, slug, 'abort:snoozed')
+    return () => {}
+  }
+  if (!mobile) {
+    activeInitSignature = null
+    activeCleanup = null
+    logPromptAudit(context, slug, 'abort:desktop-not-mobile')
     return () => {}
   }
 
@@ -471,6 +547,7 @@ export function initPwaInstallPrompt(options) {
     }
     if (shown) return bannerEl
     shown = true
+    logPromptAudit(context, slug, 'show:banner', { mode })
     clearTimers()
     if (interactHandler) {
       document.removeEventListener('click', interactHandler, true)
@@ -531,7 +608,7 @@ export function initPwaInstallPrompt(options) {
         if (!shown && chromium) {
           showBanner('preparing')
         }
-      }, isPwaDebugMode() ? 500 : PREPARING_BANNER_DELAY_MS)
+      }, preparingBannerDelayMs())
     )
 
     timers.push(window.setTimeout(finalizeChromiumMode, waitMs))
@@ -541,9 +618,11 @@ export function initPwaInstallPrompt(options) {
     if (prerequisitesMet) return
     prerequisitesMet = true
 
-    pwaLog('manifestReady:', isPwaManifestReady())
-    pwaLog('serviceWorkerReady:', isServiceWorkerReady())
-    pwaLog('beforeinstallprompt captured:', !!deferredInstallPrompt)
+    logPromptAudit(context, slug, 'flow:start', {
+      manifestReady: isPwaManifestReady(),
+      serviceWorkerReady: isServiceWorkerReady(),
+      hasBeforeInstallPrompt: !!deferredInstallPrompt,
+    })
 
     uninstallPromptListener = () => {
       if (deferredInstallPrompt) upgradeToNative()
@@ -560,26 +639,36 @@ export function initPwaInstallPrompt(options) {
       return
     }
 
-    timers.push(
-      window.setTimeout(() => {
-        showBanner(deferredInstallPrompt ? 'native' : 'fallback')
-      }, DESKTOP_CHROMIUM_NATIVE_WAIT_MS)
-    )
+    showBanner(deferredInstallPrompt ? 'native' : 'fallback')
   }
 
   const maybeStartAfterPrerequisites = () => {
     if (prerequisitesMet) return
-    if (requireManifestReady && !isPwaManifestReady()) return
-    if (!isServiceWorkerReady()) return
-    if (document.visibilityState === 'hidden') return
+    if (requireManifestReady && !isPwaManifestReady()) {
+      logPromptAudit(context, slug, 'wait:manifest-not-ready')
+      timers.push(window.setTimeout(maybeStartAfterPrerequisites, PREREQUISITE_POLL_MS))
+      return
+    }
+    if (!isServiceWorkerReady()) {
+      logPromptAudit(context, slug, 'wait:service-worker-not-ready')
+      waitForServiceWorkerReady().then(() => {
+        timers.push(window.setTimeout(maybeStartAfterPrerequisites, PREREQUISITE_POLL_MS))
+      })
+      return
+    }
+    if (document.visibilityState === 'hidden') {
+      logPromptAudit(context, slug, 'wait:document-hidden')
+      return
+    }
     startPromptFlow()
   }
 
   const onUserEngagement = () => {
-    timers.push(window.setTimeout(maybeStartAfterPrerequisites, SHOW_AFTER_INTERACT_MS))
+    timers.push(window.setTimeout(maybeStartAfterPrerequisites, showAfterInteractMs()))
   }
 
   const armEngagementListeners = () => {
+    logPromptAudit(context, slug, 'arm:engagement-listeners', { showDelayMs: showDelayMs() })
     interactHandler = () => onUserEngagement()
     document.addEventListener('click', interactHandler, { once: true, capture: true })
     document.addEventListener('touchstart', interactHandler, { once: true, capture: true, passive: true })
@@ -590,12 +679,12 @@ export function initPwaInstallPrompt(options) {
     }
     document.addEventListener('visibilitychange', visibilityHandler)
 
-    timers.push(window.setTimeout(maybeStartAfterPrerequisites, SHOW_DELAY_MS))
+    timers.push(window.setTimeout(maybeStartAfterPrerequisites, showDelayMs()))
   }
 
   const waitForPrerequisites = () => {
     if (requireManifestReady && !isPwaManifestReady()) {
-      timers.push(window.setTimeout(waitForPrerequisites, 80))
+      timers.push(window.setTimeout(waitForPrerequisites, PREREQUISITE_POLL_MS))
       return
     }
     waitForServiceWorkerReady().then(() => {
@@ -604,6 +693,7 @@ export function initPwaInstallPrompt(options) {
     })
   }
 
+  initServiceWorkerRegistration()
   waitForPrerequisites()
 
   const cleanup = () => {
