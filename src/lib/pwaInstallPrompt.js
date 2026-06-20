@@ -1,6 +1,7 @@
 import { escapeHtml } from './html.js'
 
 const DISMISS_MS = 14 * 24 * 60 * 60 * 1000
+const OPERATOR_SNOOZE_MS = 8 * 60 * 60 * 1000
 const SHOW_DELAY_MS = 4000
 const SHOW_AFTER_INTERACT_MS = 1500
 const CHROMIUM_NATIVE_WAIT_MS = 10000
@@ -9,6 +10,7 @@ const DESKTOP_CHROMIUM_NATIVE_WAIT_MS = 8000
 const PREPARING_BANNER_DELAY_MS = 2000
 
 let deferredInstallPrompt = null
+let pendingInstallPrompt = null
 let beforeInstallBound = false
 let activeCleanup = null
 let pwaManifestReady = false
@@ -29,12 +31,18 @@ export function setPwaManifestReady(ready = true) {
   if (!ready) {
     pwaManifestReady = false
     deferredInstallPrompt = null
+    pendingInstallPrompt = null
     return
   }
   const firstReady = !pwaManifestReady
   pwaManifestReady = true
   if (firstReady) {
     deferredInstallPrompt = null
+  }
+  if (pendingInstallPrompt) {
+    deferredInstallPrompt = pendingInstallPrompt
+    pendingInstallPrompt = null
+    notifyInstallPromptCaptured()
   }
   pwaLog('manifestReady:', true)
 }
@@ -46,6 +54,7 @@ export function isPwaManifestReady() {
 export function resetPwaManifestReady() {
   pwaManifestReady = false
   deferredInstallPrompt = null
+  pendingInstallPrompt = null
 }
 
 export function setServiceWorkerReady(ready = true) {
@@ -122,7 +131,11 @@ function bindBeforeInstallPrompt() {
   beforeInstallBound = true
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault()
-    if (!pwaManifestReady) return
+    if (!pwaManifestReady) {
+      pendingInstallPrompt = e
+      pwaLog('beforeinstallprompt queued (manifest not ready yet)')
+      return
+    }
     deferredInstallPrompt = e
     notifyInstallPromptCaptured()
   })
@@ -180,7 +193,24 @@ export function getInstallStorageKey(context, companyIdOrSlug) {
 export function isPromptDismissed(context, companyIdOrSlug) {
   if (isPwaDebugMode()) return false
   try {
-    const raw = localStorage.getItem(getInstallStorageKey(context, companyIdOrSlug))
+    const key = getInstallStorageKey(context, companyIdOrSlug)
+    if (context === 'operator') {
+      try {
+        localStorage.removeItem(key)
+      } catch {
+        /* migrate away from 14-day operator dismiss */
+      }
+      const raw = sessionStorage.getItem(key)
+      if (!raw) return false
+      const at = Number(raw)
+      if (!Number.isFinite(at)) return false
+      if (Date.now() - at >= OPERATOR_SNOOZE_MS) {
+        sessionStorage.removeItem(key)
+        return false
+      }
+      return true
+    }
+    const raw = localStorage.getItem(key)
     if (!raw) return false
     const at = Number(raw)
     if (!Number.isFinite(at)) return false
@@ -192,7 +222,12 @@ export function isPromptDismissed(context, companyIdOrSlug) {
 
 export function setPromptDismissed(context, companyIdOrSlug) {
   try {
-    localStorage.setItem(getInstallStorageKey(context, companyIdOrSlug), String(Date.now()))
+    const key = getInstallStorageKey(context, companyIdOrSlug)
+    if (context === 'operator') {
+      sessionStorage.setItem(key, String(Date.now()))
+      return
+    }
+    localStorage.setItem(key, String(Date.now()))
   } catch {
     /* private mode */
   }
@@ -370,16 +405,24 @@ export function initPwaInstallPrompt(options) {
   }
 
   const sig = `${options.context}:${options.slug || ''}:${options.requireManifestReady !== false}`
-  if (activeInitSignature === sig && activeCleanup) {
-    return activeCleanup
+  if (activeInitSignature === sig) {
+    if (activeCleanup) return activeCleanup
+    return () => {}
   }
 
   activeCleanup?.()
   activeCleanup = null
   activeInitSignature = sig
 
+  let innerCleanup = null
+  const outerCleanup = () => {
+    innerCleanup?.()
+  }
+  activeCleanup = outerCleanup
+
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     activeInitSignature = null
+    activeCleanup = null
     return () => {}
   }
 
@@ -394,10 +437,12 @@ export function initPwaInstallPrompt(options) {
 
   if (isStandaloneMode()) {
     activeInitSignature = null
+    activeCleanup = null
     return () => {}
   }
   if (isPromptDismissed(context, slug)) {
     activeInitSignature = null
+    activeCleanup = null
     return () => {}
   }
 
@@ -575,12 +620,12 @@ export function initPwaInstallPrompt(options) {
       installPromptListeners.delete(uninstallPromptListener)
     }
     if (!shown) removePromptEl()
-    if (activeCleanup === cleanup) {
+    if (activeCleanup === outerCleanup) {
       activeCleanup = null
       activeInitSignature = null
     }
   }
 
-  activeCleanup = cleanup
-  return cleanup
+  innerCleanup = cleanup
+  return outerCleanup
 }

@@ -44,8 +44,10 @@ const dashState = {
   editingCarId: null,
   drawerOpen: false,
   qrOpen: false,
-  moreOpen: false,
 }
+
+/** One PWA prompt init per dashboard page load — remounts must not cancel timers. */
+let companyDashboardPwaInit = false
 
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
 const DASH_SHELL =
@@ -208,25 +210,6 @@ function renderDrawer(td, currentTab, companyName, avail, open) {
         <button type="button" id="co-logout" class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-slate-800/50 px-3.5 py-2.5 text-sm font-semibold text-slate-300 transition-all duration-200 hover:border-slate-600 hover:bg-slate-800 hover:text-white active:scale-[0.98] ${DASH_FOCUS}">${icon.logOut('h-4 w-4')}${td.logout}</button>
       </div>
     </aside>
-  </div>`
-}
-
-function renderMoreSheet(td, open) {
-  const rowCls = `flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left text-sm font-semibold transition-colors ${DASH_FOCUS} text-gray-900 hover:bg-gray-50 dark:text-slate-100 dark:hover:bg-slate-800/80`
-  return `<div id="dash-more-sheet" class="fixed inset-0 z-[55] sm:hidden ${open ? '' : 'pointer-events-none hidden'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(td.moreMenuTitle)}">
-    <div id="dash-more-backdrop" class="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"></div>
-    <div class="absolute bottom-0 left-0 right-0 mx-auto max-w-lg rounded-t-2xl border border-gray-200/70 bg-white/98 p-5 shadow-2xl dark:border-slate-700/60 dark:bg-slate-900/98 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <div class="mx-auto mb-3 h-1 w-10 rounded-full bg-gray-200 dark:bg-slate-700" aria-hidden="true"></div>
-      <div class="mb-4 flex items-center justify-between gap-3">
-        <h2 class="text-base font-bold ${DASH_TEXT}">${escapeHtml(td.moreMenuTitle)}</h2>
-        <button type="button" id="dash-more-close" class="${DASH_ICON_BTN} h-9 w-9" aria-label="${escapeHtml(td.closeMore)}">${icon.x('h-4 w-4')}</button>
-      </div>
-      <p class="mb-3 text-xs font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.drawerFleet)}</p>
-      <div class="space-y-1">
-        <button type="button" data-dash-tab="cars" class="${rowCls}">${icon.car('h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400')}${escapeHtml(td.tabCars)}</button>
-        <button type="button" data-dash-tab="drivers" class="${rowCls}">${icon.users('h-5 w-5 shrink-0 text-violet-600 dark:text-violet-400')}${escapeHtml(td.tabDrivers)}</button>
-      </div>
-    </div>
   </div>`
 }
 
@@ -828,10 +811,7 @@ export async function mountDashboardCompany(root) {
       ${renderDrawer(td, t, company.name, avail, dashState.drawerOpen)}
       <header class="${DASH_HEADER} sticky top-0 z-30">
         <div class="mx-auto flex h-[3.25rem] max-w-6xl items-center justify-between gap-1.5 px-3 sm:h-14 sm:gap-2 sm:px-4">
-          <div class="flex items-center gap-1">
-            <button type="button" id="dash-more-btn" class="${DASH_ICON_BTN} h-10 w-10 sm:hidden" aria-label="${escapeHtml(td.moreMenuTitle)}" title="${escapeHtml(td.moreMenuTitle)}">${icon.moreVertical('h-5 w-5')}</button>
-            <button type="button" id="dash-menu-btn" class="${DASH_ICON_BTN} h-10 w-10" aria-label="${escapeHtml(dashState.drawerOpen ? td.closeMenu : td.openMenu)}">${icon.menu('h-5 w-5')}</button>
-          </div>
+          <button type="button" id="dash-menu-btn" class="${DASH_ICON_BTN} h-10 w-10" aria-label="${escapeHtml(dashState.drawerOpen ? td.closeMenu : td.openMenu)}">${icon.menu('h-5 w-5')}</button>
           <div class="min-w-0 flex-1 px-1 text-center sm:px-2">
             <p class="text-[10px] font-semibold tracking-wide text-amber-600 dark:text-amber-400 sm:text-[11px]">${escapeHtml(td.dashOperatorLabel)}</p>
             <p class="truncate text-sm font-bold leading-tight tracking-tight ${DASH_TEXT}">${escapeHtml(company.name)}</p>
@@ -867,7 +847,6 @@ export async function mountDashboardCompany(root) {
       </footer>
 
       ${renderQrSheet(td, bookPublicUrl, bookingQrSrc, dashState.qrOpen)}
-      ${renderMoreSheet(td, dashState.moreOpen)}
       ${renderMobileBottomNav(td, t)}
       <div id="dash-modal-root"></div>
     </div>`
@@ -877,30 +856,12 @@ export async function mountDashboardCompany(root) {
       dashState.tab = btn.getAttribute('data-dash-tab')
       dashState.modal = null
       dashState.drawerOpen = false
-      dashState.moreOpen = false
       mountDashboardCompany(root)
     })
   })
 
-  root.querySelector('#dash-more-btn')?.addEventListener('click', () => {
-    dashState.moreOpen = true
-    dashState.drawerOpen = false
-    mountDashboardCompany(root)
-  })
-
-  root.querySelector('#dash-more-close')?.addEventListener('click', () => {
-    dashState.moreOpen = false
-    mountDashboardCompany(root)
-  })
-
-  root.querySelector('#dash-more-backdrop')?.addEventListener('click', () => {
-    dashState.moreOpen = false
-    mountDashboardCompany(root)
-  })
-
   root.querySelector('#dash-menu-btn')?.addEventListener('click', () => {
     dashState.drawerOpen = !dashState.drawerOpen
-    dashState.moreOpen = false
     mountDashboardCompany(root)
   })
 
@@ -1409,13 +1370,16 @@ export async function mountDashboardCompany(root) {
     })
   }
 
-  initPwaInstallPrompt({
-    context: 'operator',
-    variant: 'operator',
-    slug: company.slug,
-    iconUrl: resolvePwaIconUrl(company),
-    strings: buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name),
-    requireManifestReady: true,
-    fixedBottomClass: DASH_PWA_PROMPT_BOTTOM,
-  })
+  if (!companyDashboardPwaInit) {
+    companyDashboardPwaInit = true
+    initPwaInstallPrompt({
+      context: 'operator',
+      variant: 'operator',
+      slug: company.slug,
+      iconUrl: resolvePwaIconUrl(company),
+      strings: buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name),
+      requireManifestReady: true,
+      fixedBottomClass: DASH_PWA_PROMPT_BOTTOM,
+    })
+  }
 }
