@@ -35,8 +35,14 @@ import {
   buildTaxioSupportWaUrl,
   calculateCompanySetupProgress,
 } from '../lib/companySetupProgress.js'
-import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
-import { applyCompanyPwaIdentity, buildPwaPromptStrings, prefetchCompanyManifest, resolvePwaIconUrl } from '../lib/companyPwa.js'
+import {
+  shouldShowOperatorDashboardPwaCard,
+  setPromptDismissed,
+  triggerPwaInstallAction,
+  logDashboardPwaDebug,
+  initServiceWorkerRegistration,
+} from '../lib/pwaInstallPrompt.js'
+import { applyCompanyPwaIdentity, buildPwaPromptStrings, prefetchCompanyManifest } from '../lib/companyPwa.js'
 
 const dashState = {
   tab: 'overview',
@@ -49,8 +55,6 @@ const dashState = {
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
 const DASH_SHELL =
   `min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200/70 pb-[calc(${DASH_MOBILE_NAV_HEIGHT}+env(safe-area-inset-bottom,0px)+1.5rem)] sm:pb-10 dark:from-[#06080f] dark:via-slate-950 dark:to-[#0a0f1a]`
-const DASH_PWA_PROMPT_BOTTOM =
-  `bottom-[calc(${DASH_MOBILE_NAV_HEIGHT}+env(safe-area-inset-bottom,0px)+1rem)] sm:bottom-4`
 const DASH_HEADER =
   'border-b border-gray-200/80 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04)] backdrop-blur-lg dark:border-slate-800/80 dark:bg-slate-950/90 dark:shadow-[0_1px_0_rgba(255,255,255,0.04)]'
 const DASH_TAB_BAR = 'border-t border-gray-100 bg-[#eef0f3] dark:border-slate-700/60 dark:bg-slate-900/50'
@@ -74,16 +78,20 @@ const DASH_EDIT_BTN =
   'inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
 const DASH_PRICING_INPUT = `${DASH_INPUT} mt-1 w-full px-2 py-2 text-sm`
 
-function startCompanyDashboardPwaPrompt(company, lang) {
-  initPwaInstallPrompt({
-    context: 'operator',
-    variant: 'operator',
-    slug: company.slug,
-    iconUrl: resolvePwaIconUrl(company),
-    strings: buildPwaPromptStrings(tPwa(lang), 'operator', company.name),
-    requireManifestReady: true,
-    fixedBottomClass: DASH_PWA_PROMPT_BOTTOM,
-  })
+function renderDashboardPwaCard(td, tpwa) {
+  return `<section id="dash-pwa-inline-card" class="sm:hidden ${DASH_CARD} border border-amber-200/80 bg-gradient-to-br from-amber-50/95 via-white to-white p-5 shadow-[0_4px_24px_rgba(234,179,8,0.12)] dark:border-amber-500/30 dark:from-amber-950/35 dark:via-slate-900/80 dark:to-slate-900/70 dark:shadow-[0_8px_32px_rgba(0,0,0,0.35)]" aria-label="${escapeHtml(td.dashPwaCardTitle)}">
+    <div class="flex gap-3.5">
+      <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-yellow-400 text-base font-black text-slate-900 shadow-sm ring-1 ring-amber-400/40">T</div>
+      <div class="min-w-0 flex-1">
+        <h2 class="text-base font-bold leading-snug ${DASH_TEXT}">${escapeHtml(td.dashPwaCardTitle)}</h2>
+        <p class="mt-1 text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.dashPwaCardSub)}</p>
+      </div>
+    </div>
+    <div class="mt-4 flex flex-col gap-2">
+      <button type="button" id="dash-pwa-add" class="${DASH_BTN_PRIMARY} min-h-[44px] w-full flex-1">${escapeHtml(tpwa.addShortcut)}</button>
+      <button type="button" id="dash-pwa-later" class="${DASH_BTN_SECONDARY} min-h-[44px] w-full flex-1">${escapeHtml(tpwa.notNow)}</button>
+    </div>
+  </section>`
 }
 
 function pricingOf(company) {
@@ -308,8 +316,8 @@ function renderHeroCard(td, ctx) {
   </section>`
 }
 
-function renderOverviewBody(td, ctx) {
-  const { bookingStats } = ctx
+function renderOverviewBody(td, ctx, tpwa) {
+  const { bookingStats, showPwaCard } = ctx
 
   const activityHtml =
     bookingStats.total === 0
@@ -331,6 +339,7 @@ function renderOverviewBody(td, ctx) {
 
   return `<div class="mx-auto max-w-3xl space-y-4 sm:space-y-5">
     ${renderHeroCard(td, ctx)}
+    ${showPwaCard ? renderDashboardPwaCard(td, tpwa) : ''}
 
     <section class="${DASH_CARD} p-5 sm:p-6">
       <div class="flex items-center justify-between gap-3">
@@ -509,7 +518,7 @@ export async function mountDashboardCompany(root) {
 
   const pwaIdentity = applyCompanyPwaIdentity({ context: 'dashboard', company })
   await prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
-  startCompanyDashboardPwaPrompt(company, getLocale())
+  initServiceWorkerRegistration()
 
   let cars = []
   let bookings = []
@@ -526,6 +535,12 @@ export async function mountDashboardCompany(root) {
 
   const dashLang = getLocale()
   const td = tDashboard(dashLang)
+  const tpwa = buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name)
+  const showPwaCard = shouldShowOperatorDashboardPwaCard()
+  logDashboardPwaDebug(showPwaCard ? 'inline-card:visible' : 'inline-card:hidden', {
+    tab: dashState.tab,
+    companySlug: company.slug,
+  })
 
   const vatLine = company.vat_number
     ? `${td.vatLine} ${escapeHtml(company.vat_number)}`
@@ -579,7 +594,8 @@ export async function mountDashboardCompany(root) {
       bookingStats,
       pricingStatus,
       carCount: cars.length,
-    })
+      showPwaCard,
+    }, tpwa)
   } else if (t === 'cars') {
     const rows =
       cars.length === 0
@@ -1057,6 +1073,23 @@ export async function mountDashboardCompany(root) {
         handleSetupAction('support')
       }
     })
+  })
+
+  root.querySelector('#dash-pwa-add')?.addEventListener('click', async () => {
+    logDashboardPwaDebug('inline-card:add-click')
+    const result = await triggerPwaInstallAction({
+      context: 'operator',
+      slug: company.slug,
+      strings: tpwa,
+      variant: 'operator',
+    })
+    logDashboardPwaDebug('inline-card:add-result', { result })
+  })
+
+  root.querySelector('#dash-pwa-later')?.addEventListener('click', () => {
+    setPromptDismissed('operator', company.slug)
+    logDashboardPwaDebug('inline-card:dismissed')
+    mountDashboardCompany(root)
   })
 
   if (t === 'pricing') {

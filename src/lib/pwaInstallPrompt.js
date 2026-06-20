@@ -427,6 +427,18 @@ function renderInstructionsSheet(strings, platform, onClose) {
 
 async function handleInstallClick({ el, strings, context, slug, platform }) {
   if (el?.dataset?.taxioPwaMode === 'preparing') return
+  await triggerPwaInstallAction({ context, slug, strings, platform })
+}
+
+/** Whether native Chromium install prompt is currently available. */
+export function hasNativeInstallPrompt() {
+  return !!deferredInstallPrompt
+}
+
+/** Try native install; on failure or unavailable, open manual instructions sheet. */
+export async function triggerPwaInstallAction({ context, slug, strings, platform, variant = 'operator' }) {
+  const resolvedPlatform = platform || detectInstallPlatform()
+  const picked = pickStrings(strings, variant)
 
   if (deferredInstallPrompt) {
     try {
@@ -437,13 +449,36 @@ async function handleInstallClick({ el, strings, context, slug, platform }) {
       if (choice?.outcome === 'dismissed') {
         setPromptDismissed(context, slug)
       }
+      return 'native'
     } catch {
-      renderInstructionsSheet(strings, platform, null)
+      renderInstructionsSheet(picked, resolvedPlatform, null)
+      return 'instructions'
     }
-    return
   }
 
-  renderInstructionsSheet(strings, platform, null)
+  renderInstructionsSheet(picked, resolvedPlatform, null)
+  return 'instructions'
+}
+
+/** Inline dashboard card visibility (mobile, not standalone, not snoozed). */
+export function shouldShowOperatorDashboardPwaCard() {
+  if (!isMobileInstallTarget()) return false
+  if (isStandaloneMode()) return false
+  if (!isPwaDebugMode() && isPromptDismissed('operator', '')) return false
+  return true
+}
+
+export function logDashboardPwaDebug(reason, extra) {
+  if (!isPwaDebugMode() || typeof console === 'undefined') return
+  console.log('[taxio-pwa-dashboard]', reason, {
+    isStandalone: isStandaloneMode(),
+    isMobile: isMobileInstallTarget(),
+    platform: detectInstallPlatform(),
+    hasNativeInstallPrompt: hasNativeInstallPrompt(),
+    manifestReady: isPwaManifestReady(),
+    dismissed: isPromptDismissed('operator', ''),
+    ...extra,
+  })
 }
 
 /**
@@ -451,6 +486,11 @@ async function handleInstallClick({ el, strings, context, slug, platform }) {
  */
 export function initPwaInstallPrompt(options) {
   const sig = `${options.context}:${options.slug || ''}:${options.requireManifestReady !== false}`
+
+  if (options.context === 'operator') {
+    logPromptAudit(options.context, options.slug, 'skip:operator-dashboard-uses-inline-card')
+    return () => {}
+  }
 
   if (document.getElementById('taxio-pwa-prompt')) {
     logPromptAudit(options.context, options.slug, 'skip:banner-already-in-dom')

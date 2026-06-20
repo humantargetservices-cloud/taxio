@@ -211,6 +211,9 @@ export const translations = {
       tabRides: 'Requests',
       tabLicense: 'Plan',
       dashBadge: 'Dashboard',
+      dashPwaCardTitle: 'Add TAXIO to your phone',
+      dashPwaCardSub:
+        'Create a shortcut on your home screen for faster access to your company dashboard.',
       vatLine: 'VAT',
       shareTitle: 'Share your booking page',
       shareSubtitle: 'Public link and QR code.',
@@ -804,6 +807,9 @@ export const translations = {
       tabRides: 'Demandes',
       tabLicense: 'Offre',
       dashBadge: 'Tableau de bord',
+      dashPwaCardTitle: 'Ajoutez TAXIO à votre téléphone',
+      dashPwaCardSub:
+        'Créez un raccourci sur votre écran d’accueil pour accéder plus vite à votre tableau de bord.',
       vatLine: 'TVA',
       shareTitle: 'Partager votre page de réservation',
       shareSubtitle: 'Lien public et QR code.',
@@ -1399,6 +1405,9 @@ export const translations = {
       tabRides: 'Aanvragen',
       tabLicense: 'Plan',
       dashBadge: 'Dashboard',
+      dashPwaCardTitle: 'Voeg TAXIO toe aan je telefoon',
+      dashPwaCardSub:
+        'Maak een snelkoppeling op je startscherm voor snellere toegang tot je bedrijfsdashboard.',
       vatLine: 'BTW',
       shareTitle: 'Deel uw boekingspagina',
       shareSubtitle: 'Publieke link en QR-code.',
