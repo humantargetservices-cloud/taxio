@@ -68,6 +68,11 @@ const DASH_FOCUS =
 const DASH_ICON_BTN = `flex shrink-0 items-center justify-center rounded-xl border border-gray-200/80 bg-white/90 text-gray-600 shadow-sm transition-all duration-200 hover:border-gray-300 hover:bg-white hover:shadow-md dark:border-slate-600/60 dark:bg-slate-800/90 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:bg-slate-800 active:scale-[0.97] ${DASH_FOCUS}`
 const DASH_BTN_PRIMARY = `inline-flex items-center justify-center gap-2 rounded-xl bg-yellow-400 px-4 py-2.5 text-sm font-bold text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.06),0_4px_14px_rgba(234,179,8,0.28)] transition-all duration-200 hover:bg-yellow-300 hover:shadow-[0_4px_18px_rgba(234,179,8,0.38)] active:scale-[0.98] dark:bg-amber-400 dark:text-gray-900 dark:hover:bg-amber-300 ${DASH_FOCUS}`
 const DASH_BTN_SECONDARY = `inline-flex items-center justify-center rounded-xl border border-gray-200/90 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 active:scale-[0.98] dark:border-slate-600/70 dark:bg-slate-800/80 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-700/80 ${DASH_FOCUS}`
+const DASH_FIELD_LABEL = 'text-xs font-semibold text-gray-500 dark:text-slate-400'
+const DASH_SUBCARD = 'rounded-xl border border-gray-100 bg-gray-50/80 dark:border-slate-600/50 dark:bg-slate-900/40'
+const DASH_EDIT_BTN =
+  'inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+const DASH_PRICING_INPUT = `${DASH_INPUT} mt-1 w-full px-2 py-2 text-sm`
 
 function pricingOf(company) {
   const p = company?.pricing && typeof company.pricing === 'object' ? company.pricing : {}
@@ -126,23 +131,31 @@ function drawerNavItem(tabId, label, current) {
 
 function renderMobileBottomNav(td, currentTab) {
   const items = [
-    { id: 'overview', label: td.navHome, icon: icon.home('h-5 w-5') },
-    { id: 'cars', label: td.navFleet, icon: icon.car('h-5 w-5') },
-    { id: 'ride-requests', label: td.navRequests, icon: icon.messageCircle('h-5 w-5') },
-    { id: 'essential', label: td.navAccount, icon: icon.building2('h-5 w-5') },
+    { kind: 'tab', id: 'overview', label: td.navHome, icon: icon.home('h-[18px] w-[18px]') },
+    { kind: 'tab', id: 'cars', label: td.navFleet, icon: icon.car('h-[18px] w-[18px]') },
+    { kind: 'tab', id: 'ride-requests', label: td.navRequests, icon: icon.inbox('h-[18px] w-[18px]') },
+    { kind: 'tab', id: 'pricing', label: td.navPricing, icon: icon.euro('h-[18px] w-[18px]') },
+    { kind: 'wa', label: td.navTaxio, icon: icon.whatsapp('h-[18px] w-[18px]') },
+    { kind: 'tab', id: 'essential', label: td.navAccount, icon: icon.building2('h-[18px] w-[18px]') },
   ]
   return `<nav id="dash-bottom-nav" class="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200/90 bg-white/95 shadow-[0_-4px_24px_rgba(15,23,42,0.08)] backdrop-blur-md sm:hidden dark:border-slate-700/70 dark:bg-slate-950/95 dark:shadow-[0_-8px_32px_rgba(0,0,0,0.45)]" aria-label="${escapeHtml(td.drawerNavLabel)}">
-    <div class="mx-auto flex h-[4.25rem] max-w-6xl items-stretch justify-around pb-[env(safe-area-inset-bottom,0px)]">
+    <div class="mx-auto flex h-[4.25rem] max-w-6xl items-stretch justify-between gap-0 px-0.5 pb-[env(safe-area-inset-bottom,0px)]">
       ${items
-        .map(({ id, label, icon: iconHtml }) => {
-          const active = id === currentTab
-          return `<button type="button" data-dash-tab="${id}" class="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 transition-colors ${DASH_FOCUS} ${
+        .map((item) => {
+          if (item.kind === 'wa') {
+            return `<button type="button" data-dash-wa-support class="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 transition-colors text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 ${DASH_FOCUS}" aria-label="${escapeHtml(td.taxioSupport)}" title="${escapeHtml(td.taxioSupport)}">
+            <span>${item.icon}</span>
+            <span class="max-w-full truncate text-[9px] font-semibold leading-tight">${escapeHtml(item.label)}</span>
+          </button>`
+          }
+          const active = item.id === currentTab
+          return `<button type="button" data-dash-tab="${item.id}" class="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 transition-colors ${DASH_FOCUS} ${
             active
               ? 'text-amber-600 dark:text-amber-400'
               : 'text-gray-500 hover:text-gray-800 dark:text-slate-400 dark:hover:text-slate-200'
           }">
-            <span class="${active ? 'scale-105' : ''} transition-transform">${iconHtml}</span>
-            <span class="max-w-full truncate text-[10px] font-semibold leading-tight">${escapeHtml(label)}</span>
+            <span class="${active ? 'scale-105' : ''} transition-transform">${item.icon}</span>
+            <span class="max-w-full truncate text-[9px] font-semibold leading-tight">${escapeHtml(item.label)}</span>
           </button>`
         })
         .join('')}
@@ -599,23 +612,23 @@ export async function mountDashboardCompany(root) {
           <h2 class="text-lg font-bold ${DASH_TEXT}">${escapeHtml(td.hourlyHead)}</h2>
           <p class="text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.hourlySub)}</p>
           <div class="mt-6 space-y-4">
-            <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
-              <input type="checkbox" id="dash-hourly-enabled" class="mt-1 h-5 w-5 rounded border-gray-300 text-yellow-500 focus:ring-yellow-400" ${hourly.enabled ? 'checked' : ''} />
-              <span class="text-sm font-semibold text-gray-900">${escapeHtml(td.hourlyEnable)}</span>
+            <label class="flex cursor-pointer items-start gap-3 ${DASH_SUBCARD} p-4">
+              <input type="checkbox" id="dash-hourly-enabled" class="mt-1 h-5 w-5 rounded border-gray-300 text-yellow-500 focus:ring-yellow-400 dark:border-slate-500 dark:bg-slate-900" ${hourly.enabled ? 'checked' : ''} />
+              <span class="text-sm font-semibold ${DASH_TEXT}">${escapeHtml(td.hourlyEnable)}</span>
             </label>
             <div class="grid gap-4 sm:grid-cols-2">
               <div>
-                <label class="text-xs font-semibold text-gray-500" for="dash-hourly-rate">${escapeHtml(td.hourlyRateLabel)}</label>
-                <input type="number" id="dash-hourly-rate" min="1" step="1" value="${escapeHtml(String(hourly.rateEur))}" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                <label class="${DASH_FIELD_LABEL}" for="dash-hourly-rate">${escapeHtml(td.hourlyRateLabel)}</label>
+                <input type="number" id="dash-hourly-rate" min="1" step="1" value="${escapeHtml(String(hourly.rateEur))}" class="${DASH_PRICING_INPUT}" />
               </div>
               <div>
-                <label class="text-xs font-semibold text-gray-500" for="dash-hourly-min">${escapeHtml(td.hourlyMinLabel)}</label>
-                <input type="number" id="dash-hourly-min" min="1" step="1" value="${escapeHtml(String(hourly.minHours))}" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                <label class="${DASH_FIELD_LABEL}" for="dash-hourly-min">${escapeHtml(td.hourlyMinLabel)}</label>
+                <input type="number" id="dash-hourly-min" min="1" step="1" value="${escapeHtml(String(hourly.minHours))}" class="${DASH_PRICING_INPUT}" />
               </div>
             </div>
           </div>
-          <p id="dash-hourly-status" class="${hourly.enabled ? '' : 'hidden '}mt-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800" role="status">${hourly.enabled ? escapeHtml(td.hourlySavedOn) : ''}</p>
-          <button type="button" id="save-hourly" class="mt-4 w-full rounded-xl border-2 border-gray-900 bg-gray-900 py-3.5 text-sm font-bold text-white shadow hover:bg-gray-800">${escapeHtml(td.saveHourly)}</button>
+          <p id="dash-hourly-status" class="${hourly.enabled ? '' : 'hidden '}mt-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800 dark:border-green-500/30 dark:bg-green-950/30 dark:text-green-300" role="status">${hourly.enabled ? escapeHtml(td.hourlySavedOn) : ''}</p>
+          <button type="button" id="save-hourly" class="mt-4 w-full rounded-xl border-2 border-gray-900 bg-gray-900 py-3.5 text-sm font-bold text-white shadow hover:bg-gray-800 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700">${escapeHtml(td.saveHourly)}</button>
         </div>
       </div>`
   } else if (t === 'essential') {
@@ -628,7 +641,7 @@ export async function mountDashboardCompany(root) {
     const slogan = company.slogan || 'Fast & Reliable Service'
     const logoPreviewInner = logoOk
       ? `<img id="dash-logo-preview-img" src="${logoSrcEsc}" alt="" class="h-full w-full object-cover" decoding="async" />`
-      : `<div class="flex h-full w-full items-center justify-center bg-gray-100 text-gray-500">${icon.building2('h-10 w-10')}</div>`
+      : `<div class="flex h-full w-full items-center justify-center bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-400">${icon.building2('h-10 w-10')}</div>`
     bodyHtml = `
       <div class="${DASH_PANEL}">
         <h2 class="text-lg font-bold ${DASH_TEXT}">${td.essentialHead}</h2>
@@ -642,82 +655,82 @@ export async function mountDashboardCompany(root) {
           ${icon.arrowRight('h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400')}
         </button>
         <div class="mt-6 space-y-4">
-          <div class="rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+          <div class="${DASH_SUBCARD} p-4">
             <div class="flex flex-col gap-4 sm:flex-row sm:items-start">
               <div class="flex shrink-0 justify-center sm:justify-start">
-                <div id="dash-logo-preview-wrap" class="relative flex h-24 w-24 shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-inner">
+                <div id="dash-logo-preview-wrap" class="relative flex h-24 w-24 shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-inner dark:border-slate-600 dark:bg-slate-900">
                   ${logoPreviewInner}
                 </div>
               </div>
               <div class="min-w-0 flex-1 space-y-2">
-                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">${escapeHtml(td.logoHead)}</p>
-                <p class="text-sm leading-relaxed text-gray-600">${escapeHtml(td.logoSub)}</p>
+                <p class="text-xs font-semibold uppercase tracking-wide ${DASH_MUTED}">${escapeHtml(td.logoHead)}</p>
+                <p class="text-sm leading-relaxed text-gray-600 dark:text-slate-300">${escapeHtml(td.logoSub)}</p>
                 <div class="flex flex-wrap items-center gap-2 pt-1">
                   <input type="file" id="dash-logo-input" accept="image/jpeg,image/png,image/webp" class="sr-only" />
                   <label for="dash-logo-input" class="inline-flex min-h-[44px] cursor-pointer items-center justify-center rounded-xl bg-yellow-400 px-4 py-2.5 text-sm font-bold text-gray-900 shadow hover:bg-yellow-500">${escapeHtml(td.logoChoose)}</label>
                   ${
                     logoOk
-                      ? `<button type="button" id="dash-logo-remove" class="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-50">${escapeHtml(td.logoRemove)}</button>`
+                      ? `<button type="button" id="dash-logo-remove" class="${DASH_EDIT_BTN} min-h-[44px] px-4 py-2.5">${escapeHtml(td.logoRemove)}</button>`
                       : ''
                   }
                 </div>
-                <p class="text-xs text-gray-400">${escapeHtml(td.logoHint)}</p>
+                <p class="text-xs text-gray-400 dark:text-slate-500">${escapeHtml(td.logoHint)}</p>
               </div>
             </div>
           </div>
-          <div class="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+          <div class="flex items-center justify-between gap-4 ${DASH_SUBCARD} p-4">
             <div class="flex items-start gap-3">
-              <span class="text-emerald-600">${icon.helpCircle('h-5 w-5')}</span>
+              <span class="text-emerald-600 dark:text-emerald-400">${icon.helpCircle('h-5 w-5')}</span>
               <div>
-                <p class="text-xs text-gray-500">${td.companyName}</p>
-                <p class="font-bold text-gray-900">${escapeHtml(company.name)}</p>
+                <p class="text-xs ${DASH_MUTED}">${td.companyName}</p>
+                <p class="font-bold ${DASH_TEXT}">${escapeHtml(company.name)}</p>
               </div>
             </div>
-            <button type="button" data-edit-field="name" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}${td.edit}</button>
+            <button type="button" data-edit-field="name" class="${DASH_EDIT_BTN}">${icon.pencil('h-3 w-3')}${td.edit}</button>
           </div>
-          <div class="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+          <div class="flex items-center justify-between gap-4 ${DASH_SUBCARD} p-4">
             <div>
-              <p class="text-xs text-gray-500">${td.slogan}</p>
-              <p class="font-bold text-gray-900">${escapeHtml(slogan)}</p>
+              <p class="text-xs ${DASH_MUTED}">${td.slogan}</p>
+              <p class="font-bold ${DASH_TEXT}">${escapeHtml(slogan)}</p>
             </div>
-            <button type="button" data-edit-field="slogan" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}${td.edit}</button>
+            <button type="button" data-edit-field="slogan" class="${DASH_EDIT_BTN}">${icon.pencil('h-3 w-3')}${td.edit}</button>
           </div>
           <div class="grid gap-4 sm:grid-cols-3">
-            <div class="rounded-xl border border-gray-100 bg-white p-4">
+            <div class="rounded-xl border border-gray-100 bg-white p-4 dark:border-slate-600/50 dark:bg-slate-900/50">
               <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0">
-                  <p class="text-xs text-gray-500">${td.phone}</p>
-                  <p class="mt-1 text-sm font-semibold text-gray-900">${escapeHtml(company.phone || '—')}</p>
+                  <p class="text-xs ${DASH_MUTED}">${td.phone}</p>
+                  <p class="mt-1 text-sm font-semibold ${DASH_TEXT}">${escapeHtml(company.phone || '—')}</p>
                 </div>
-                <span class="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Locked</span>
+                <span class="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400">Locked</span>
               </div>
-              <p class="mt-2 text-[11px] text-gray-400">${td.lockedHint}</p>
+              <p class="mt-2 text-[11px] text-gray-400 dark:text-slate-500">${td.lockedHint}</p>
             </div>
-            <div class="rounded-xl border border-gray-100 bg-white p-4">
-              <p class="text-xs text-gray-500">${td.email}</p>
-              <p class="mt-1 text-sm font-semibold text-gray-900 break-all">${escapeHtml(company.email)}</p>
+            <div class="rounded-xl border border-gray-100 bg-white p-4 dark:border-slate-600/50 dark:bg-slate-900/50">
+              <p class="text-xs ${DASH_MUTED}">${td.email}</p>
+              <p class="mt-1 text-sm font-semibold ${DASH_TEXT} break-all">${escapeHtml(company.email)}</p>
             </div>
-            <div class="rounded-xl border border-gray-100 bg-white p-4">
-              <p class="text-xs text-gray-500">${td.city}</p>
-              <p class="mt-1 text-sm font-semibold text-gray-900">${escapeHtml(company.city || '—')}</p>
+            <div class="rounded-xl border border-gray-100 bg-white p-4 dark:border-slate-600/50 dark:bg-slate-900/50">
+              <p class="text-xs ${DASH_MUTED}">${td.city}</p>
+              <p class="mt-1 text-sm font-semibold ${DASH_TEXT}">${escapeHtml(company.city || '—')}</p>
             </div>
           </div>
-          <div class="rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+          <div class="${DASH_SUBCARD} p-4">
             <div class="flex items-center justify-between gap-4">
               <div>
-                <p class="text-xs text-gray-500">${td.vatLine}</p>
-                <p class="font-bold text-gray-900">${escapeHtml(company.vat_number || '—')}</p>
+                <p class="text-xs ${DASH_MUTED}">${td.vatLine}</p>
+                <p class="font-bold ${DASH_TEXT}">${escapeHtml(company.vat_number || '—')}</p>
               </div>
-              <span class="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-500">Locked</span>
+              <span class="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400">Locked</span>
             </div>
-            <p class="mt-2 text-[11px] text-gray-400">${td.lockedHintVat}</p>
+            <p class="mt-2 text-[11px] text-gray-400 dark:text-slate-500">${td.lockedHintVat}</p>
           </div>
-          <div class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+          <div class="flex flex-wrap items-center justify-between gap-4 ${DASH_SUBCARD} p-4">
             <div>
-              <p class="text-xs text-gray-500 mb-2">${td.carTypes}</p>
-              <div class="flex flex-wrap gap-2">${enabledTypeBadges || `<span class="text-xs font-semibold text-gray-500">${escapeHtml(td.noCars)}</span>`}</div>
+              <p class="text-xs ${DASH_MUTED} mb-2">${td.carTypes}</p>
+              <div class="flex flex-wrap gap-2">${enabledTypeBadges || `<span class="text-xs font-semibold ${DASH_MUTED}">${escapeHtml(td.noCars)}</span>`}</div>
             </div>
-            <button type="button" data-edit-field="contact" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700">${icon.pencil('h-3 w-3')}${td.edit}</button>
+            <button type="button" data-edit-field="contact" class="${DASH_EDIT_BTN}">${icon.pencil('h-3 w-3')}${td.edit}</button>
           </div>
         </div>
       </div>`
@@ -809,7 +822,7 @@ export async function mountDashboardCompany(root) {
             <button type="button" id="co-toggle-dark" class="${DASH_ICON_BTN} h-9 w-9" title="${escapeHtml(td.themeToggle)}" aria-label="${escapeHtml(td.themeToggle)}">
               ${dashDark ? icon.moon('h-4 w-4') : icon.sun('h-4 w-4')}
             </button>
-            <button type="button" data-dash-wa-support class="${DASH_ICON_BTN} h-9 w-9 text-emerald-600 hover:border-emerald-300 hover:text-emerald-700 dark:text-emerald-400 dark:hover:border-emerald-500/50 dark:hover:text-emerald-300" aria-label="${escapeHtml(td.taxioSupport)}" title="${escapeHtml(td.taxioSupport)}">${icon.whatsapp('h-4 w-4')}</button>
+            <button type="button" data-help class="${DASH_ICON_BTN} h-9 w-9" aria-label="${escapeHtml(td.help)}" title="${escapeHtml(td.help)}">${icon.helpCircle('h-4 w-4')}</button>
           </div>
         </div>
       </header>
@@ -891,6 +904,10 @@ export async function mountDashboardCompany(root) {
       e.preventDefault()
       openTaxioSupport()
     })
+  })
+
+  root.querySelector('[data-help]')?.addEventListener('click', () => {
+    navigate('/contact')
   })
 
   root.querySelectorAll('[data-dash-lang]').forEach((b) => {
@@ -1046,23 +1063,23 @@ export async function mountDashboardCompany(root) {
         const p = pricingRowForType(company.pricing, name) || { ...DEFAULT_PRICING[name] }
         const enabled = isPricingTypeConfigured(company.pricing, name)
         return `
-        <div class="rounded-xl border border-gray-200 p-4">
+        <div class="rounded-xl border border-gray-200 p-4 dark:border-slate-600/60 dark:bg-slate-900/50">
           <label class="flex cursor-pointer items-center gap-3">
-            <input type="checkbox" data-pricing-enable="${name}" class="h-5 w-5 rounded border-gray-300 text-yellow-500 focus:ring-yellow-400" ${enabled ? 'checked' : ''} />
-            <span class="text-base font-bold text-gray-900">${escapeHtml(name)}</span>
+            <input type="checkbox" data-pricing-enable="${name}" class="h-5 w-5 rounded border-gray-300 text-yellow-500 focus:ring-yellow-400 dark:border-slate-500 dark:bg-slate-900" ${enabled ? 'checked' : ''} />
+            <span class="text-base font-bold ${DASH_TEXT}">${escapeHtml(name)}</span>
           </label>
           <div data-pricing-fields="${name}" class="mt-4 grid gap-3 sm:grid-cols-3">
             <div>
-              <label class="text-xs text-gray-500">Start</label>
-              <input type="text" data-pcat="${name}" data-pfield="start" value="${escapeHtml(p.start)}" class="mt-1 w-full rounded-lg border border-gray-300 px-2 py-2 text-sm" />
+              <label class="${DASH_FIELD_LABEL}">Start</label>
+              <input type="text" data-pcat="${name}" data-pfield="start" value="${escapeHtml(p.start)}" class="${DASH_PRICING_INPUT}" />
             </div>
             <div>
-              <label class="text-xs text-gray-500">Per Km</label>
-              <input type="text" data-pcat="${name}" data-pfield="per_km" value="${escapeHtml(p.per_km)}" class="mt-1 w-full rounded-lg border border-gray-300 px-2 py-2 text-sm" />
+              <label class="${DASH_FIELD_LABEL}">Per Km</label>
+              <input type="text" data-pcat="${name}" data-pfield="per_km" value="${escapeHtml(p.per_km)}" class="${DASH_PRICING_INPUT}" />
             </div>
             <div>
-              <label class="text-xs text-gray-500">Initial Km</label>
-              <input type="text" data-pcat="${name}" data-pfield="initial_km" value="${escapeHtml(p.initial_km)}" class="mt-1 w-full rounded-lg border border-gray-300 px-2 py-2 text-sm" />
+              <label class="${DASH_FIELD_LABEL}">Initial Km</label>
+              <input type="text" data-pcat="${name}" data-pfield="initial_km" value="${escapeHtml(p.initial_km)}" class="${DASH_PRICING_INPUT}" />
             </div>
           </div>
         </div>`

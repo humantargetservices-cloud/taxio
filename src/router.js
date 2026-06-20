@@ -14,6 +14,7 @@ import { mountAdminDashboard } from './pages/adminDashboard.js'
 import { mountTerms, mountPrivacy, mountCompanyTerms, mountContact } from './pages/legal.js'
 import { mountTaxiDirectory } from './pages/taxiDirectory.js'
 import { resolveBookSlugForRouter } from './lib/tenant.js'
+import { ensureGenericSiteManifest, primeBookingPwaManifest } from './lib/companyPwa.js'
 import { getLocale, syncDocumentLang } from './lib/locale.js'
 import { taxioLogoImg } from './lib/taxioLogo.js'
 
@@ -34,6 +35,12 @@ function route() {
 
   const path = window.location.pathname
   const bookSlug = resolveBookSlugForRouter(path)
+
+  if (bookSlug) {
+    primeBookingPwaManifest(bookSlug)
+  } else if (path !== '/dashboard/company') {
+    ensureGenericSiteManifest()
+  }
 
   if (path === '/' || path === '') {
     if (bookSlug) {
