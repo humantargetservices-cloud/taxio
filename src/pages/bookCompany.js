@@ -20,6 +20,7 @@ import {
 } from '../lib/companyHourly.js'
 import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
 import { applyCompanyPwaIdentity, buildPwaPromptStrings, pickCompanyImageUrl, prefetchCompanyManifest, resolvePwaIconUrl } from '../lib/companyPwa.js'
+import { parseBookingAnalyticsSource, trackCompanyAnalyticsEvent } from '../lib/companyAnalytics.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const TURNSTILE_FRONT_ENABLED =
@@ -443,6 +444,17 @@ export async function mountBookCompany(root, slug) {
         <a href="/" class="mt-10 inline-flex items-center rounded-2xl bg-amber-400 px-6 py-3 text-sm font-bold text-slate-900 shadow-[0_8px_30px_rgba(251,191,36,0.25)] transition hover:bg-amber-300">${escapeHtml(tb.homeCta)}</a>
       </div>`
     return
+  }
+
+  if (!isDemo) {
+    const visitSource = parseBookingAnalyticsSource(window.location.search)
+    trackCompanyAnalyticsEvent({
+      companyId: company.id,
+      slug,
+      eventType: 'page_visit',
+      source: visitSource,
+      path: window.location.pathname,
+    })
   }
 
   const pwaIdentity = applyCompanyPwaIdentity({ context: 'booking', company, slug })
@@ -1595,6 +1607,15 @@ Estimate price: ${estimatePrice}`
     if (!company.email || mailA.classList.contains('pointer-events-none')) return
     if (!bookingContactGate(false)) {
       e.preventDefault()
+      return
+    }
+    if (!isDemo) {
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'email_click',
+        source: parseBookingAnalyticsSource(window.location.search),
+      })
     }
   })
 
@@ -1602,6 +1623,15 @@ Estimate price: ${estimatePrice}`
     if (!normalizedCompanyPhone || callA.classList.contains('pointer-events-none')) return
     if (!bookingContactGate(false)) {
       e.preventDefault()
+      return
+    }
+    if (!isDemo) {
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'call_click',
+        source: parseBookingAnalyticsSource(window.location.search),
+      })
     }
   })
 
@@ -1672,6 +1702,14 @@ Estimate price: ${estimatePrice}`
       errEl.classList.remove('hidden')
       return
     }
+
+    const waSource = parseBookingAnalyticsSource(window.location.search)
+    trackCompanyAnalyticsEvent({
+      companyId: company.id,
+      slug,
+      eventType: 'whatsapp_click',
+      source: waSource,
+    })
 
     openWaMeUrl(url)
 

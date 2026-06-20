@@ -530,6 +530,28 @@ export const translations = {
       androidStep3: 'Confirm',
       close: 'Close',
     },
+    adminAnalytics: {
+      tab: 'Analytics',
+      title: 'Company booking funnel',
+      subtitle: 'Anonymous visitor activity per company during the free promotion phase.',
+      range7d: 'Last 7 days',
+      range30d: 'Last 30 days',
+      rangeAll: 'All time',
+      sortWhatsapp: 'Sort: WhatsApp clicks',
+      sortVisits: 'Sort: Total visits',
+      totalVisits: 'Total visits',
+      qrScans: 'QR scans',
+      shareVisits: 'Shared link visits',
+      whatsappClicks: 'WhatsApp clicks',
+      callClicks: 'Call clicks',
+      emailClicks: 'Email clicks',
+      bookingIntent: 'Booking intent',
+      lastActivity: 'Last activity',
+      noActivity: 'No activity yet',
+      today: 'Today',
+      bookingLink: 'Booking link',
+      empty: 'No analytics data yet. Activity appears when visitors open booking pages.',
+    },
     registerPage: {
       registerEyebrow: 'B2B',
       title: 'Taxi Company Registration',
@@ -1126,6 +1148,28 @@ export const translations = {
       androidStep2: 'Appuyez sur Ajouter à l’écran d’accueil ou Installer',
       androidStep3: 'Confirmez',
       close: 'Fermer',
+    },
+    adminAnalytics: {
+      tab: 'Analytique',
+      title: 'Entonnoir de réservation',
+      subtitle: 'Activité anonyme par entreprise pendant la phase promotionnelle gratuite.',
+      range7d: '7 derniers jours',
+      range30d: '30 derniers jours',
+      rangeAll: 'Tout',
+      sortWhatsapp: 'Tri : clics WhatsApp',
+      sortVisits: 'Tri : visites totales',
+      totalVisits: 'Visites totales',
+      qrScans: 'Scans QR',
+      shareVisits: 'Visites lien partagé',
+      whatsappClicks: 'Clics WhatsApp',
+      callClicks: 'Clics appel',
+      emailClicks: 'Clics e-mail',
+      bookingIntent: 'Intention de réservation',
+      lastActivity: 'Dernière activité',
+      noActivity: 'Aucune activité',
+      today: "Aujourd'hui",
+      bookingLink: 'Page de réservation',
+      empty: 'Pas encore de données. L’activité apparaît quand des visiteurs ouvrent une page.',
     },
     registerPage: {
       registerEyebrow: 'B2B',
@@ -1724,6 +1768,28 @@ export const translations = {
       androidStep3: 'Bevestig',
       close: 'Sluiten',
     },
+    adminAnalytics: {
+      tab: 'Analytics',
+      title: 'Boekingsfunnel',
+      subtitle: 'Anonieme activiteit per bedrijf tijdens de gratis promotiefase.',
+      range7d: 'Laatste 7 dagen',
+      range30d: 'Laatste 30 dagen',
+      rangeAll: 'Alles',
+      sortWhatsapp: 'Sorteer: WhatsApp-kliks',
+      sortVisits: 'Sorteer: totale bezoeken',
+      totalVisits: 'Totaal bezoeken',
+      qrScans: 'QR-scans',
+      shareVisits: 'Gedeelde link-bezoeken',
+      whatsappClicks: 'WhatsApp-kliks',
+      callClicks: 'Bel-kliks',
+      emailClicks: 'E-mail-kliks',
+      bookingIntent: 'Boekingsintentie',
+      lastActivity: 'Laatste activiteit',
+      noActivity: 'Nog geen activiteit',
+      today: 'Vandaag',
+      bookingLink: 'Boekingspagina',
+      empty: 'Nog geen gegevens. Activiteit verschijnt wanneer bezoekers een pagina openen.',
+    },
     registerPage: {
       registerEyebrow: 'B2B',
       title: 'Taxi Bedrijf Registratie',
@@ -1811,6 +1877,13 @@ export function tBooking(lang) {
   const L = normalizeLocale(lang)
   const base = translations.en.bookingPage || {}
   const loc = translations[L]?.bookingPage || {}
+  return { ...base, ...loc }
+}
+
+export function tAdminAnalytics(lang) {
+  const L = normalizeLocale(lang)
+  const base = translations.en.adminAnalytics || {}
+  const loc = translations[L]?.adminAnalytics || {}
   return { ...base, ...loc }
 }
 

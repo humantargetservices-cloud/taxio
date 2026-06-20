@@ -129,3 +129,41 @@ export function absolutePublicBookingUrl(slug) {
 export function companyDashboardPath() {
   return '/dashboard/company'
 }
+
+/** Short tracking redirect path: /r/:slug?src=qr|share */
+export function companyAnalyticsRedirectPath(slug, src) {
+  const normalized = String(slug || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+  if (!normalized) return '/'
+  const q = src === 'qr' || src === 'share' ? `?src=${encodeURIComponent(src)}` : ''
+  return `/r/${encodeURIComponent(normalized)}${q}`
+}
+
+/** Absolute URL for QR codes / share links that record analytics before redirect. */
+export function absoluteAnalyticsRedirectUrl(slug, src) {
+  const path = companyAnalyticsRedirectPath(slug, src)
+  const root = bookingRootDomain()
+  if (root) return `https://www.${root}${path}`
+  if (typeof window !== 'undefined') return `${window.location.origin}${path}`
+  return path
+}
+
+/** Booking page URL preserving src=qr|share after redirect. */
+export function bookingPageUrlWithSource(slug, src) {
+  const normalized = String(slug || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+  if (!normalized) return '/'
+  const q = src === 'qr' || src === 'share' ? `?src=${encodeURIComponent(src)}` : ''
+  const root = bookingRootDomain()
+  if (root && normalized.length >= 2) {
+    return `https://${normalized}.${root}${q}`
+  }
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}${bookPathFromSlug(normalized)}${q}`
+  }
+  return `${bookPathFromSlug(normalized)}${q}`
+}

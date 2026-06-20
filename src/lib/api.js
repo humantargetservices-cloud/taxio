@@ -10,7 +10,7 @@ export const DEFAULT_PRICING = {
 
 const apiBase = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 
-function apiUrl(path) {
+export function apiUrl(path) {
   return `${apiBase}${path}`
 }
 
@@ -687,6 +687,21 @@ export async function countCarsByCompanyIdsAdmin() {
     map[r.company_id] = (map[r.company_id] || 0) + 1
   }
   return map
+}
+
+export async function fetchAdminCompanyAnalytics(range = '30d') {
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return { error: new Error('You must be signed in as admin.'), companies: [] }
+
+  const r = encodeURIComponent(String(range || '30d'))
+  const res = await fetch(apiUrl(`/api/admin-company-analytics?range=${r}`), {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) return { error: new Error(json.error || 'Failed to load analytics.'), companies: [] }
+  return { error: null, companies: json.companies || [], range: json.range || range }
 }
 
 /** Public directory: approved companies (RLS allows SELECT where status = approved). */

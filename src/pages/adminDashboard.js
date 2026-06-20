@@ -15,6 +15,7 @@ import {
   deleteCompanyAsAdmin,
   adminSendCommunicationEmail,
   devCleanupTestCompanies,
+  fetchAdminCompanyAnalytics,
 } from '../lib/api.js'
 import { slugFromCompanyName } from '../lib/slug.js'
 import { isPlatformAdmin, signOutEverywhere } from '../lib/auth.js'
@@ -22,10 +23,14 @@ import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
+import { getLocale } from '../lib/locale.js'
+import { tAdminAnalytics } from '../i18n.js'
 
 const adminState = {
   tab: 'requests',
   editBaseline: null,
+  analyticsRange: '30d',
+  analyticsSort: 'whatsapp',
   /** approved | pending | inactive | all */
   commAudience: 'approved',
   commSelected: [],
@@ -129,6 +134,16 @@ function waMeDigits(phone) {
   return d
 }
 
+function formatAnalyticsLastActivity(iso, ta) {
+  if (!iso) return ta.noActivity
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ta.noActivity
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (d >= todayStart) return ta.today
+  return d.toISOString().slice(0, 10)
+}
+
 function fillCommTemplate(company, template, origin) {
   const loginUrl = `${origin}${LOGIN_ACTION_URL}`
   const bookingUrl =
@@ -212,6 +227,9 @@ export async function mountAdminDashboard(root) {
   let carMap = {}
   let recentBookings = []
   let abuseEvents = []
+  let analyticsCompanies = []
+  let analyticsError = null
+  const ta = tAdminAnalytics(getLocale())
   try {
     companies = await listAllCompaniesForAdmin()
   } catch {
@@ -236,6 +254,22 @@ export async function mountAdminDashboard(root) {
     abuseEvents = await listAbuseRateEventsForAdmin(24)
   } catch {
     abuseEvents = []
+  }
+
+  const tabPrefetch = adminState.tab
+  if (tabPrefetch === 'analytics') {
+    try {
+      const { companies: rows, error } = await fetchAdminCompanyAnalytics(adminState.analyticsRange)
+      if (error) {
+        analyticsError = error.message || 'Failed to load analytics.'
+        analyticsCompanies = []
+      } else {
+        analyticsCompanies = rows || []
+      }
+    } catch (e) {
+      analyticsError = e?.message || 'Failed to load analytics.'
+      analyticsCompanies = []
+    }
   }
 
   const pending = companies.filter((c) => c.status === 'pending')
@@ -315,8 +349,14 @@ export async function mountAdminDashboard(root) {
       return { name: c?.name || id.slice(0, 8), count }
     })
 
-  if (!['requests', 'active', 'subscriptions', 'communication'].includes(adminState.tab)) {
+  if (!['requests', 'active', 'subscriptions', 'analytics', 'communication'].includes(adminState.tab)) {
     adminState.tab = 'requests'
+  }
+  if (!['7d', '30d', 'all'].includes(adminState.analyticsRange)) {
+    adminState.analyticsRange = '30d'
+  }
+  if (!['whatsapp', 'visits'].includes(adminState.analyticsSort)) {
+    adminState.analyticsSort = 'whatsapp'
   }
   if (!['approved', 'pending', 'inactive', 'all'].includes(adminState.commAudience)) {
     adminState.commAudience = 'approved'
@@ -523,6 +563,94 @@ export async function mountAdminDashboard(root) {
             <li>Example: Premium + 8 cars = €50 + €40 = €90/month</li>
           </ul>
         </div>
+      </div>`
+  } else if (tab === 'analytics') {
+    const range = adminState.analyticsRange
+    const sort = adminState.analyticsSort
+    let rows = [...analyticsCompanies]
+    if (sort === 'visits') {
+      rows.sort((a, b) => b.page_visits - a.page_visits || b.whatsapp_clicks - a.whatsapp_clicks)
+    } else {
+      rows.sort((a, b) => b.whatsapp_clicks - a.whatsapp_clicks || b.page_visits - a.page_visits)
+    }
+    const withActivity = rows.filter(
+      (r) =>
+        r.page_visits > 0 ||
+        r.qr_scans > 0 ||
+        r.share_visits > 0 ||
+        r.whatsapp_clicks > 0 ||
+        r.call_clicks > 0 ||
+        r.email_clicks > 0
+    )
+    const displayRows = withActivity.length > 0 ? withActivity : rows.filter((r) => r.status === 'approved')
+
+    const rangeBtn = (value, label) =>
+      `<button type="button" data-adm-analytics-range="${value}" class="rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+        range === value ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+      }">${escapeHtml(label)}</button>`
+
+    const cards =
+      displayRows.length === 0
+        ? `<p class="py-12 text-center text-sm text-gray-500">${escapeHtml(ta.empty)}</p>`
+        : displayRows
+            .map((r) => {
+              const booking =
+                r.status === 'approved' && r.slug ? absolutePublicBookingUrl(r.slug) : ''
+              const intent = `${r.booking_intent_rate || 0}%`
+              return `
+        <article class="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 class="text-lg font-bold text-gray-900">${escapeHtml(r.name || '—')}</h3>
+              <p class="mt-0.5 text-xs text-gray-500">${escapeHtml(statusLabel(r.status))}${r.slug ? ` · /${escapeHtml(r.slug)}` : ''}</p>
+              ${
+                booking
+                  ? `<a href="${escapeHtml(booking)}" target="_blank" rel="noopener noreferrer" class="mt-1 inline-block text-xs font-medium text-amber-700 underline decoration-amber-200 underline-offset-2 hover:text-amber-800">${escapeHtml(ta.bookingLink)}</a>`
+                  : ''
+              }
+            </div>
+            <p class="text-xs text-gray-500">${escapeHtml(ta.lastActivity)}: <span class="font-semibold text-gray-800">${escapeHtml(formatAnalyticsLastActivity(r.last_activity_at, ta))}</span></p>
+          </div>
+          <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
+            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.totalVisits)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.page_visits}</dd></div>
+            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.qrScans)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.qr_scans}</dd></div>
+            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.shareVisits)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.share_visits}</dd></div>
+            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.whatsappClicks)}</dt><dd class="text-lg font-bold tabular-nums text-amber-700">${r.whatsapp_clicks}</dd></div>
+            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.callClicks)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.call_clicks}</dd></div>
+            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.emailClicks)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.email_clicks}</dd></div>
+            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.bookingIntent)}</dt><dd class="text-lg font-bold tabular-nums text-emerald-700">${intent}</dd></div>
+          </dl>
+        </article>`
+            })
+            .join('')
+
+    mainHtml = `
+      <div class="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg">
+        ${
+          analyticsError
+            ? `<div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">${escapeHtml(analyticsError)}</div>`
+            : ''
+        }
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-gray-900">${escapeHtml(ta.title)}</h2>
+            <p class="mt-1 text-sm text-gray-500">${escapeHtml(ta.subtitle)}</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            ${rangeBtn('7d', ta.range7d)}
+            ${rangeBtn('30d', ta.range30d)}
+            ${rangeBtn('all', ta.rangeAll)}
+          </div>
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button type="button" data-adm-analytics-sort="whatsapp" class="rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+            sort === 'whatsapp' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600'
+          }">${escapeHtml(ta.sortWhatsapp)}</button>
+          <button type="button" data-adm-analytics-sort="visits" class="rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+            sort === 'visits' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600'
+          }">${escapeHtml(ta.sortVisits)}</button>
+        </div>
+        <div class="mt-6 grid gap-4 lg:grid-cols-2">${cards}</div>
       </div>`
   } else if (tab === 'communication') {
     const rejected = companies.filter((c) => c.status === 'rejected')
@@ -907,6 +1035,7 @@ export async function mountAdminDashboard(root) {
           ${tabBtn('requests', 'Company Requests')}
           ${tabBtn('active', 'Active Companies')}
           ${tabBtn('subscriptions', 'Subscriptions & Revenue')}
+          ${tabBtn('analytics', ta.tab)}
           ${tabBtn('communication', 'Communication')}
           </div>
         </div>
@@ -1025,6 +1154,20 @@ export async function mountAdminDashboard(root) {
   root.querySelectorAll('[data-adm-tab]').forEach((b) => {
     b.addEventListener('click', () => {
       adminState.tab = b.getAttribute('data-adm-tab')
+      mountAdminDashboard(root)
+    })
+  })
+
+  root.querySelectorAll('[data-adm-analytics-range]').forEach((b) => {
+    b.addEventListener('click', () => {
+      adminState.analyticsRange = b.getAttribute('data-adm-analytics-range')
+      mountAdminDashboard(root)
+    })
+  })
+
+  root.querySelectorAll('[data-adm-analytics-sort]').forEach((b) => {
+    b.addEventListener('click', () => {
+      adminState.analyticsSort = b.getAttribute('data-adm-analytics-sort')
       mountAdminDashboard(root)
     })
   })

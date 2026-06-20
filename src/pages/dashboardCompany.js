@@ -18,7 +18,7 @@ import { signOutEverywhere } from '../lib/auth.js'
 import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
-import { absolutePublicBookingUrl } from '../lib/tenant.js'
+import { absoluteAnalyticsRedirectUrl, absolutePublicBookingUrl } from '../lib/tenant.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 import {
@@ -546,7 +546,8 @@ export async function mountDashboardCompany(root) {
     ? `${td.vatLine} ${escapeHtml(company.vat_number)}`
     : `${td.vatLine} —`
   const bookPublicUrl = absolutePublicBookingUrl(company.slug)
-  const bookingQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(bookPublicUrl)}`
+  const qrTrackUrl = absoluteAnalyticsRedirectUrl(company.slug, 'qr')
+  const bookingQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(qrTrackUrl)}`
   let previewDone = false
   let qrRequested = false
   try {

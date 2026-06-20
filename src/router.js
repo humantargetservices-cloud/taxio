@@ -9,6 +9,7 @@ import { mountDashboardCompany } from './pages/dashboardCompany.js'
 import { mountChangePasswordCompany } from './pages/changePasswordCompany.js'
 import { mountOnboardingCompany } from './pages/onboardingCompany.js'
 import { mountBookCompany } from './pages/bookCompany.js'
+import { mountCompanyAnalyticsRedirect } from './pages/companyAnalyticsRedirect.js'
 import { mountAdminLogin } from './pages/adminLogin.js'
 import { mountAdminDashboard } from './pages/adminDashboard.js'
 import { mountTerms, mountPrivacy, mountCompanyTerms, mountContact } from './pages/legal.js'
@@ -51,6 +52,18 @@ function route() {
     } else {
       mountLanding(root)
     }
+    return
+  }
+  if (path.startsWith('/r/')) {
+    const redirectSlug = decodeURIComponent(path.slice(3).split('/')[0] || '').trim()
+    if (redirectSlug) {
+      mountCompanyAnalyticsRedirect(root, redirectSlug).catch((err) => {
+        console.error(err)
+        mountNotFound(root)
+      })
+      return
+    }
+    mountNotFound(root)
     return
   }
   if (path === '/register') {
