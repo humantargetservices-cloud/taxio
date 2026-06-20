@@ -46,8 +46,11 @@ const dashState = {
   qrOpen: false,
 }
 
+const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
 const DASH_SHELL =
-  'min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200/70 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] sm:pb-10 dark:from-[#06080f] dark:via-slate-950 dark:to-[#0a0f1a]'
+  `min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200/70 pb-[calc(${DASH_MOBILE_NAV_HEIGHT}+env(safe-area-inset-bottom,0px)+1.5rem)] sm:pb-10 dark:from-[#06080f] dark:via-slate-950 dark:to-[#0a0f1a]`
+const DASH_PWA_PROMPT_BOTTOM =
+  `bottom-[calc(${DASH_MOBILE_NAV_HEIGHT}+env(safe-area-inset-bottom,0px)+1rem)] sm:bottom-4`
 const DASH_HEADER =
   'border-b border-gray-200/80 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04)] backdrop-blur-lg dark:border-slate-800/80 dark:bg-slate-950/90 dark:shadow-[0_1px_0_rgba(255,255,255,0.04)]'
 const DASH_TAB_BAR = 'border-t border-gray-100 bg-[#eef0f3] dark:border-slate-700/60 dark:bg-slate-900/50'
@@ -811,7 +814,7 @@ export async function mountDashboardCompany(root) {
         </div>
       </header>
 
-      <main class="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+      <main class="mx-auto max-w-6xl px-3 py-4 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px)+0.5rem)] sm:px-4 sm:py-6 sm:pb-6">
         <p id="dash-msg" class="mb-4 hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"></p>
         ${bodyHtml}
       </main>
@@ -1351,5 +1354,6 @@ export async function mountDashboardCompany(root) {
     iconUrl: resolvePwaIconUrl(company),
     strings: buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name),
     requireManifestReady: true,
+    fixedBottomClass: DASH_PWA_PROMPT_BOTTOM,
   })
 }

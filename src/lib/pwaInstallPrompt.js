@@ -253,10 +253,11 @@ function applyBannerInstallMode(el, strings, mode) {
   el.dataset.taxioPwaMode = mode
 }
 
-function renderBanner({ strings, context, slug, iconUrl, mode, onDismiss, onInstallClick }) {
+function renderBanner({ strings, context, slug, iconUrl, mode, onDismiss, onInstallClick, fixedBottomClass }) {
   const platform = detectInstallPlatform()
   const resolvedMode = mode || resolveInstallButtonMode(platform)
   const primaryLabel = primaryLabelForMode(strings, resolvedMode)
+  const bottomPos = fixedBottomClass || 'bottom-3 sm:bottom-4'
 
   if (resolvedMode === 'native') pwaLog('showing native install button')
   if (resolvedMode === 'fallback') pwaLog('showing fallback instructions after timeout')
@@ -265,7 +266,7 @@ function renderBanner({ strings, context, slug, iconUrl, mode, onDismiss, onInst
   el.id = 'taxio-pwa-prompt'
   el.dataset.taxioPwaMode = resolvedMode
   el.className =
-    'pointer-events-none fixed bottom-3 left-3 right-3 z-[35] mx-auto max-w-lg translate-y-3 opacity-0 transition-all duration-500 ease-out sm:bottom-4'
+    `pointer-events-none fixed left-3 right-3 z-[35] mx-auto max-w-lg translate-y-3 opacity-0 transition-all duration-500 ease-out ${bottomPos}`
   el.setAttribute('role', 'region')
   el.setAttribute('aria-label', strings.title)
   el.innerHTML = `
@@ -371,7 +372,7 @@ export function initPwaInstallPrompt(options) {
 
   if (typeof window === 'undefined' || typeof document === 'undefined') return () => {}
 
-  const { context, slug, strings: rawStrings, iconUrl } = options
+  const { context, slug, strings: rawStrings, iconUrl, fixedBottomClass } = options
   const variant = options.variant || context
   const strings = pickStrings(rawStrings, variant)
   const requireManifestReady = options.requireManifestReady !== false
@@ -425,6 +426,7 @@ export function initPwaInstallPrompt(options) {
       slug,
       iconUrl,
       mode,
+      fixedBottomClass,
       onDismiss: () => {
         activeCleanup = null
         bannerEl = null
