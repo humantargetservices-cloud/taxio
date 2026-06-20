@@ -14,6 +14,7 @@ let activeCleanup = null
 let pwaManifestReady = false
 let serviceWorkerReady = false
 let serviceWorkerReadyPromise = null
+let activeInitSignature = null
 const installPromptListeners = new Set()
 
 /** @returns {'native'|'preparing'|'fallback'} */
@@ -258,6 +259,7 @@ function renderBanner({ strings, context, slug, iconUrl, mode, onDismiss, onInst
   const resolvedMode = mode || resolveInstallButtonMode(platform)
   const primaryLabel = primaryLabelForMode(strings, resolvedMode)
   const bottomPos = fixedBottomClass || 'bottom-3 sm:bottom-4'
+  const zClass = fixedBottomClass ? 'z-[45]' : 'z-[35]'
 
   if (resolvedMode === 'native') pwaLog('showing native install button')
   if (resolvedMode === 'fallback') pwaLog('showing fallback instructions after timeout')
@@ -266,7 +268,7 @@ function renderBanner({ strings, context, slug, iconUrl, mode, onDismiss, onInst
   el.id = 'taxio-pwa-prompt'
   el.dataset.taxioPwaMode = resolvedMode
   el.className =
-    `pointer-events-none fixed left-3 right-3 z-[35] mx-auto max-w-lg translate-y-3 opacity-0 transition-all duration-500 ease-out ${bottomPos}`
+    `pointer-events-none fixed left-3 right-3 ${zClass} mx-auto max-w-lg translate-y-3 opacity-0 transition-all duration-500 ease-out ${bottomPos}`
   el.setAttribute('role', 'region')
   el.setAttribute('aria-label', strings.title)
   el.innerHTML = `
@@ -367,10 +369,19 @@ export function initPwaInstallPrompt(options) {
     return () => {}
   }
 
+  const sig = `${options.context}:${options.slug || ''}:${options.requireManifestReady !== false}`
+  if (activeInitSignature === sig && activeCleanup) {
+    return activeCleanup
+  }
+
   activeCleanup?.()
   activeCleanup = null
+  activeInitSignature = sig
 
-  if (typeof window === 'undefined' || typeof document === 'undefined') return () => {}
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    activeInitSignature = null
+    return () => {}
+  }
 
   const { context, slug, strings: rawStrings, iconUrl, fixedBottomClass } = options
   const variant = options.variant || context
@@ -381,8 +392,14 @@ export function initPwaInstallPrompt(options) {
 
   pwaLog('platform:', platform === 'android' && chromium ? 'android/chromium' : platform)
 
-  if (isStandaloneMode()) return () => {}
-  if (isPromptDismissed(context, slug)) return () => {}
+  if (isStandaloneMode()) {
+    activeInitSignature = null
+    return () => {}
+  }
+  if (isPromptDismissed(context, slug)) {
+    activeInitSignature = null
+    return () => {}
+  }
 
   let shown = false
   let nativeWaitDone = false
@@ -558,7 +575,10 @@ export function initPwaInstallPrompt(options) {
       installPromptListeners.delete(uninstallPromptListener)
     }
     if (!shown) removePromptEl()
-    if (activeCleanup === cleanup) activeCleanup = null
+    if (activeCleanup === cleanup) {
+      activeCleanup = null
+      activeInitSignature = null
+    }
   }
 
   activeCleanup = cleanup
