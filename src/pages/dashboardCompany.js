@@ -47,7 +47,7 @@ const dashState = {
 }
 
 const DASH_SHELL =
-  'min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200/70 pb-10 dark:from-[#06080f] dark:via-slate-950 dark:to-[#0a0f1a]'
+  'min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200/70 pb-[calc(5rem+env(safe-area-inset-bottom,0px))] sm:pb-10 dark:from-[#06080f] dark:via-slate-950 dark:to-[#0a0f1a]'
 const DASH_HEADER =
   'border-b border-gray-200/80 bg-white/90 shadow-[0_1px_0_rgba(15,23,42,0.04)] backdrop-blur-lg dark:border-slate-800/80 dark:bg-slate-950/90 dark:shadow-[0_1px_0_rgba(255,255,255,0.04)]'
 const DASH_TAB_BAR = 'border-t border-gray-100 bg-[#eef0f3] dark:border-slate-700/60 dark:bg-slate-900/50'
@@ -119,6 +119,32 @@ function drawerNavItem(tabId, label, current) {
       ? 'border-l-[3px] border-amber-400 bg-gradient-to-r from-amber-400/15 to-transparent pl-[calc(0.75rem-3px)] font-semibold text-amber-200'
       : 'border-l-[3px] border-transparent text-slate-400 hover:bg-slate-800/60 hover:text-slate-100'
   }">${escapeHtml(label)}</button>`
+}
+
+function renderMobileBottomNav(td, currentTab) {
+  const items = [
+    { id: 'overview', label: td.navHome, icon: icon.home('h-5 w-5') },
+    { id: 'cars', label: td.navFleet, icon: icon.car('h-5 w-5') },
+    { id: 'ride-requests', label: td.navRequests, icon: icon.messageCircle('h-5 w-5') },
+    { id: 'essential', label: td.navAccount, icon: icon.building2('h-5 w-5') },
+  ]
+  return `<nav id="dash-bottom-nav" class="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200/90 bg-white/95 shadow-[0_-4px_24px_rgba(15,23,42,0.08)] backdrop-blur-md sm:hidden dark:border-slate-700/70 dark:bg-slate-950/95 dark:shadow-[0_-8px_32px_rgba(0,0,0,0.45)]" aria-label="${escapeHtml(td.drawerNavLabel)}">
+    <div class="mx-auto flex h-[4.25rem] max-w-6xl items-stretch justify-around pb-[env(safe-area-inset-bottom,0px)]">
+      ${items
+        .map(({ id, label, icon: iconHtml }) => {
+          const active = id === currentTab
+          return `<button type="button" data-dash-tab="${id}" class="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 transition-colors ${DASH_FOCUS} ${
+            active
+              ? 'text-amber-600 dark:text-amber-400'
+              : 'text-gray-500 hover:text-gray-800 dark:text-slate-400 dark:hover:text-slate-200'
+          }">
+            <span class="${active ? 'scale-105' : ''} transition-transform">${iconHtml}</span>
+            <span class="max-w-full truncate text-[10px] font-semibold leading-tight">${escapeHtml(label)}</span>
+          </button>`
+        })
+        .join('')}
+    </div>
+  </nav>`
 }
 
 function renderDrawer(td, currentTab, companyName, avail, open) {
@@ -604,6 +630,14 @@ export async function mountDashboardCompany(root) {
       <div class="${DASH_PANEL}">
         <h2 class="text-lg font-bold ${DASH_TEXT}">${td.essentialHead}</h2>
         <p class="text-sm ${DASH_MUTED}">${td.essentialSub}</p>
+        <button type="button" data-dash-wa-support class="mt-4 flex w-full items-center gap-3 rounded-xl border border-emerald-200/90 bg-emerald-50/90 px-4 py-3.5 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:hover:border-emerald-400/40 dark:hover:bg-emerald-950/50 ${DASH_FOCUS}">
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-sm">${icon.whatsapp('h-5 w-5')}</span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-sm font-bold text-emerald-900 dark:text-emerald-100">${escapeHtml(td.taxioSupport)}</span>
+            <span class="mt-0.5 block text-xs text-emerald-700/90 dark:text-emerald-300/90">${escapeHtml(td.setupHelpShort)}</span>
+          </span>
+          ${icon.arrowRight('h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400')}
+        </button>
         <div class="mt-6 space-y-4">
           <div class="rounded-xl border border-gray-100 bg-gray-50/80 p-4">
             <div class="flex flex-col gap-4 sm:flex-row sm:items-start">
@@ -772,7 +806,7 @@ export async function mountDashboardCompany(root) {
             <button type="button" id="co-toggle-dark" class="${DASH_ICON_BTN} h-9 w-9" title="${escapeHtml(td.themeToggle)}" aria-label="${escapeHtml(td.themeToggle)}">
               ${dashDark ? icon.moon('h-4 w-4') : icon.sun('h-4 w-4')}
             </button>
-            <button type="button" data-help class="${DASH_ICON_BTN} h-9 w-9" aria-label="${escapeHtml(td.help)}">${icon.helpCircle('h-4 w-4')}</button>
+            <button type="button" data-dash-wa-support class="${DASH_ICON_BTN} h-9 w-9 text-emerald-600 hover:border-emerald-300 hover:text-emerald-700 dark:text-emerald-400 dark:hover:border-emerald-500/50 dark:hover:text-emerald-300" aria-label="${escapeHtml(td.taxioSupport)}" title="${escapeHtml(td.taxioSupport)}">${icon.whatsapp('h-4 w-4')}</button>
           </div>
         </div>
       </header>
@@ -782,7 +816,7 @@ export async function mountDashboardCompany(root) {
         ${bodyHtml}
       </main>
 
-      <footer class="mx-auto max-w-6xl px-4 pb-8 text-center text-xs text-gray-500 dark:text-slate-500">
+      <footer class="mx-auto max-w-6xl px-4 pb-6 pt-2 text-center text-xs text-gray-500 sm:pb-8 dark:text-slate-500">
         <p>© 2026 TAXIO</p>
         <p class="mt-2">
           <a href="/terms" class="font-medium text-gray-700 underline decoration-gray-300 underline-offset-2 hover:text-gray-900 dark:text-slate-300 dark:decoration-slate-600 dark:hover:text-white">${translations[dashLang]?.footerTerms || 'Terms'}</a>
@@ -791,6 +825,7 @@ export async function mountDashboardCompany(root) {
       </footer>
 
       ${renderQrSheet(td, bookPublicUrl, bookingQrSrc, dashState.qrOpen)}
+      ${renderMobileBottomNav(td, t)}
       <div id="dash-modal-root"></div>
     </div>`
 
@@ -839,8 +874,20 @@ export async function mountDashboardCompany(root) {
     navigate('/')
   })
 
-  root.querySelector('[data-help]')?.addEventListener('click', () => {
-    navigate('/contact')
+  function openTaxioSupport() {
+    const url = buildTaxioSupportWaUrl({
+      companyName: company.name,
+      bookingUrl: bookPublicUrl,
+      locale: dashLang,
+    })
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  root.querySelectorAll('[data-dash-wa-support]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault()
+      openTaxioSupport()
+    })
   })
 
   root.querySelectorAll('[data-dash-lang]').forEach((b) => {
@@ -891,12 +938,7 @@ export async function mountDashboardCompany(root) {
       return
     }
     if (action === 'support') {
-      const url = buildTaxioSupportWaUrl({
-        companyName: company.name,
-        bookingUrl: bookPublicUrl,
-        locale,
-      })
-      window.open(url, '_blank', 'noopener,noreferrer')
+      openTaxioSupport()
     }
   }
 

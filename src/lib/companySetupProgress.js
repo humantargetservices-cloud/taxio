@@ -50,18 +50,18 @@ export function buildTaxioSupportWaUrl({ companyName, bookingUrl, locale = 'en' 
   const lines =
     locale === 'nl'
       ? [
-          'Hallo TAXIO, ik heb hulp nodig bij het instellen van mijn boekingspagina.',
+          'Hallo TAXIO, ik heb hulp nodig met mijn dashboard.',
           `Bedrijf: ${companyName}`,
           `Boekingspagina: ${bookingUrl}`,
         ]
       : locale === 'fr'
         ? [
-            "Bonjour TAXIO, j'ai besoin d'aide pour configurer ma page de réservation.",
+            "Bonjour TAXIO, j'ai besoin d'aide avec mon tableau de bord.",
             `Entreprise : ${companyName}`,
             `Page de réservation : ${bookingUrl}`,
           ]
         : [
-            'Hello TAXIO, I need help configuring my booking page.',
+            'Hello TAXIO, I need help with my dashboard.',
             `Company: ${companyName}`,
             `Booking page: ${bookingUrl}`,
           ]
