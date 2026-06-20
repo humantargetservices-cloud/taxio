@@ -3,7 +3,7 @@ import {
   createQuickBookingLog,
 } from '../lib/api.js'
 import { TERMS_VERSION_BOOKING_RIDER } from '../lib/legalVersions.js'
-import { hasExplicitVehicleTypeConfig, resolveBookingVehicleTypes } from '../lib/bookingCarTypes.js'
+import { resolveBookingVehicleTypes } from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
@@ -460,12 +460,10 @@ export async function mountBookCompany(root, slug) {
   const bookingVehicles = resolveBookingVehicleTypes(company)
   const carTypes = bookingVehicles.map((v) => v.type)
   const effectivePricing = Object.fromEntries(bookingVehicles.map((v) => [v.type, v.pricing]))
-  if (typeof console !== 'undefined' && console.warn) {
-    console.warn('[taxio-booking] resolved vehicle types:', carTypes.join(', ') || 'Standard')
+  if (import.meta.env.DEV && typeof console !== 'undefined') {
+    console.log('[taxio-booking] vehicle types resolved:', carTypes.join(', ') || 'Standard')
   }
-  const hasMultipleCarTypes = carTypes.length > 1
-  const showCarTypeChooser = hasMultipleCarTypes
-  const showVehicleSection = showCarTypeChooser || hasExplicitVehicleTypeConfig(company.pricing)
+  const showCarTypeChooser = carTypes.length > 1
   const tb = tBooking(getLocale())
   const hourlyCfg = companyHourlyFromRecord(company)
   const hourlyOffered = hourlyCfg.enabled && !isDemo
@@ -488,7 +486,7 @@ export async function mountBookCompany(root, slug) {
     ? `<button type="button" id="bk-locate-pickup" class="absolute right-1 top-1/2 z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-xl text-emerald-600 transition hover:bg-emerald-50 active:bg-emerald-100/90 dark:text-emerald-400 dark:hover:bg-emerald-400/10 dark:active:bg-emerald-400/15" title="${escapeHtml(tb.locateMeTitle)}" aria-label="${escapeHtml(tb.locateMeAria)}">${icon.crosshair('h-[19px] w-[19px]')}</button>`
     : ''
 
-  const bkCarOptsHtml = !hasMultipleCarTypes
+  const bkCarOptsHtml = !showCarTypeChooser
     ? ''
     : carTypes
         .map((t) => {
@@ -509,31 +507,20 @@ export async function mountBookCompany(root, slug) {
         </div>`
     : ''
 
-  const vehicleSectionHtml = showVehicleSection
+  const vehicleSectionHtml = showCarTypeChooser
     ? `<div id="bk-car-wrap" class="relative z-[45]">
-          ${showCarTypeChooser ? `<p class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.chooseCarType)}</p>` : ''}
-          ${
-            showCarTypeChooser
-              ? `<button type="button" id="bk-car-trigger" class="mt-2 flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border-2 border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-amber-300/80 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600 dark:bg-slate-800/90 dark:hover:border-amber-400/40 dark:focus:ring-amber-400/25" aria-expanded="false" aria-haspopup="listbox" aria-controls="bk-car-panel">
-                  <span id="bk-car-trigger-icon" class="flex shrink-0">${bookingCarTypeIconHtml(defaultSelectedCar, 'h-7 w-7')}</span>
-                  <span class="min-w-0 flex-1">
-                    <span id="bk-car-trigger-name" class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(bookingCarTypeLabel(defaultSelectedCar, tb))}</span>
-                    <span id="bk-car-trigger-seats" class="mt-0.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">${escapeHtml(bookingCarTypeSeatsLabel(defaultSelectedCar))}</span>
-                  </span>
-                  <span id="bk-car-chevron" class="shrink-0 text-slate-400 transition-transform duration-200 dark:text-slate-500">${icon.chevronDown('h-5 w-5')}</span>
-                </button>
-                <div id="bk-car-panel" class="pointer-events-auto absolute left-0 right-0 top-full z-[80] mt-1.5 hidden max-h-[min(22rem,55vh)] overflow-y-auto overflow-x-hidden rounded-xl border border-slate-200 bg-white py-0.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/[0.06] dark:border-slate-600 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/10" role="listbox" aria-label="${escapeHtml(tb.carTypesListAria)}">
-                  ${bkCarOptsHtml}
-                </div>`
-              : `<div class="mt-2 flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border-2 border-amber-300/70 bg-amber-50/70 px-4 py-3 text-left shadow-sm ring-1 ring-amber-200/60 dark:border-amber-400/35 dark:bg-amber-400/10 dark:ring-amber-400/15" aria-label="${escapeHtml(bookingCarTypeLabel(defaultSelectedCar, tb))}">
-                  <span class="flex shrink-0">${bookingCarTypeIconHtml(defaultSelectedCar, 'h-7 w-7')}</span>
-                  <span class="min-w-0 flex-1">
-                    <span class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(bookingCarTypeLabel(defaultSelectedCar, tb))}</span>
-                    <span class="mt-0.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">${escapeHtml(bookingCarTypeSeatsLabel(defaultSelectedCar))}</span>
-                  </span>
-                  <span class="shrink-0 rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-900">${escapeHtml(tb.carSelectedBadge)}</span>
-                </div>`
-          }
+          <p class="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.chooseCarType)}</p>
+          <button type="button" id="bk-car-trigger" class="mt-2 flex min-h-[3.5rem] w-full items-center gap-3 rounded-2xl border-2 border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-amber-300/80 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600 dark:bg-slate-800/90 dark:hover:border-amber-400/40 dark:focus:ring-amber-400/25" aria-expanded="false" aria-haspopup="listbox" aria-controls="bk-car-panel">
+            <span id="bk-car-trigger-icon" class="flex shrink-0">${bookingCarTypeIconHtml(defaultSelectedCar, 'h-7 w-7')}</span>
+            <span class="min-w-0 flex-1">
+              <span id="bk-car-trigger-name" class="block text-sm font-bold text-slate-900 dark:text-slate-100">${escapeHtml(bookingCarTypeLabel(defaultSelectedCar, tb))}</span>
+              <span id="bk-car-trigger-seats" class="mt-0.5 block text-xs font-semibold text-slate-500 dark:text-slate-400">${escapeHtml(bookingCarTypeSeatsLabel(defaultSelectedCar))}</span>
+            </span>
+            <span id="bk-car-chevron" class="shrink-0 text-slate-400 transition-transform duration-200 dark:text-slate-500">${icon.chevronDown('h-5 w-5')}</span>
+          </button>
+          <div id="bk-car-panel" class="pointer-events-auto absolute left-0 right-0 top-full z-[80] mt-1.5 hidden max-h-[min(22rem,55vh)] overflow-y-auto overflow-x-hidden rounded-xl border border-slate-200 bg-white py-0.5 shadow-xl shadow-slate-900/10 ring-1 ring-slate-900/[0.06] dark:border-slate-600 dark:bg-slate-900 dark:shadow-black/40 dark:ring-white/10" role="listbox" aria-label="${escapeHtml(tb.carTypesListAria)}">
+            ${bkCarOptsHtml}
+          </div>
         </div>`
     : ''
   const bookingPageUrl =
@@ -810,13 +797,13 @@ export async function mountBookCompany(root, slug) {
   let turnstileToken = ''
 
   const carWrapEl = root.querySelector('#bk-car-wrap')
-  const carTriggerEl = hasMultipleCarTypes ? root.querySelector('#bk-car-trigger') : null
-  const carPanelEl = hasMultipleCarTypes ? root.querySelector('#bk-car-panel') : null
-  const carChevronEl = hasMultipleCarTypes ? root.querySelector('#bk-car-chevron') : null
+  const carTriggerEl = showCarTypeChooser ? root.querySelector('#bk-car-trigger') : null
+  const carPanelEl = showCarTypeChooser ? root.querySelector('#bk-car-panel') : null
+  const carChevronEl = showCarTypeChooser ? root.querySelector('#bk-car-chevron') : null
   let bkCarOutsideHandler = null
 
   function closeCarPanel() {
-    if (!hasMultipleCarTypes || !carPanelEl) return
+    if (!showCarTypeChooser || !carPanelEl) return
     carPanelEl.classList.add('hidden')
     carTriggerEl?.setAttribute('aria-expanded', 'false')
     carChevronEl?.classList.remove('rotate-180')
@@ -827,7 +814,7 @@ export async function mountBookCompany(root, slug) {
   }
 
   function openCarPanel() {
-    if (!hasMultipleCarTypes || !carPanelEl || !carTriggerEl) return
+    if (!showCarTypeChooser || !carPanelEl || !carTriggerEl) return
     if (bkCarOutsideHandler) {
       document.removeEventListener('pointerdown', bkCarOutsideHandler, true)
       bkCarOutsideHandler = null
@@ -852,7 +839,7 @@ export async function mountBookCompany(root, slug) {
   }
 
   function syncCarUi() {
-    if (!hasMultipleCarTypes) return
+    if (!showCarTypeChooser) return
     const nameEl = root.querySelector('#bk-car-trigger-name')
     const seatsEl = root.querySelector('#bk-car-trigger-seats')
     const iconEl = root.querySelector('#bk-car-trigger-icon')
@@ -1279,7 +1266,7 @@ Estimate price: ${estimatePrice}`
     queueEstimate()
   }
 
-  if (hasMultipleCarTypes && carTriggerEl) {
+  if (showCarTypeChooser && carTriggerEl) {
     carTriggerEl.addEventListener('click', (e) => {
       e.preventDefault()
       toggleCarPanel()

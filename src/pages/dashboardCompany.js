@@ -25,6 +25,7 @@ import {
   BOOKING_CAR_TYPE_ORDER,
   pricingRowForType,
   resolveEnabledBookingCarTypes,
+  isPricingTypeConfigured,
 } from '../lib/bookingCarTypes.js'
 import { companyHourlyFromRecord, pricingWithHourlyEmbed } from '../lib/companyHourly.js'
 import {
@@ -72,7 +73,7 @@ function pricingOf(company) {
     const row = pricingRowForType(p, name)
     const def = DEFAULT_PRICING[name]
     out[name] = {
-      enabled: row && typeof row === 'object' ? row.enabled === true : false,
+      enabled: isPricingTypeConfigured(p, name),
       start: row && typeof row === 'object' ? row.start ?? def.start : def.start,
       per_km: row && typeof row === 'object' ? row.per_km ?? def.per_km : def.per_km,
       initial_km: row && typeof row === 'object' ? row.initial_km ?? def.initial_km : def.initial_km,
@@ -997,8 +998,8 @@ export async function mountDashboardCompany(root) {
 
     if (mount) {
       mount.innerHTML = BOOKING_CAR_TYPE_ORDER.map((name) => {
-        const p = pricingRowForType(company.pricing, name) || { enabled: false, ...DEFAULT_PRICING[name] }
-        const enabled = p.enabled === true
+        const p = pricingRowForType(company.pricing, name) || { ...DEFAULT_PRICING[name] }
+        const enabled = isPricingTypeConfigured(company.pricing, name)
         return `
         <div class="rounded-xl border border-gray-200 p-4">
           <label class="flex cursor-pointer items-center gap-3">

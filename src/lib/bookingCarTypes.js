@@ -2,6 +2,8 @@ import { DEFAULT_PRICING } from './api.js'
 
 export const BOOKING_CAR_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
 
+const PRICE_FIELDS = ['start', 'per_km', 'initial_km']
+
 function normalizeBookingCarTypeKey(raw) {
   const x = String(raw || '').trim().toLowerCase()
   if (x === 'luxury' || x.includes('lux')) return 'Luxury'
@@ -19,12 +21,21 @@ function pricingObject(rawPricing) {
   return rawPricing
 }
 
-function coerceTruthy(value) {
+function coerceEnabledFlag(value) {
   if (value === true || value === 1) return true
-  const s = String(value ?? '')
-    .trim()
-    .toLowerCase()
-  return s === 'true' || s === '1' || s === 'yes'
+  if (value === false || value === 0 || value == null) return false
+  const s = String(value).trim().toLowerCase()
+  if (s === 'true' || s === '1' || s === 'yes') return true
+  if (s === 'false' || s === '0' || s === 'no' || s === '') return false
+  return false
+}
+
+function rowHasPriceValues(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return false
+  return PRICE_FIELDS.some((field) => {
+    const v = row[field]
+    return v != null && String(v).trim() !== ''
+  })
 }
 
 function pricingFieldOrDefault(cur, field, fallback) {
@@ -46,19 +57,33 @@ export function pricingRowForType(pricing, typeName) {
   return null
 }
 
+/**
+ * True when company saved pricing with an enabled flag on any vehicle type row.
+ * Also true for legacy rows that only contain price values (no enabled key).
+ */
 export function hasExplicitVehicleTypeConfig(rawPricing) {
   const pricing = pricingObject(rawPricing)
-  return BOOKING_CAR_TYPE_ORDER.some((typeName) => {
-    const row = pricingRowForType(pricing, typeName)
-    return row && typeof row === 'object' && Object.prototype.hasOwnProperty.call(row, 'enabled')
-  })
+  const keys = Object.keys(pricing).filter((k) => k !== '__hourly')
+  if (keys.length === 0) return false
+  return BOOKING_CAR_TYPE_ORDER.some((typeName) => isPricingTypeConfigured(pricing, typeName))
 }
 
-/** True when dashboard (or onboarding) explicitly enabled this type. */
+/**
+ * Whether this vehicle type is offered on the public booking page.
+ * Uses enabled flag when present; legacy rows with price values count as enabled.
+ */
+export function isPricingTypeConfigured(pricing, typeName) {
+  const row = pricingRowForType(pricing, typeName)
+  if (!row || typeof row !== 'object') return false
+  if (Object.prototype.hasOwnProperty.call(row, 'enabled')) {
+    return coerceEnabledFlag(row.enabled)
+  }
+  return rowHasPriceValues(row)
+}
+
+/** @deprecated Prefer isPricingTypeConfigured */
 export function pricingTypeIsEnabled(pricing, typeName) {
-  const cur = pricingRowForType(pricing, typeName)
-  if (!cur || typeof cur !== 'object') return false
-  return coerceTruthy(cur.enabled)
+  return isPricingTypeConfigured(pricing, typeName)
 }
 
 function mergeTypePricing(typeName, rawPricing) {
@@ -71,23 +96,33 @@ function mergeTypePricing(typeName, rawPricing) {
   }
 }
 
+function isPricingObjectEmpty(rawPricing) {
+  const pricing = pricingObject(rawPricing)
+  return Object.keys(pricing).filter((k) => k !== '__hourly').length === 0
+}
+
 /**
  * Booking page source of truth for vehicle types + merged pricing.
- * Always returns at least Standard.
+ * Fleet cars are never used here — only company.pricing configuration.
+ * Always returns at least one type (Standard default when nothing configured).
  */
 export function resolveBookingVehicleTypes(company) {
-  const rawPricing = pricingObject(company?.pricing ?? company)
-  const hasExplicit = hasExplicitVehicleTypeConfig(rawPricing)
+  const rawPricing = pricingObject(company?.pricing)
 
-  let types
-  if (!hasExplicit) {
-    types = ['Standard']
-  } else {
-    types = BOOKING_CAR_TYPE_ORDER.filter((typeName) => pricingTypeIsEnabled(rawPricing, typeName))
-    if (types.length === 0) types = ['Standard']
+  if (isPricingObjectEmpty(rawPricing)) {
+    return [
+      {
+        type: 'Standard',
+        enabled: true,
+        pricing: mergeTypePricing('Standard', rawPricing),
+      },
+    ]
   }
 
-  return types.map((type) => ({
+  const types = BOOKING_CAR_TYPE_ORDER.filter((typeName) => isPricingTypeConfigured(rawPricing, typeName))
+  const resolved = types.length > 0 ? types : ['Standard']
+
+  return resolved.map((type) => ({
     type,
     enabled: true,
     pricing: mergeTypePricing(type, rawPricing),
