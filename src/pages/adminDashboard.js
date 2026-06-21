@@ -24,13 +24,15 @@ import { icon } from '../lib/icons.js'
 import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { absolutePublicBookingUrl } from '../lib/tenant.js'
 import { getLocale } from '../lib/locale.js'
-import { tAdminAnalytics } from '../i18n.js'
+import { tAdminAnalytics, tAdminDashboard } from '../i18n.js'
 
 const adminState = {
   tab: 'requests',
   editBaseline: null,
   analyticsRange: '30d',
   analyticsSort: 'whatsapp',
+  activeSearch: '',
+  analyticsSearch: '',
   /** approved | pending | inactive | all */
   commAudience: 'approved',
   commSelected: [],
@@ -107,6 +109,143 @@ const COMM_PREVIEW_EMPTY_HTML = `<div class="flex min-h-[12rem] flex-col items-c
   <p class="text-sm font-medium text-slate-300">No recipient selected</p>
   <p class="mt-1 max-w-sm text-xs leading-relaxed text-slate-500">Choose one or more companies from the list to preview merged variables and prepare your WhatsApp messages.</p>
 </div>`
+
+function admBtnSecondary(label, extra = '') {
+  return `rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 ${extra}`
+}
+
+function admBtnDanger(label, extra = '') {
+  return `rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-800 transition hover:bg-red-100 ${extra}`
+}
+
+function admBtnPrimary(label, extra = '') {
+  return `inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 ${extra}`
+}
+
+function admSectionHeader(title, subtitle) {
+  return `<div class="border-b border-slate-100 px-5 py-4 sm:px-6">
+    <h2 class="text-base font-bold tracking-tight text-slate-900 sm:text-lg">${escapeHtml(title)}</h2>
+    ${subtitle ? `<p class="mt-1 text-sm text-slate-500">${escapeHtml(subtitle)}</p>` : ''}
+  </div>`
+}
+
+function admEmptyState(message, hint = '') {
+  return `<div class="flex flex-col items-center justify-center px-6 py-14 text-center">
+    <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">${icon.inbox('h-6 w-6')}</div>
+    <p class="mt-4 text-sm font-medium text-slate-700">${escapeHtml(message)}</p>
+    ${hint ? `<p class="mt-1 max-w-md text-xs leading-relaxed text-slate-500">${escapeHtml(hint)}</p>` : ''}
+  </div>`
+}
+
+function admKpiCard({ label, value, helper, tone, iconName }) {
+  const tones = {
+    sky: 'from-sky-500/10 to-sky-500/5 border-sky-200/80 text-sky-700',
+    emerald: 'from-emerald-500/10 to-emerald-500/5 border-emerald-200/80 text-emerald-700',
+    amber: 'from-amber-500/10 to-amber-500/5 border-amber-200/80 text-amber-700',
+    orange: 'from-orange-500/10 to-orange-500/5 border-orange-200/80 text-orange-700',
+    violet: 'from-violet-500/10 to-violet-500/5 border-violet-200/80 text-violet-700',
+  }
+  const iconTones = {
+    sky: 'bg-sky-500 text-white',
+    emerald: 'bg-emerald-500 text-white',
+    amber: 'bg-amber-500 text-white',
+    orange: 'bg-orange-500 text-white',
+    violet: 'bg-violet-500 text-white',
+  }
+  const iconFn = icon[iconName] || icon.building2
+  return `<article class="rounded-2xl border bg-gradient-to-br ${tones[tone] || tones.sky} p-4 shadow-sm sm:p-5">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="text-[11px] font-semibold uppercase tracking-wide opacity-80">${escapeHtml(label)}</p>
+        <p class="mt-1 text-2xl font-bold tabular-nums text-slate-900 sm:text-3xl">${escapeHtml(String(value))}</p>
+        ${helper ? `<p class="mt-1 text-xs text-slate-500">${escapeHtml(helper)}</p>` : ''}
+      </div>
+      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-sm ${iconTones[tone] || iconTones.sky}">${iconFn('h-5 w-5')}</div>
+    </div>
+  </article>`
+}
+
+function admStatusBadgeHtml(status) {
+  const label = statusLabel(status)
+  const s = String(status || '').toLowerCase()
+  let cls = 'bg-slate-100 text-slate-700 ring-slate-200'
+  if (s === 'approved') cls = 'bg-emerald-100 text-emerald-800 ring-emerald-200'
+  else if (s === 'pending') cls = 'bg-sky-100 text-sky-800 ring-sky-200'
+  else if (s === 'suspended') cls = 'bg-amber-100 text-amber-800 ring-amber-200'
+  else if (s === 'rejected') cls = 'bg-rose-100 text-rose-800 ring-rose-200'
+  return `<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${cls}">${escapeHtml(label)}</span>`
+}
+
+function filterCompaniesBySearch(list, q) {
+  const needle = String(q || '').trim().toLowerCase()
+  if (!needle) return list
+  return list.filter((c) => {
+    const blob = [c.name, c.slug, c.email, c.phone, c.city, c.status, statusLabel(c.status)]
+      .join(' ')
+      .toLowerCase()
+    return blob.includes(needle)
+  })
+}
+
+function analyticsActivityLevel(r) {
+  const visits = r.page_visits || 0
+  const wa = r.whatsapp_clicks || 0
+  const intent = r.booking_intent_rate || 0
+  const qr = r.qr_scans || 0
+  if (wa >= 5 || (intent >= 25 && visits >= 5)) return 'hot'
+  if (visits >= 5 || qr >= 3) return 'active'
+  if (visits > 0 || wa > 0 || qr > 0 || (r.share_visits || 0) > 0) return 'low'
+  return 'dormant'
+}
+
+function analyticsActivityBadge(r, ta) {
+  const level = analyticsActivityLevel(r)
+  const map = {
+    hot: ['bg-rose-50 text-rose-800 ring-rose-200', ta.activityHotLead],
+    active: ['bg-emerald-50 text-emerald-800 ring-emerald-200', ta.activityActive],
+    low: ['bg-amber-50 text-amber-800 ring-amber-200', ta.activityLow],
+    dormant: ['bg-slate-100 text-slate-600 ring-slate-200', ta.activityDormant],
+  }
+  const [cls, label] = map[level] || map.dormant
+  return `<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${cls}">${escapeHtml(label)}</span>`
+}
+
+function sortAnalyticsRows(rows, sort) {
+  const copy = [...rows]
+  switch (sort) {
+    case 'visits':
+      copy.sort((a, b) => b.page_visits - a.page_visits || b.whatsapp_clicks - a.whatsapp_clicks)
+      break
+    case 'qr':
+      copy.sort((a, b) => b.qr_scans - a.qr_scans || b.page_visits - a.page_visits)
+      break
+    case 'intent':
+      copy.sort((a, b) => b.booking_intent_rate - a.booking_intent_rate || b.page_visits - a.page_visits)
+      break
+    case 'activity':
+      copy.sort((a, b) =>
+        String(b.last_activity_at || '').localeCompare(String(a.last_activity_at || ''))
+      )
+      break
+    case 'name':
+      copy.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+      break
+    default:
+      copy.sort((a, b) => b.whatsapp_clicks - a.whatsapp_clicks || b.page_visits - a.page_visits)
+  }
+  return copy
+}
+
+function analyticsPlatformTotals(rows) {
+  return {
+    visits: rows.reduce((s, r) => s + (r.page_visits || 0), 0),
+    qr: rows.reduce((s, r) => s + (r.qr_scans || 0), 0),
+    share: rows.reduce((s, r) => s + (r.share_visits || 0), 0),
+    wa: rows.reduce((s, r) => s + (r.whatsapp_clicks || 0), 0),
+    call: rows.reduce((s, r) => s + (r.call_clicks || 0), 0),
+    email: rows.reduce((s, r) => s + (r.email_clicks || 0), 0),
+  }
+}
 
 function statusLabel(status) {
   const s = String(status || '').toLowerCase()
@@ -223,6 +362,7 @@ export async function mountAdminDashboard(root) {
   }
 
   let companies = []
+  let companiesLoadError = false
   let totalCars = 0
   let carMap = {}
   let recentBookings = []
@@ -230,10 +370,12 @@ export async function mountAdminDashboard(root) {
   let analyticsCompanies = []
   let analyticsError = null
   const ta = tAdminAnalytics(getLocale())
+  const td = tAdminDashboard(getLocale())
   try {
     companies = await listAllCompaniesForAdmin()
   } catch {
     companies = []
+    companiesLoadError = true
   }
   try {
     totalCars = await countAllCarsAdmin()
@@ -355,7 +497,7 @@ export async function mountAdminDashboard(root) {
   if (!['7d', '30d', 'all'].includes(adminState.analyticsRange)) {
     adminState.analyticsRange = '30d'
   }
-  if (!['whatsapp', 'visits'].includes(adminState.analyticsSort)) {
+  if (!['whatsapp', 'visits', 'qr', 'intent', 'activity', 'name'].includes(adminState.analyticsSort)) {
     adminState.analyticsSort = 'whatsapp'
   }
   if (!['approved', 'pending', 'inactive', 'all'].includes(adminState.commAudience)) {
@@ -369,57 +511,61 @@ export async function mountAdminDashboard(root) {
   }
   const tab = adminState.tab
   const tabBtn = (id, label) =>
-    `<button type="button" data-adm-tab="${id}" class="rounded-full px-5 py-2 text-sm font-semibold transition ${
-      tab === id ? 'bg-white text-gray-900 shadow' : 'text-gray-600 hover:text-gray-900'
-    }">${label}</button>`
+    `<button type="button" data-adm-tab="${id}" class="shrink-0 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+      tab === id
+        ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
+        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+    }">${escapeHtml(label)}</button>`
 
   let mainHtml = ''
 
   if (tab === 'requests') {
     const rows =
       pending.length === 0
-        ? `<tr><td colspan="8" class="px-4 py-12 text-center text-gray-500">No pending company requests.</td></tr>`
+        ? `<tr><td colspan="8">${admEmptyState('No pending requests yet.')}</td></tr>`
         : pending
             .map((c) => {
               const created = c.created_at ? String(c.created_at).slice(0, 10) : '—'
               const city = c.city || '—'
               const ncars = carMap[c.id] || 0
               return `
-          <tr class="border-b border-gray-100">
-            <td class="px-4 py-3 font-semibold text-gray-900">${escapeHtml(c.name)}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(c.vat_number || '—')}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(c.email)}</td>
-            <td class="px-4 py-3 text-sm text-gray-600"><span class="inline-flex items-center gap-1">${icon.mapPin('h-3.5 w-3.5 shrink-0 text-gray-400')}${escapeHtml(city)}</span></td>
-            <td class="px-4 py-3"><span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">${icon.car('h-3.5 w-3.5')}${ncars}</span></td>
-            <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(created)}</td>
-            <td class="px-4 py-3"><span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Pending</span></td>
-            <td class="px-4 py-3">
-              <div class="flex flex-wrap gap-2">
-                <button type="button" data-adm="edit" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold">Edit</button>
-                <button type="button" data-adm="delete" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">Delete</button>
-                <button type="button" data-adm="approve" data-id="${escapeHtml(c.id)}" class="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-gray-800">${icon.check('h-3.5 w-3.5')}Approve</button>
-                <button type="button" data-adm="reject" data-id="${escapeHtml(c.id)}" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-500">${icon.x('h-3.5 w-3.5')}Reject</button>
+          <tr class="border-b border-slate-100 transition hover:bg-slate-50/80">
+            <td class="px-4 py-3.5">
+              <p class="font-semibold text-slate-900">${escapeHtml(c.name)}</p>
+              <p class="mt-0.5 text-xs text-slate-500">${escapeHtml(c.phone || '—')}</p>
+            </td>
+            <td class="px-4 py-3.5 text-sm text-slate-600">${escapeHtml(c.vat_number || '—')}</td>
+            <td class="px-4 py-3.5 text-sm text-slate-600">${escapeHtml(c.email)}</td>
+            <td class="px-4 py-3.5 text-sm text-slate-600"><span class="inline-flex items-center gap-1">${icon.mapPin('h-3.5 w-3.5 shrink-0 text-slate-400')}${escapeHtml(city)}</span></td>
+            <td class="px-4 py-3.5"><span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-700">${icon.car('h-3.5 w-3.5')}${ncars}</span></td>
+            <td class="px-4 py-3.5 text-sm tabular-nums text-slate-600">${escapeHtml(created)}</td>
+            <td class="px-4 py-3.5">${admStatusBadgeHtml('pending')}</td>
+            <td class="px-4 py-3.5">
+              <div class="flex flex-wrap gap-1.5">
+                <button type="button" data-adm="edit" data-id="${escapeHtml(c.id)}" class="${admBtnSecondary()}">Edit</button>
+                <button type="button" data-adm="delete" data-id="${escapeHtml(c.id)}" class="${admBtnDanger()}">Delete</button>
+                <button type="button" data-adm="approve" data-id="${escapeHtml(c.id)}" class="${admBtnPrimary()}">${icon.check('h-3.5 w-3.5')}Approve</button>
+                <button type="button" data-adm="reject" data-id="${escapeHtml(c.id)}" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-red-500">${icon.x('h-3.5 w-3.5')}Reject</button>
               </div>
             </td>
           </tr>`
             })
             .join('')
     mainHtml = `
-      <div class="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg">
-        <h2 class="text-lg font-bold text-gray-900">New Company Requests</h2>
-        <p class="text-sm text-gray-500">Review and approve company registration requests</p>
-        <div class="mt-4 overflow-x-auto">
+      <div class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
+        ${admSectionHeader(td.requestsTitle, td.requestsSubtitle)}
+        <div class="overflow-x-auto">
           <table class="w-full min-w-[960px] text-left text-sm">
-            <thead>
-              <tr class="border-b border-gray-200 text-xs font-semibold uppercase text-gray-500">
-                <th class="py-3 pr-4">Company Name</th>
-                <th class="py-3 pr-4">VAT Number</th>
-                <th class="py-3 pr-4">Email</th>
-                <th class="py-3 pr-4">City</th>
-                <th class="py-3 pr-4">Cars</th>
-                <th class="py-3 pr-4">Request Date</th>
-                <th class="py-3 pr-4">Status</th>
-                <th class="py-3">Actions</th>
+            <thead class="bg-slate-50/80">
+              <tr class="border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th class="px-4 py-3">${escapeHtml(td.company)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.vat)}</th>
+                <th class="px-4 py-3">Email</th>
+                <th class="px-4 py-3">City</th>
+                <th class="px-4 py-3">${escapeHtml(td.cars)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.requestDate)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.status)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.actions)}</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -427,33 +573,44 @@ export async function mountAdminDashboard(root) {
         </div>
       </div>`
   } else if (tab === 'active') {
+    const activeQ = (adminState.activeSearch || '').trim()
+    const activeFiltered = filterCompaniesBySearch([...active, ...suspended], activeQ)
     const rows =
-      active.length + suspended.length === 0
-        ? `<tr><td colspan="7" class="px-4 py-12 text-center text-gray-500">No approved or suspended companies.</td></tr>`
-        : [...active, ...suspended]
+      activeFiltered.length === 0
+        ? `<tr><td colspan="7">${admEmptyState(
+            activeQ ? td.noSearchResults : 'No active companies found.',
+            activeQ ? '' : 'Approved and suspended tenants appear here.'
+          )}</td></tr>`
+        : activeFiltered
             .map((c) => {
               const ncars = carMap[c.id] || 0
-              const statusBadge =
-                c.status === 'suspended'
-                  ? '<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Suspended</span>'
-                  : '<span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">Approved</span>'
+              const booking =
+                c.status === 'approved' && c.slug ? absolutePublicBookingUrl(c.slug) : ''
               return `
-          <tr class="border-b border-gray-100">
-            <td class="px-4 py-3 font-semibold text-gray-900">${escapeHtml(c.name)}</td>
-            <td class="px-4 py-3 font-mono text-sm text-gray-600">${escapeHtml(c.slug)}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(c.email)}</td>
-            <td class="px-4 py-3 text-sm">${statusBadge}</td>
-            <td class="px-4 py-3 text-sm">${planBadge(c.subscription_plan)}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">${ncars}</td>
-            <td class="px-4 py-3">
-              <div class="flex flex-wrap gap-2">
-                <button type="button" data-adm="edit" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold">Edit</button>
-                <button type="button" data-adm="delete" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">Delete</button>
-                <button type="button" data-adm="copy" data-slug="${escapeHtml(c.slug)}" class="rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold">Copy link</button>
+          <tr class="border-b border-slate-100 transition hover:bg-slate-50/80">
+            <td class="px-4 py-3.5">
+              <p class="font-semibold text-slate-900">${escapeHtml(c.name)}</p>
+              <p class="mt-0.5 font-mono text-xs text-slate-500">/${escapeHtml(c.slug || '—')}</p>
+            </td>
+            <td class="px-4 py-3.5 text-sm text-slate-600">${escapeHtml(c.email)}</td>
+            <td class="px-4 py-3.5 text-sm text-slate-600">${escapeHtml(c.phone || '—')}</td>
+            <td class="px-4 py-3.5">${admStatusBadgeHtml(c.status)}</td>
+            <td class="px-4 py-3.5">${planBadge(c.subscription_plan)}</td>
+            <td class="px-4 py-3.5 text-sm tabular-nums font-semibold text-slate-700">${ncars}</td>
+            <td class="px-4 py-3.5">
+              <div class="flex flex-wrap gap-1.5">
+                ${
+                  booking
+                    ? `<a href="${escapeHtml(booking)}" target="_blank" rel="noopener noreferrer" class="${admBtnSecondary()} inline-flex items-center gap-1">${icon.externalLink('h-3 w-3')}Open</a>`
+                    : ''
+                }
+                <button type="button" data-adm="edit" data-id="${escapeHtml(c.id)}" class="${admBtnSecondary()}">Edit</button>
+                <button type="button" data-adm="delete" data-id="${escapeHtml(c.id)}" class="${admBtnDanger()}">Delete</button>
+                <button type="button" data-adm="copy" data-slug="${escapeHtml(c.slug)}" class="${admBtnSecondary()}">Copy link</button>
                 ${
                   c.status === 'suspended'
-                    ? `<button type="button" data-adm="reactivate" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-green-200 bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">Reactivate</button>`
-                    : `<button type="button" data-adm="suspend" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">Suspend</button>`
+                    ? `<button type="button" data-adm="reactivate" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100">Reactivate</button>`
+                    : `<button type="button" data-adm="suspend" data-id="${escapeHtml(c.id)}" class="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100">Suspend</button>`
                 }
               </div>
             </td>
@@ -461,20 +618,25 @@ export async function mountAdminDashboard(root) {
             })
             .join('')
     mainHtml = `
-      <div class="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg">
-        <h2 class="text-lg font-bold text-gray-900">Active Companies</h2>
-        <p class="text-sm text-gray-500">Approved tenants on the platform</p>
-        <div class="mt-4 overflow-x-auto">
-          <table class="w-full min-w-[800px] text-left text-sm">
-            <thead>
-              <tr class="border-b border-gray-200 text-xs font-semibold uppercase text-gray-500">
-                <th class="py-3 pr-4">Company</th>
-                <th class="py-3 pr-4">Slug</th>
-                <th class="py-3 pr-4">Email</th>
-                <th class="py-3 pr-4">Status</th>
-                <th class="py-3 pr-4">Plan</th>
-                <th class="py-3 pr-4">Cars</th>
-                <th class="py-3">Actions</th>
+      <div class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
+        ${admSectionHeader(td.activeTitle, td.activeSubtitle)}
+        <div class="border-b border-slate-100 px-5 py-3 sm:px-6">
+          <div class="relative max-w-md">
+            <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">${icon.search('h-4 w-4')}</span>
+            <input id="adm-active-search" type="search" value="${escapeHtml(activeQ)}" placeholder="${escapeHtml(td.searchCompanies)}" autocomplete="off" class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[900px] text-left text-sm">
+            <thead class="bg-slate-50/80">
+              <tr class="border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th class="px-4 py-3">${escapeHtml(td.company)}</th>
+                <th class="px-4 py-3">Email</th>
+                <th class="px-4 py-3">Phone</th>
+                <th class="px-4 py-3">${escapeHtml(td.status)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.plan)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.cars)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.actions)}</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -515,50 +677,52 @@ export async function mountAdminDashboard(root) {
             })
             .join('')
     mainHtml = `
-      <div class="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg">
-        <h2 class="text-lg font-bold text-gray-900">Subscription Status &amp; Revenue</h2>
-        <p class="text-sm text-gray-500">Monitor company subscriptions and calculate fees.</p>
-        <div class="mt-4 overflow-x-auto">
+      <div class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
+        ${admSectionHeader(td.subscriptionsTitle, td.subscriptionsSubtitle)}
+        <div class="mx-5 mb-4 rounded-xl border border-violet-200/80 bg-violet-50/80 px-4 py-3 text-sm text-violet-900 sm:mx-6">
+          <span class="font-semibold">Note:</span> ${escapeHtml(td.subscriptionsPrepNote)}
+        </div>
+        <div class="overflow-x-auto px-1 pb-2">
           <table class="w-full min-w-[1000px] text-left text-sm">
-            <thead>
-              <tr class="border-b border-gray-200 text-xs font-semibold uppercase text-gray-500">
-                <th class="py-3 pr-4">Company</th>
-                <th class="py-3 pr-4">Plan</th>
-                <th class="py-3 pr-4">Cars</th>
-                <th class="py-3 pr-4">Base</th>
-                <th class="py-3 pr-4">Car fee</th>
-                <th class="py-3 pr-4">Total / mo</th>
-                <th class="py-3 pr-4">Trips</th>
-                <th class="py-3 pr-4">Next invoice</th>
-                <th class="py-3">Actions</th>
+            <thead class="bg-slate-50/80">
+              <tr class="border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th class="px-4 py-3">${escapeHtml(td.company)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.plan)}</th>
+                <th class="px-4 py-3">${escapeHtml(td.cars)}</th>
+                <th class="px-4 py-3">Base</th>
+                <th class="px-4 py-3">Car fee</th>
+                <th class="px-4 py-3">Total / mo</th>
+                <th class="px-4 py-3">Trips</th>
+                <th class="px-4 py-3">Next invoice</th>
+                <th class="px-4 py-3">${escapeHtml(td.actions)}</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
-        <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div class="rounded-xl border border-blue-200 bg-blue-50 p-4">
-            <p class="text-xs font-semibold text-blue-800">Premium Plans</p>
-            <p class="text-lg font-bold text-blue-900">${premiumCount} companies</p>
+        <div class="grid gap-3 border-t border-slate-100 px-5 py-5 sm:grid-cols-2 lg:grid-cols-4 sm:px-6">
+          <div class="rounded-xl border border-violet-200 bg-violet-50/60 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-violet-700">Premium plans</p>
+            <p class="mt-1 text-xl font-bold tabular-nums text-violet-900">${premiumCount}</p>
           </div>
-          <div class="rounded-xl border border-green-200 bg-green-50 p-4">
-            <p class="text-xs font-semibold text-green-800">Basic Plans</p>
-            <p class="text-lg font-bold text-green-900">${basicCount} companies</p>
+          <div class="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Basic plans</p>
+            <p class="mt-1 text-xl font-bold tabular-nums text-emerald-900">${basicCount}</p>
           </div>
-          <div class="rounded-xl border border-orange-200 bg-orange-50 p-4">
-            <p class="text-xs font-semibold text-orange-800">Total Cars</p>
-            <p class="text-lg font-bold text-orange-900">${totalCars} fleet</p>
+          <div class="rounded-xl border border-orange-200 bg-orange-50/60 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-orange-700">${escapeHtml(td.kpiCars)}</p>
+            <p class="mt-1 text-xl font-bold tabular-nums text-orange-900">${totalCars}</p>
           </div>
-          <div class="rounded-xl border border-violet-200 bg-violet-50 p-4">
-            <p class="text-xs font-semibold text-violet-800">Total Revenue</p>
-            <p class="text-lg font-bold text-violet-900">€${revenue} / mo</p>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-600">${escapeHtml(td.kpiRevenue)}</p>
+            <p class="mt-1 text-xl font-bold tabular-nums text-slate-900">€${revenue}</p>
           </div>
         </div>
-        <div class="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
-          <p class="font-bold text-gray-900">Pricing Structure</p>
-          <ul class="mt-2 list-inside list-disc space-y-1">
-            <li>Basic Plan: €30/month base</li>
-            <li>Premium Plan: €50/month base</li>
+        <div class="mx-5 mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 sm:mx-6">
+          <p class="font-bold text-slate-900">Pricing structure</p>
+          <ul class="mt-2 list-inside list-disc space-y-1 text-xs sm:text-sm">
+            <li>Basic plan: €30/month base</li>
+            <li>Premium plan: €50/month base</li>
             <li>Additional cars: €5 per car per month</li>
             <li>Example: Premium + 8 cars = €50 + €40 = €90/month</li>
           </ul>
@@ -567,90 +731,168 @@ export async function mountAdminDashboard(root) {
   } else if (tab === 'analytics') {
     const range = adminState.analyticsRange
     const sort = adminState.analyticsSort
-    let rows = [...analyticsCompanies]
-    if (sort === 'visits') {
-      rows.sort((a, b) => b.page_visits - a.page_visits || b.whatsapp_clicks - a.whatsapp_clicks)
-    } else {
-      rows.sort((a, b) => b.whatsapp_clicks - a.whatsapp_clicks || b.page_visits - a.page_visits)
+    const analyticsQ = (adminState.analyticsSearch || '').trim()
+    let rows = sortAnalyticsRows(analyticsCompanies, sort)
+    if (analyticsQ) {
+      rows = filterCompaniesBySearch(rows, analyticsQ)
     }
-    const withActivity = rows.filter(
-      (r) =>
-        r.page_visits > 0 ||
-        r.qr_scans > 0 ||
-        r.share_visits > 0 ||
-        r.whatsapp_clicks > 0 ||
-        r.call_clicks > 0 ||
-        r.email_clicks > 0
-    )
-    const displayRows = withActivity.length > 0 ? withActivity : rows.filter((r) => r.status === 'approved')
+    const totals = analyticsPlatformTotals(analyticsCompanies)
+    const avgIntent =
+      analyticsCompanies.length > 0
+        ? Math.round(
+            analyticsCompanies.reduce((s, r) => s + (r.booking_intent_rate || 0), 0) /
+              analyticsCompanies.length
+          )
+        : 0
 
     const rangeBtn = (value, label) =>
-      `<button type="button" data-adm-analytics-range="${value}" class="rounded-full px-4 py-1.5 text-xs font-semibold transition ${
-        range === value ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+      `<button type="button" data-adm-analytics-range="${value}" class="rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+        range === value
+          ? 'bg-slate-900 text-white shadow-sm'
+          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
       }">${escapeHtml(label)}</button>`
 
-    const cards =
-      displayRows.length === 0
-        ? `<p class="py-12 text-center text-sm text-gray-500">${escapeHtml(ta.empty)}</p>`
-        : displayRows
+    const sortBtn = (value, label) =>
+      `<button type="button" data-adm-analytics-sort="${value}" class="rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition sm:text-xs ${
+        sort === value
+          ? 'border-slate-900 bg-slate-900 text-white'
+          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+      }">${escapeHtml(label)}</button>`
+
+    const topWa = [...analyticsCompanies].sort((a, b) => b.whatsapp_clicks - a.whatsapp_clicks)[0]
+    const topQr = [...analyticsCompanies].sort((a, b) => b.qr_scans - a.qr_scans)[0]
+    const topIntent = [...analyticsCompanies].sort(
+      (a, b) => b.booking_intent_rate - a.booking_intent_rate
+    )[0]
+    const noActivityCount = analyticsCompanies.filter(
+      (r) =>
+        (r.page_visits || 0) === 0 &&
+        (r.whatsapp_clicks || 0) === 0 &&
+        (r.qr_scans || 0) === 0 &&
+        (r.share_visits || 0) === 0
+    ).length
+
+    const tableBody =
+      rows.length === 0
+        ? `<tr><td colspan="11">${admEmptyState(ta.empty)}</td></tr>`
+        : rows
             .map((r) => {
               const booking =
                 r.status === 'approved' && r.slug ? absolutePublicBookingUrl(r.slug) : ''
-              const intent = `${r.booking_intent_rate || 0}%`
               return `
-        <article class="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 class="text-lg font-bold text-gray-900">${escapeHtml(r.name || '—')}</h3>
-              <p class="mt-0.5 text-xs text-gray-500">${escapeHtml(statusLabel(r.status))}${r.slug ? ` · /${escapeHtml(r.slug)}` : ''}</p>
+          <tr class="border-b border-slate-100 transition hover:bg-slate-50/80">
+            <td class="px-3 py-3">
+              <p class="font-semibold text-slate-900">${escapeHtml(r.name || '—')}</p>
+              <p class="mt-0.5 font-mono text-[11px] text-slate-500">${r.slug ? `/${escapeHtml(r.slug)}` : '—'}</p>
+              <div class="mt-1.5">${analyticsActivityBadge(r, ta)}</div>
+            </td>
+            <td class="px-3 py-3">${admStatusBadgeHtml(r.status)}</td>
+            <td class="px-3 py-3 tabular-nums font-medium text-slate-800">${r.page_visits || 0}</td>
+            <td class="px-3 py-3 tabular-nums text-slate-700">${r.qr_scans || 0}</td>
+            <td class="px-3 py-3 tabular-nums text-slate-700">${r.share_visits || 0}</td>
+            <td class="px-3 py-3 tabular-nums font-semibold text-emerald-700">${r.whatsapp_clicks || 0}</td>
+            <td class="px-3 py-3 tabular-nums text-slate-700">${r.call_clicks || 0}</td>
+            <td class="px-3 py-3 tabular-nums text-slate-700">${r.email_clicks || 0}</td>
+            <td class="px-3 py-3 tabular-nums font-semibold text-violet-700">${r.booking_intent_rate || 0}%</td>
+            <td class="px-3 py-3 text-xs text-slate-600">${escapeHtml(formatAnalyticsLastActivity(r.last_activity_at, ta))}</td>
+            <td class="px-3 py-3">
               ${
                 booking
-                  ? `<a href="${escapeHtml(booking)}" target="_blank" rel="noopener noreferrer" class="mt-1 inline-block text-xs font-medium text-amber-700 underline decoration-amber-200 underline-offset-2 hover:text-amber-800">${escapeHtml(ta.bookingLink)}</a>`
-                  : ''
+                  ? `<a href="${escapeHtml(booking)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-slate-900">${icon.externalLink('h-3 w-3')}${escapeHtml(ta.bookingLink)}</a>`
+                  : `<span class="text-xs text-slate-400">${escapeHtml(ta.none)}</span>`
               }
-            </div>
-            <p class="text-xs text-gray-500">${escapeHtml(ta.lastActivity)}: <span class="font-semibold text-gray-800">${escapeHtml(formatAnalyticsLastActivity(r.last_activity_at, ta))}</span></p>
-          </div>
-          <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
-            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.totalVisits)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.page_visits}</dd></div>
-            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.qrScans)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.qr_scans}</dd></div>
-            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.shareVisits)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.share_visits}</dd></div>
-            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.whatsappClicks)}</dt><dd class="text-lg font-bold tabular-nums text-amber-700">${r.whatsapp_clicks}</dd></div>
-            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.callClicks)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.call_clicks}</dd></div>
-            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.emailClicks)}</dt><dd class="text-lg font-bold tabular-nums text-gray-900">${r.email_clicks}</dd></div>
-            <div><dt class="text-xs font-medium text-gray-500">${escapeHtml(ta.bookingIntent)}</dt><dd class="text-lg font-bold tabular-nums text-emerald-700">${intent}</dd></div>
-          </dl>
-        </article>`
+            </td>
+          </tr>`
             })
             .join('')
 
     mainHtml = `
-      <div class="rounded-2xl border border-gray-100 bg-white p-6 shadow-lg">
+      <div class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
         ${
           analyticsError
-            ? `<div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">${escapeHtml(analyticsError)}</div>`
+            ? `<div class="mx-5 mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 sm:mx-6">${escapeHtml(ta.loadError)}</div>`
             : ''
         }
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 class="text-lg font-bold text-gray-900">${escapeHtml(ta.title)}</h2>
-            <p class="mt-1 text-sm text-gray-500">${escapeHtml(ta.subtitle)}</p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            ${rangeBtn('7d', ta.range7d)}
-            ${rangeBtn('30d', ta.range30d)}
-            ${rangeBtn('all', ta.rangeAll)}
+        <div class="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 class="text-lg font-bold tracking-tight text-slate-900">${escapeHtml(ta.title)}</h2>
+              <p class="mt-1 max-w-2xl text-sm text-slate-500">${escapeHtml(ta.subtitle)}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              ${rangeBtn('7d', ta.range7d)}
+              ${rangeBtn('30d', ta.range30d)}
+              ${rangeBtn('all', ta.rangeAll)}
+            </div>
           </div>
         </div>
-        <div class="mt-4 flex flex-wrap gap-2">
-          <button type="button" data-adm-analytics-sort="whatsapp" class="rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-            sort === 'whatsapp' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600'
-          }">${escapeHtml(ta.sortWhatsapp)}</button>
-          <button type="button" data-adm-analytics-sort="visits" class="rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-            sort === 'visits' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600'
-          }">${escapeHtml(ta.sortVisits)}</button>
+
+        <div class="grid gap-3 border-b border-slate-100 px-5 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 sm:px-6">
+          ${admKpiCard({ label: ta.totalVisits, value: totals.visits, helper: ta.range30d, tone: 'sky', iconName: 'eye' })}
+          ${admKpiCard({ label: ta.qrScans, value: totals.qr, helper: 'QR redirect scans', tone: 'violet', iconName: 'qrCode' })}
+          ${admKpiCard({ label: ta.shareVisits, value: totals.share, helper: 'Shared links', tone: 'orange', iconName: 'globe' })}
+          ${admKpiCard({ label: ta.whatsappClicks, value: totals.wa, helper: 'High intent signal', tone: 'emerald', iconName: 'whatsapp' })}
+          ${admKpiCard({ label: ta.bookingIntent, value: `${avgIntent}%`, helper: 'Platform average', tone: 'amber', iconName: 'trending' })}
+          ${admKpiCard({ label: ta.activeCompanies, value: active.length, helper: 'Approved tenants', tone: 'sky', iconName: 'building2' })}
         </div>
-        <div class="mt-6 grid gap-4 lg:grid-cols-2">${cards}</div>
+
+        <div class="border-b border-slate-100 px-5 py-4 sm:px-6">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(ta.insightTitle)}</p>
+          <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
+              <p class="text-[11px] font-medium text-slate-500">${escapeHtml(ta.insightTopWa)}</p>
+              <p class="mt-0.5 font-semibold text-slate-900">${escapeHtml(topWa?.name || ta.none)} <span class="text-xs font-normal text-slate-500">(${topWa?.whatsapp_clicks || 0})</span></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
+              <p class="text-[11px] font-medium text-slate-500">${escapeHtml(ta.insightTopQr)}</p>
+              <p class="mt-0.5 font-semibold text-slate-900">${escapeHtml(topQr?.name || ta.none)} <span class="text-xs font-normal text-slate-500">(${topQr?.qr_scans || 0})</span></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
+              <p class="text-[11px] font-medium text-slate-500">${escapeHtml(ta.insightTopIntent)}</p>
+              <p class="mt-0.5 font-semibold text-slate-900">${escapeHtml(topIntent?.name || ta.none)} <span class="text-xs font-normal text-slate-500">(${topIntent?.booking_intent_rate || 0}%)</span></p>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
+              <p class="text-[11px] font-medium text-slate-500">${escapeHtml(ta.insightNoActivity)}</p>
+              <p class="mt-0.5 font-semibold tabular-nums text-slate-900">${noActivityCount}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div class="relative min-w-0 flex-1 max-w-md">
+            <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">${icon.search('h-4 w-4')}</span>
+            <input id="adm-analytics-search" type="search" value="${escapeHtml(analyticsQ)}" placeholder="${escapeHtml(ta.searchPlaceholder)}" autocomplete="off" class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            ${sortBtn('whatsapp', ta.sortWhatsapp)}
+            ${sortBtn('visits', ta.sortVisits)}
+            ${sortBtn('qr', ta.sortQr)}
+            ${sortBtn('intent', ta.sortIntent)}
+            ${sortBtn('activity', ta.sortActivity)}
+            ${sortBtn('name', ta.sortName)}
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[1100px] text-left text-sm">
+            <thead class="bg-slate-50/90">
+              <tr class="border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <th class="px-3 py-3">${escapeHtml(td.company)}</th>
+                <th class="px-3 py-3">${escapeHtml(td.status)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.totalVisits)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.qrScans)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.shareVisits)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.whatsappClicks)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.callClicks)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.emailClicks)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.bookingIntent)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.lastActivity)}</th>
+                <th class="px-3 py-3">${escapeHtml(ta.bookingLink)}</th>
+              </tr>
+            </thead>
+            <tbody>${tableBody}</tbody>
+          </table>
+        </div>
       </div>`
   } else if (tab === 'communication') {
     const rejected = companies.filter((c) => c.status === 'rejected')
@@ -904,7 +1146,7 @@ export async function mountAdminDashboard(root) {
         </div>
       </div>`
   } else {
-    mainHtml = '<div class="rounded-2xl border border-gray-200 bg-white p-6 text-gray-600">Select a tab above.</div>'
+    mainHtml = `<div class="rounded-2xl border border-slate-200 bg-white p-6 text-slate-600">${escapeHtml(td.selectTab)}</div>`
   }
 
   const showDevCleanupPanel =
@@ -928,115 +1170,91 @@ export async function mountAdminDashboard(root) {
     : ''
 
   root.innerHTML = `
-    <div class="min-h-screen bg-[#e8e4f0] pb-16">
-      <header class="bg-gradient-to-r from-violet-600 via-purple-600 to-violet-700 px-4 py-6 shadow-lg">
-        <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
+    <div class="min-h-screen bg-slate-100 pb-16">
+      <header class="border-b border-slate-800/60 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-4 py-6 shadow-xl">
+        <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
           <div class="flex items-center gap-3">
-            ${taxioLogoImg('h-10 w-10')}
+            ${taxioLogoImg('h-10 w-10 rounded-xl ring-1 ring-white/10')}
             <div>
-              <h1 class="text-xl font-bold text-white md:text-2xl">Platform Admin Dashboard</h1>
-              <p class="text-sm text-white/80">Subscription &amp; company management</p>
+              <p class="text-[11px] font-semibold uppercase tracking-widest text-amber-400/90">TAXIO Platform</p>
+              <h1 class="text-xl font-bold text-white md:text-2xl">${escapeHtml(td.headerTitle)}</h1>
+              <p class="text-sm text-slate-400">${escapeHtml(td.headerSubtitle)}</p>
             </div>
           </div>
           <div class="flex flex-wrap gap-2">
-            <button type="button" id="adm-qr" class="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-bold text-gray-900 shadow hover:bg-gray-100">${icon.sparkles('h-4 w-4')}QR Codes</button>
-            <button type="button" id="adm-logout" class="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-bold text-gray-900 shadow hover:bg-gray-100">${icon.logOut('h-4 w-4')}Logout</button>
+            <button type="button" id="adm-qr" class="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10">${icon.qrCode('h-4 w-4')}QR Codes</button>
+            <button type="button" id="adm-logout" class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900 shadow-sm transition hover:bg-slate-100">${icon.logOut('h-4 w-4')}${escapeHtml('Logout')}</button>
           </div>
         </div>
       </header>
 
-      <div class="mx-auto max-w-6xl px-4 -mt-4">
+      <div class="mx-auto max-w-7xl px-4 pt-6">
+        ${
+          companiesLoadError
+            ? `<div class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">${escapeHtml(td.loadError)}</div>`
+            : ''
+        }
         ${
           warningBadges
             ? `<div class="mb-4 flex flex-wrap gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">${warningBadges}</div>`
             : ''
         }
-        <div class="mb-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <div class="mb-6 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <h3 class="text-sm font-bold text-gray-900">Abuse stats (last 24h)</h3>
+            <h3 class="text-sm font-bold text-slate-900">Abuse stats (last 24h)</h3>
             <div class="flex flex-wrap gap-2">
               <span class="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">Registrations blocked: ${registrationsBlocked24h}</span>
               <span class="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">Bookings blocked: ${bookingsBlocked24h}</span>
             </div>
           </div>
           <div class="mt-3 grid gap-3 md:grid-cols-2">
-            <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Top IPs</p>
-              <div class="mt-2 text-xs text-gray-800">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs font-semibold uppercase tracking-wide text-slate-600">Top IPs</p>
+              <div class="mt-2 text-xs text-slate-800">
                 ${
                   topIps.length
                     ? topIps
                         .map(
                           ([ip, count]) =>
-                            `<p class="flex items-center justify-between gap-2"><span class="font-mono">${escapeHtml(ip)}</span><span class="rounded-full bg-gray-200 px-2 py-0.5 font-semibold">${count}</span></p>`
+                            `<p class="flex items-center justify-between gap-2"><span class="font-mono">${escapeHtml(ip)}</span><span class="rounded-full bg-slate-200 px-2 py-0.5 font-semibold">${count}</span></p>`
                         )
                         .join('')
-                    : '<p class="text-gray-500">No abuse events in last 24h.</p>'
+                    : '<p class="text-slate-500">No abuse events in last 24h.</p>'
                 }
               </div>
             </div>
-            <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <p class="text-xs font-semibold uppercase tracking-wide text-gray-600">Top targeted companies</p>
-              <div class="mt-2 text-xs text-gray-800">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs font-semibold uppercase tracking-wide text-slate-600">Top targeted companies</p>
+              <div class="mt-2 text-xs text-slate-800">
                 ${
                   topCompanies.length
                     ? topCompanies
                         .map(
                           (row) =>
-                            `<p class="flex items-center justify-between gap-2"><span>${escapeHtml(row.name)}</span><span class="rounded-full bg-gray-200 px-2 py-0.5 font-semibold">${row.count}</span></p>`
+                            `<p class="flex items-center justify-between gap-2"><span>${escapeHtml(row.name)}</span><span class="rounded-full bg-slate-200 px-2 py-0.5 font-semibold">${row.count}</span></p>`
                         )
                         .join('')
-                    : '<p class="text-gray-500">No company-targeted abuse events in last 24h.</p>'
+                    : '<p class="text-slate-500">No company-targeted abuse events in last 24h.</p>'
                 }
               </div>
             </div>
           </div>
         </div>
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-5 shadow-md">
-            <div>
-              <p class="text-xs font-semibold uppercase text-gray-500">Pending Requests</p>
-              <p class="text-3xl font-bold text-blue-600">${pending.length}</p>
-            </div>
-            ${icon.building2('h-10 w-10 text-gray-200')}
-          </div>
-          <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-5 shadow-md">
-            <div>
-              <p class="text-xs font-semibold uppercase text-gray-500">Active Companies</p>
-              <p class="text-3xl font-bold text-green-600">${active.length}</p>
-            </div>
-            ${icon.building2('h-10 w-10 text-gray-200')}
-          </div>
-          <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-5 shadow-md">
-            <div>
-              <p class="text-xs font-semibold uppercase text-gray-500">Suspended Companies</p>
-              <p class="text-3xl font-bold text-amber-600">${suspended.length}</p>
-            </div>
-            ${icon.building2('h-10 w-10 text-gray-200')}
-          </div>
-          <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-5 shadow-md">
-            <div>
-              <p class="text-xs font-semibold uppercase text-gray-500">Total Cars</p>
-              <p class="text-3xl font-bold text-orange-500">${totalCars}</p>
-            </div>
-            ${icon.car('h-10 w-10 text-gray-200')}
-          </div>
-          <div class="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-5 shadow-md">
-            <div>
-              <p class="text-xs font-semibold uppercase text-gray-500">Monthly Revenue</p>
-              <p class="text-3xl font-bold text-violet-600">€${revenue}</p>
-            </div>
-            ${icon.credit('h-10 w-10 text-gray-200')}
-          </div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          ${admKpiCard({ label: td.kpiPending, value: pending.length, helper: td.kpiPendingHelper, tone: 'sky', iconName: 'inbox' })}
+          ${admKpiCard({ label: td.kpiActive, value: active.length, helper: td.kpiActiveHelper, tone: 'emerald', iconName: 'building2' })}
+          ${admKpiCard({ label: td.kpiSuspended, value: suspended.length, helper: td.kpiSuspendedHelper, tone: 'amber', iconName: 'shield' })}
+          ${admKpiCard({ label: td.kpiCars, value: totalCars, helper: td.kpiCarsHelper, tone: 'orange', iconName: 'car' })}
+          ${admKpiCard({ label: td.kpiRevenue, value: `€${revenue}`, helper: td.kpiRevenueHelper, tone: 'violet', iconName: 'euro' })}
         </div>
 
         <div class="mt-6 overflow-x-auto pb-1">
-          <div class="flex min-w-max justify-center gap-1 rounded-full bg-gray-200/80 p-1 shadow-inner sm:min-w-0">
-          ${tabBtn('requests', 'Company Requests')}
-          ${tabBtn('active', 'Active Companies')}
-          ${tabBtn('subscriptions', 'Subscriptions & Revenue')}
+          <div class="flex min-w-max gap-1 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm sm:min-w-0 sm:flex-wrap">
+          ${tabBtn('requests', td.tabRequests)}
+          ${tabBtn('active', td.tabActive)}
+          ${tabBtn('subscriptions', td.tabSubscriptions)}
           ${tabBtn('analytics', ta.tab)}
-          ${tabBtn('communication', 'Communication')}
+          ${tabBtn('communication', td.tabCommunication)}
           </div>
         </div>
 
@@ -1170,6 +1388,24 @@ export async function mountAdminDashboard(root) {
       adminState.analyticsSort = b.getAttribute('data-adm-analytics-sort')
       mountAdminDashboard(root)
     })
+  })
+
+  let activeSearchTimer
+  root.querySelector('#adm-active-search')?.addEventListener('input', (e) => {
+    clearTimeout(activeSearchTimer)
+    activeSearchTimer = setTimeout(() => {
+      adminState.activeSearch = e.target.value
+      mountAdminDashboard(root)
+    }, 280)
+  })
+
+  let analyticsSearchTimer
+  root.querySelector('#adm-analytics-search')?.addEventListener('input', (e) => {
+    clearTimeout(analyticsSearchTimer)
+    analyticsSearchTimer = setTimeout(() => {
+      adminState.analyticsSearch = e.target.value
+      mountAdminDashboard(root)
+    }, 280)
   })
 
   root.querySelector('#adm-logout')?.addEventListener('click', async () => {
