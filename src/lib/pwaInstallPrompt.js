@@ -21,6 +21,7 @@ let pwaManifestReady = false
 let serviceWorkerReady = false
 let serviceWorkerReadyPromise = null
 let activeInitSignature = null
+let activeOperatorCompanyKey = null
 const installPromptListeners = new Set()
 
 /** @returns {'native'|'preparing'|'fallback'} */
@@ -190,6 +191,9 @@ function bindBeforeInstallPrompt() {
   window.addEventListener('appinstalled', () => {
     deferredInstallPrompt = null
     removePromptEl()
+    if (activeOperatorCompanyKey) {
+      setOperatorShortcutComplete(activeOperatorCompanyKey)
+    }
   })
 }
 
@@ -229,8 +233,42 @@ function chromiumNativeWaitMs(platform) {
   return DESKTOP_CHROMIUM_NATIVE_WAIT_MS
 }
 
+export function setActiveOperatorPwaCompany(companyIdOrSlug) {
+  activeOperatorCompanyKey = String(companyIdOrSlug || '').trim() || null
+}
+
+export function getOperatorShortcutStorageKey(companyIdOrSlug) {
+  const id = String(companyIdOrSlug || 'default')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+  return `taxio_pwa_shortcut_operator_${id || 'default'}`
+}
+
+export function isOperatorShortcutComplete(companyIdOrSlug) {
+  if (isStandaloneMode()) return true
+  try {
+    return localStorage.getItem(getOperatorShortcutStorageKey(companyIdOrSlug)) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function setOperatorShortcutComplete(companyIdOrSlug) {
+  if (!companyIdOrSlug) return
+  try {
+    localStorage.setItem(getOperatorShortcutStorageKey(companyIdOrSlug), '1')
+  } catch {
+    /* private mode */
+  }
+}
+
 export function getInstallStorageKey(context, companyIdOrSlug) {
-  if (context === 'operator') return 'taxio_pwa_prompt_operator_dismissed'
+  if (context === 'operator') {
+    const id = String(companyIdOrSlug || 'default')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+    return `taxio_pwa_prompt_operator_dismissed_${id || 'default'}`
+  }
   const slug = String(companyIdOrSlug || 'default')
     .trim()
     .toLowerCase()
@@ -293,6 +331,7 @@ function pickStrings(strings, variant) {
     body: strings.body || strings[`${v}Body`] || strings.operatorBody || '',
     addShortcut: strings.addShortcut || 'Add shortcut',
     preparingShortcut: strings.preparingShortcut || 'Preparing shortcut…',
+    addedIt: strings.addedIt || 'I added it',
     howToAdd: strings.howToAdd || strings.how || 'How to add',
     notNow: strings.notNow || 'Not now',
     instructionsTitle: strings.instructionsTitle || 'Add to home screen',
@@ -392,11 +431,12 @@ function renderBanner({ strings, context, slug, iconUrl, mode, onDismiss, onInst
   return el
 }
 
-function renderInstructionsSheet(strings, platform, onClose) {
+function renderInstructionsSheet(strings, platform, onClose, opts = {}) {
   const isIOS = platform === 'ios'
   const steps = isIOS
     ? [strings.iosStep1, strings.iosStep2, strings.iosStep3]
     : [strings.androidStep1, strings.androidStep2, strings.androidStep3]
+  const showManualComplete = typeof opts.onManualComplete === 'function'
 
   const sheet = document.createElement('div')
   sheet.id = 'taxio-pwa-instructions'
@@ -414,6 +454,11 @@ function renderInstructionsSheet(strings, platform, onClose) {
       <ol class="mt-4 space-y-3 text-sm leading-relaxed text-gray-700 dark:text-slate-300">
         ${steps.map((step) => `<li class="flex gap-2"><span class="font-bold text-amber-600 dark:text-amber-400">•</span><span>${escapeHtml(step)}</span></li>`).join('')}
       </ol>
+      ${
+        showManualComplete
+          ? `<button type="button" class="taxio-pwa-instr-done mt-5 min-h-[44px] w-full rounded-xl bg-yellow-400 px-4 py-2.5 text-sm font-bold text-gray-900 shadow-sm transition hover:bg-yellow-300 active:scale-[0.98] dark:bg-amber-400 dark:hover:bg-amber-300">${escapeHtml(strings.addedIt)}</button>`
+          : ''
+      }
     </div>`
 
   const close = () => {
@@ -422,6 +467,10 @@ function renderInstructionsSheet(strings, platform, onClose) {
   }
   sheet.querySelector('.taxio-pwa-instr-backdrop')?.addEventListener('click', close)
   sheet.querySelector('.taxio-pwa-instr-close')?.addEventListener('click', close)
+  sheet.querySelector('.taxio-pwa-instr-done')?.addEventListener('click', () => {
+    opts.onManualComplete?.()
+    close()
+  })
   document.body.appendChild(sheet)
 }
 
@@ -436,9 +485,25 @@ export function hasNativeInstallPrompt() {
 }
 
 /** Try native install; on failure or unavailable, open manual instructions sheet. */
-export async function triggerPwaInstallAction({ context, slug, strings, platform, variant = 'operator' }) {
+export async function triggerPwaInstallAction({
+  context,
+  slug,
+  companyId,
+  strings,
+  platform,
+  variant = 'operator',
+  onComplete,
+}) {
   const resolvedPlatform = platform || detectInstallPlatform()
   const picked = pickStrings(strings, variant)
+  const operatorKey = companyId || slug
+
+  const markOperatorComplete = () => {
+    if (context === 'operator' && operatorKey) {
+      setOperatorShortcutComplete(operatorKey)
+      onComplete?.('complete')
+    }
+  }
 
   if (deferredInstallPrompt) {
     try {
@@ -446,25 +511,34 @@ export async function triggerPwaInstallAction({ context, slug, strings, platform
       const choice = await deferredInstallPrompt.userChoice
       deferredInstallPrompt = null
       removePromptEl()
-      if (choice?.outcome === 'dismissed') {
-        setPromptDismissed(context, slug)
+      if (choice?.outcome === 'accepted') {
+        markOperatorComplete()
+        return 'native-accepted'
       }
-      return 'native'
+      if (choice?.outcome === 'dismissed') {
+        setPromptDismissed(context, operatorKey || slug)
+      }
+      return 'native-dismissed'
     } catch {
-      renderInstructionsSheet(picked, resolvedPlatform, null)
+      renderInstructionsSheet(picked, resolvedPlatform, null, {
+        onManualComplete: context === 'operator' ? markOperatorComplete : null,
+      })
       return 'instructions'
     }
   }
 
-  renderInstructionsSheet(picked, resolvedPlatform, null)
+  renderInstructionsSheet(picked, resolvedPlatform, null, {
+    onManualComplete: context === 'operator' ? markOperatorComplete : null,
+  })
   return 'instructions'
 }
 
 /** Inline dashboard card visibility (mobile, not standalone, not snoozed). */
-export function shouldShowOperatorDashboardPwaCard() {
+export function shouldShowOperatorDashboardPwaCard(companyIdOrSlug) {
   if (!isMobileInstallTarget()) return false
   if (isStandaloneMode()) return false
-  if (!isPwaDebugMode() && isPromptDismissed('operator', '')) return false
+  if (isOperatorShortcutComplete(companyIdOrSlug)) return false
+  if (!isPwaDebugMode() && isPromptDismissed('operator', companyIdOrSlug)) return false
   return true
 }
 

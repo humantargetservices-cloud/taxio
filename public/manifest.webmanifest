@@ -1,13 +1,20 @@
 {
-  "name": "TAXIO",
+  "name": "TAXIO Dashboard",
   "short_name": "TAXIO",
-  "description": "TAXIO — your taxi smart business card.",
+  "description": "TAXIO operator dashboard — manage your taxi company.",
   "display": "standalone",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/dashboard/company",
+  "scope": "/dashboard/",
+  "id": "taxio-dashboard",
   "theme_color": "#facc15",
   "background_color": "#020617",
   "icons": [
+    {
+      "src": "/taxio-logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/taxio-logo.png",
       "sizes": "512x512",

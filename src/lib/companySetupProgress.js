@@ -100,7 +100,7 @@ export function buildQrStickersWaUrl({ companyName, bookingUrl, locale = 'en' })
  * Setup score 50% (live) → 100% when all optional steps are done.
  */
 export function calculateCompanySetupProgress(company, options = {}) {
-  const { previewDone = false, qrRequested = false } = options
+  const { previewDone = false, qrRequested = false, pwaShortcutDone = false } = options
   const slug = String(company?.slug || '').trim()
   const live = company?.status === 'approved' && slug.length >= 2
   const pricingConfigured = companyPricingConfigured(company)
@@ -169,6 +169,13 @@ export function calculateCompanySetupProgress(company, options = {}) {
       actionId: 'qr',
       meta: {},
     },
+    {
+      key: 'pwaShortcut',
+      completed: pwaShortcutDone,
+      points: 0,
+      actionId: 'pwa',
+      meta: {},
+    },
   ]
 
   return {
@@ -182,6 +189,7 @@ export function calculateCompanySetupProgress(company, options = {}) {
     hasWhatsApp,
     previewDone,
     qrRequested,
+    pwaShortcutDone,
     items,
   }
 }

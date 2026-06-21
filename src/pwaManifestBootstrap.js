@@ -10,6 +10,6 @@ initPwaInstallListener()
 const bookSlug = resolveBookSlugForRouter(window.location.pathname, window.location.hostname)
 if (bookSlug) {
   primeBookingPwaManifest(bookSlug)
-} else if (window.location.pathname !== '/dashboard/company') {
+} else {
   ensureGenericSiteManifest()
 }

@@ -2,7 +2,7 @@ import { getOriginFromReq, json, makeSupabaseServiceClient, slugFromCompanyName 
 
 const THEME_COLOR = '#facc15'
 const BACKGROUND_COLOR = '#020617'
-const FALLBACK_ICON_PATH = '/pwa-fallback-icon.svg'
+const FALLBACK_ICON_PATH = '/taxio-logo.png'
 
 function bookingRootDomain() {
   return String(process.env.VITE_TAXIO_BOOKING_ROOT_DOMAIN || 'taxio.be')
@@ -93,17 +93,18 @@ function dashboardManifestId(company) {
 function dashboardManifest(origin, company) {
   const name = String(company?.name || '').trim()
   const apex = apexWwwOrigin(origin)
+  const displayName = name ? `${name} · TAXIO Dashboard` : 'TAXIO Dashboard'
   return {
-    name: name ? `${name} Dashboard` : 'My Dashboard',
-    short_name: name ? 'My Dashboard' : 'Dashboard',
-    description: name ? `${name} operator dashboard` : 'Taxi operator dashboard',
+    name: displayName,
+    short_name: 'TAXIO',
+    description: name ? `${name} operator dashboard on TAXIO` : 'TAXIO operator dashboard',
     start_url: `${apex}/dashboard/company`,
     scope: `${apex}/dashboard/`,
     id: dashboardManifestId(company),
     display: 'standalone',
     theme_color: THEME_COLOR,
     background_color: BACKGROUND_COLOR,
-    icons: manifestIcons(origin, pickCompanyImageUrl(company)),
+    icons: manifestIcons(origin, pickCompanyImageUrl(company) || FALLBACK_ICON_PATH),
   }
 }
 
@@ -141,16 +142,16 @@ function bookingManifest(origin, company, slug, hostHeader) {
 function genericDashboardManifest(origin) {
   const apex = apexWwwOrigin(origin)
   return {
-    name: 'My Dashboard',
-    short_name: 'Dashboard',
-    description: 'Taxi operator dashboard',
+    name: 'TAXIO Dashboard',
+    short_name: 'TAXIO',
+    description: 'TAXIO operator dashboard',
     start_url: `${apex}/dashboard/company`,
     scope: `${apex}/dashboard/`,
     id: 'taxio-dashboard',
     display: 'standalone',
     theme_color: THEME_COLOR,
     background_color: BACKGROUND_COLOR,
-    icons: manifestIcons(origin, null),
+    icons: manifestIcons(origin, FALLBACK_ICON_PATH),
   }
 }
 

@@ -207,10 +207,10 @@ export function applyCompanyPwaIdentity(opts) {
   logPwaDev('manifest href:', manifestHref)
 
   if (context === 'dashboard') {
-    const title = companyName ? `${companyName} Dashboard` : 'My Dashboard'
+    const title = companyName ? `${companyName} · TAXIO Dashboard` : 'TAXIO Dashboard'
     document.title = title
-    setOrCreateMeta('application-name', title)
-    setOrCreateMeta('apple-mobile-web-app-title', 'My Dashboard')
+    setOrCreateMeta('application-name', 'TAXIO Dashboard')
+    setOrCreateMeta('apple-mobile-web-app-title', 'TAXIO')
   } else {
     const title = companyName ? `${companyName} booking` : 'Taxi booking'
     document.title = title
