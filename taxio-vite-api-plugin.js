@@ -77,14 +77,18 @@ export function taxioApiPlugin() {
           '/api/admin-delete-company': 'api/admin-delete-company.js',
           '/api/admin-dev-cleanup-test-companies': 'api/admin-dev-cleanup-test-companies.js',
           '/api/admin-send-communication-email': 'api/admin-send-communication-email.js',
+          '/api/admin-company-analytics': 'api/admin-company-analytics.js',
+          '/api/track-company-analytics': 'api/track-company-analytics.js',
           '/api/estimate-route': 'api/estimate-route.js',
         }
         const file = routes[pathname]
         const isEstimateRoute = pathname === '/api/estimate-route'
-        if (
-          !file ||
-          (req.method !== 'POST' && !(isEstimateRoute && req.method === 'OPTIONS'))
-        ) {
+        const isAdminAnalytics = pathname === '/api/admin-company-analytics'
+        const methodOk =
+          req.method === 'POST' ||
+          (isEstimateRoute && req.method === 'OPTIONS') ||
+          (isAdminAnalytics && req.method === 'GET')
+        if (!file || !methodOk) {
           return next()
         }
 
@@ -107,8 +111,9 @@ export function taxioApiPlugin() {
 
           const hdr = req.headers || {}
           const fakeReq = {
-            method: 'POST',
+            method: req.method,
             url: req.url,
+            query: Object.fromEntries(new URL(req.url || '/', 'http://local').searchParams),
             headers: {
               ...hdr,
               authorization: hdr.authorization || hdr.Authorization,

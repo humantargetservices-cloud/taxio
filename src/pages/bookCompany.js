@@ -11,7 +11,7 @@ import { tBooking, tPwa } from '../i18n.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 import { getDemoBookingCompany, isDemoBookingSlug } from '../lib/demoBookingCompany.js'
-import { absolutePublicBookingUrl } from '../lib/tenant.js'
+import { absolutePublicBookingUrl, bookingPageUrlWithSource } from '../lib/tenant.js'
 import {
   companyHourlyFromRecord,
   formatHourlyPricingNote,
@@ -20,7 +20,11 @@ import {
 } from '../lib/companyHourly.js'
 import { initPwaInstallPrompt } from '../lib/pwaInstallPrompt.js'
 import { applyCompanyPwaIdentity, buildPwaPromptStrings, pickCompanyImageUrl, prefetchCompanyManifest, resolvePwaIconUrl } from '../lib/companyPwa.js'
-import { parseBookingAnalyticsSource, trackCompanyAnalyticsEvent } from '../lib/companyAnalytics.js'
+import {
+  analyticsVisitEventType,
+  parseBookingAnalyticsSource,
+  trackCompanyAnalyticsEvent,
+} from '../lib/companyAnalytics.js'
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const TURNSTILE_FRONT_ENABLED =
@@ -473,7 +477,7 @@ export async function mountBookCompany(root, slug) {
     trackCompanyAnalyticsEvent({
       companyId: company.id,
       slug,
-      eventType: 'page_visit',
+      eventType: analyticsVisitEventType(visitSource),
       source: visitSource,
       path: window.location.pathname,
     })
@@ -563,7 +567,11 @@ export async function mountBookCompany(root, slug) {
       : typeof window !== 'undefined'
         ? window.location.href
         : ''
-  const bookingQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=16&data=${encodeURIComponent(bookingPageUrl)}`
+  const bookingQrUrl =
+    typeof window !== 'undefined' && company?.slug
+      ? bookingPageUrlWithSource(company.slug, 'qr')
+      : bookingPageUrl
+  const bookingQrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=16&data=${encodeURIComponent(bookingQrUrl)}`
 
   const slogan = (company.slogan || tb.defaultSlogan).trim()
   const vat = company.vat_number ? `${tb.vatPrefix}: ${company.vat_number}` : ''

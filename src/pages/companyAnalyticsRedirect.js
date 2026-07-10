@@ -1,29 +1,16 @@
 import { slugFromCompanyName } from '../lib/slug.js'
-import {
-  analyticsRedirectEventType,
-  parseBookingAnalyticsSource,
-  trackCompanyAnalyticsEvent,
-} from '../lib/companyAnalytics.js'
+import { parseBookingAnalyticsSource } from '../lib/companyAnalytics.js'
 import { bookingPageUrlWithSource } from '../lib/tenant.js'
 import { mountBookCompany } from './bookCompany.js'
 
 /**
- * /r/:slug?src=qr|share — record scan/visit, redirect to public booking page.
- * Analytics failure must never block the redirect.
+ * /r/:slug?src=qr|share — redirect to booking page with src preserved.
+ * qr_scan / share_visit are recorded once on the booking page load (not here),
+ * so cross-origin redirects do not abort in-flight tracking requests.
  */
 export async function mountCompanyAnalyticsRedirect(root, slug) {
   const normalized = slugFromCompanyName(slug)
   const src = parseBookingAnalyticsSource(window.location.search)
-  const eventType = analyticsRedirectEventType(src)
-
-  if (eventType) {
-    trackCompanyAnalyticsEvent({
-      slug: normalized,
-      eventType,
-      source: src,
-      path: window.location.pathname,
-    })
-  }
 
   const dest = bookingPageUrlWithSource(normalized, src === 'qr' || src === 'share' ? src : null)
 
