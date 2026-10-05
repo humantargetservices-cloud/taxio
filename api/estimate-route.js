@@ -123,13 +123,7 @@ export default async function handler(req, res) {
 
     const topStatus = String(data?.status || '').trim() || `HTTP_${googleRes.status}`
     if (!googleRes.ok || data?.status !== 'OK') {
-      // TEMP PRODUCTION DIAGNOSTIC — log Google deny reason only (no key/URL/coords/PII).
-      // Remove after root cause is confirmed in Vercel function logs.
-      console.warn('[estimate-route] Google Distance Matrix failed:', {
-        httpStatus: googleRes.status,
-        status: topStatus,
-        error_message: data?.error_message || null,
-      })
+      console.warn('[estimate-route] Google Distance Matrix failed:', topStatus)
       return routeUnavailable(req, res, 502, topStatus)
     }
 
