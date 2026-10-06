@@ -116,26 +116,26 @@ export async function fetchCompanyNamesByIds(ids) {
 }
 
 export async function activateRescueRequest({ bookingRequestId, companyId, accessToken }) {
-  const res = await fetch(apiUrl('/api/rescue-activate'), {
+  const res = await fetch(apiUrl('/api/rescue'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ bookingRequestId, companyId }),
+    body: JSON.stringify({ action: 'activate', bookingRequestId, companyId }),
   })
   const body = await res.json().catch(() => ({}))
   return { ok: res.ok && body?.ok === true, status: res.status, body }
 }
 
 export async function acceptRescueRequest({ rescueRequestId, companyId, accessToken }) {
-  const res = await fetch(apiUrl('/api/rescue-accept'), {
+  const res = await fetch(apiUrl('/api/rescue'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ rescueRequestId, companyId }),
+    body: JSON.stringify({ action: 'accept', rescueRequestId, companyId }),
   })
   const body = await res.json().catch(() => ({}))
   return { ok: res.ok && body?.ok === true, status: res.status, body }
