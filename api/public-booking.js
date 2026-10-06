@@ -135,6 +135,22 @@ export default async function handler(req, res) {
         : new Date().toISOString()
     const notesRaw = String(body.notes || '')
     const notes = notesRaw.slice(0, MAX_NOTES_LEN)
+    // SECURITY TODO (before production): recompute this once at create using Company A's
+    // pricing + route distance. Freeze the result. Never recalculate during Rescue.
+    // Current staging: trust the passenger-facing estimate submitted by the booking page.
+    let estimatedPriceEur = null
+    let priceCurrency = 'EUR'
+    if (serviceType === 'standard') {
+      const rawPrice = Number(body.estimated_price_eur)
+      if (Number.isFinite(rawPrice) && rawPrice >= 0 && rawPrice <= 100000) {
+        estimatedPriceEur = Math.round(rawPrice * 100) / 100
+      }
+      const cur = String(body.price_currency || 'EUR')
+        .trim()
+        .toUpperCase()
+        .slice(0, 8)
+      if (cur) priceCurrency = cur
+    }
     const humanConfirmed = !!body.humanConfirmed
     const ipAddress = getClientIp(req)
     const userAgent = getUserAgent(req)
@@ -376,6 +392,9 @@ export default async function handler(req, res) {
       duration_hours: serviceType === 'hourly' ? durationHours : null,
       hourly_rate_eur: serviceType === 'hourly' ? companyHourlyRate : null,
       hourly_min_hours: serviceType === 'hourly' ? companyHourlyMin : null,
+      // Point-to-point frozen trip price (immutable booking snapshot). Hourly: leave null.
+      estimated_price_eur: serviceType === 'standard' ? estimatedPriceEur : null,
+      price_currency: priceCurrency,
       customer_name: riderName,
       customer_phone: riderPhoneDigits,
       customer_email: riderEmail || null,
@@ -422,6 +441,13 @@ export default async function handler(req, res) {
     }
     if (
       insertErr &&
+      (missingColumn(insertErr, 'estimated_price_eur') || missingColumn(insertErr, 'price_currency'))
+    ) {
+      const { estimated_price_eur: _ep, price_currency: _pc, ...withoutPriceCols } = payload
+      ;({ error: insertErr } = await supabase.from('booking_requests').insert(withoutPriceCols))
+    }
+    if (
+      insertErr &&
       (missingColumn(insertErr, 'service_type') ||
         missingColumn(insertErr, 'duration_hours') ||
         missingColumn(insertErr, 'hourly_rate_eur') ||
@@ -432,6 +458,8 @@ export default async function handler(req, res) {
         duration_hours: _dh,
         hourly_rate_eur: _hr,
         hourly_min_hours: _hm,
+        estimated_price_eur: _ep2,
+        price_currency: _pc2,
         ...withoutHourlyCols
       } = payload
       const hourlyMeta =

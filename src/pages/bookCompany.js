@@ -1752,6 +1752,10 @@ Estimate price: ${estimatePrice}`
       duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
       hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
       hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
+      // Frozen passenger-facing trip price (point-to-point only). Hourly unchanged.
+      estimated_price_eur:
+        !hourlyActive && latestEstimate?.estimatedPrice != null ? latestEstimate.estimatedPrice : null,
+      price_currency: 'EUR',
       customer_name: 'Booking request',
       customer_phone: '',
       customer_email: null,

@@ -532,6 +532,7 @@ export async function updateCompanyByOwner(companyId, patch) {
     'hourly_enabled',
     'hourly_rate_eur',
     'hourly_min_hours',
+    'rescue_enabled',
   ]
   const data = {}
   for (const k of allowed) {
@@ -541,7 +542,7 @@ export async function updateCompanyByOwner(companyId, patch) {
       data[k] = v == null || v === '' ? null : String(v).trim()
       continue
     }
-    if (k === 'hourly_enabled') {
+    if (k === 'hourly_enabled' || k === 'rescue_enabled') {
       data[k] = patch[k] === true
       continue
     }
