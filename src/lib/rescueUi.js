@@ -32,7 +32,8 @@ export function cleanTripPriceDisplay(label) {
   if (label == null || label === '') return null
   let s = String(label).trim()
   if (!s) return null
-  // Whole-euro trailing dot from SQL to_char (e.g. €35.)
+  // Repair mojibake euro from mis-encoded SQL apply; strip whole-euro trailing dot.
+  s = s.replace(/â‚¬/g, '€').replace(/\u00e2\u20ac/g, '€')
   s = s.replace(/(€\s*\d+)\.(?!\d)/g, '$1')
   s = s.replace(/(\d+)\.\s*(EUR)\b/gi, '$1 $2')
   return s
