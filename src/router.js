@@ -14,6 +14,7 @@ import { mountAdminLogin } from './pages/adminLogin.js'
 import { mountAdminDashboard } from './pages/adminDashboard.js'
 import { mountTerms, mountPrivacy, mountCompanyTerms, mountContact } from './pages/legal.js'
 import { mountTaxiDirectory } from './pages/taxiDirectory.js'
+import { mountRescuePassengerConfirm } from './pages/rescuePassengerConfirm.js'
 import { resolveBookSlugForRouter } from './lib/tenant.js'
 import { ensureGenericSiteManifest, primeBookingPwaManifest } from './lib/companyPwa.js'
 import { getLocale, syncDocumentLang } from './lib/locale.js'
@@ -58,6 +59,18 @@ function route() {
     const redirectSlug = decodeURIComponent(path.slice(3).split('/')[0] || '').trim()
     if (redirectSlug) {
       mountCompanyAnalyticsRedirect(root, redirectSlug).catch((err) => {
+        console.error(err)
+        mountNotFound(root)
+      })
+      return
+    }
+    mountNotFound(root)
+    return
+  }
+  if (path.startsWith('/rescue/confirm/')) {
+    const token = decodeURIComponent(path.slice('/rescue/confirm/'.length).split('/')[0] || '').trim()
+    if (token) {
+      mountRescuePassengerConfirm(root, token).catch((err) => {
         console.error(err)
         mountNotFound(root)
       })
