@@ -244,13 +244,17 @@ export function startRescueLiveUpdates(companyId, onChange, opts = {}) {
   }
 
   const accessToken = opts.accessToken
+  // Poll is UI refresh only — server cron owns deadline authority.
+  // Keep interval modest so tick failures cannot hammer remounts.
   rescuePollTimer = setInterval(() => {
     if (accessToken) {
-      tickRescueTimeouts(accessToken).finally(fire)
+      tickRescueTimeouts(accessToken)
+        .catch(() => null)
+        .finally(fire)
     } else {
       fire()
     }
-  }, 3000)
+  }, 5000)
 }
 
 export function stopRescueLiveUpdates() {

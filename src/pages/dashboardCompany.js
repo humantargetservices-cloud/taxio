@@ -120,9 +120,42 @@ function showRescueFlash(root, message, ms = 2800) {
   setTimeout(() => {
     if (dashState.rescueFlash === message) {
       dashState.rescueFlash = null
-      mountDashboardCompany(root)
+      mountDashboardCompany(root, { soft: true })
     }
   }, ms)
+}
+
+/** Invalidates overlapping mounts so Rescue live updates cannot storm the Loading gate. */
+let dashMountGen = 0
+
+async function loadRescueDashboardData(companyId) {
+  const defaults = {
+    flags: {
+      enabled: false,
+      decisionSeconds: ORIGINAL_COMPANY_DECISION_SECONDS,
+      opportunitySeconds: RESCUE_OPPORTUNITY_SECONDS,
+    },
+    opportunities: [],
+  }
+  try {
+    const result = await Promise.race([
+      (async () => {
+        const flags = await fetchRescueGloballyEnabled()
+        const opportunities = await listRescueOpportunitiesForCompany(companyId)
+        return { flags, opportunities }
+      })(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('rescue-load-timeout')), 4000)
+      }),
+    ])
+    return {
+      flags: result?.flags || defaults.flags,
+      opportunities: Array.isArray(result?.opportunities) ? result.opportunities : [],
+    }
+  } catch (e) {
+    console.warn('[dashboard] rescue load failed soft', e?.message || e)
+    return defaults
+  }
 }
 
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
@@ -548,23 +581,35 @@ function renderSetupActionCard(td, item, progress, variant) {
   </button>`
 }
 
-export async function mountDashboardCompany(root) {
+export async function mountDashboardCompany(root, opts = {}) {
+  const soft = opts.soft === true
+  const gen = ++dashMountGen
+
+  // Stop Rescue listeners immediately — must not wait for session/company awaits
+  // or live ticks re-enter and keep the Loading gate forever.
+  stopRescueLiveUpdates()
+  stopOverlayCountdown()
+
   syncDocumentLang(getLocale())
   syncPublicThemeClass()
   const dashDark = isPublicDarkMode()
   const loadLang = getLocale()
-  root.innerHTML = `
+  if (!soft) {
+    root.innerHTML = `
     <div class="min-h-screen flex flex-col items-center justify-center bg-[#eef0f3] dark:bg-slate-950">
       <div class="h-10 w-10 animate-pulse rounded-full border-2 border-gray-300 border-t-yellow-500 dark:border-slate-600 dark:border-t-amber-400"></div>
       <p class="mt-3 text-sm text-gray-500 dark:text-slate-400">${tDashboard(loadLang).loading}</p>
     </div>`
+  }
 
   const session = await getSession()
+  if (gen !== dashMountGen) return
   if (!session) {
     navigate('/login/company')
     return
   }
   const profile = await getMyProfile(session.user.id)
+  if (gen !== dashMountGen) return
   if (profile?.first_login_required) {
     navigate('/change-password/company')
     return
@@ -576,6 +621,7 @@ export async function mountDashboardCompany(root) {
   }
 
   const company = await getCompanyForUser(session.user.id)
+  if (gen !== dashMountGen) return
   if (!company) {
     navigate('/register')
     return
@@ -594,7 +640,8 @@ export async function mountDashboardCompany(root) {
   }
 
   const pwaIdentity = applyCompanyPwaIdentity({ context: 'dashboard', company })
-  await prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
+  // Never block dashboard paint on manifest / PWA prefetch
+  void prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
   initServiceWorkerRegistration()
   setActiveOperatorPwaCompany(company.id)
 
@@ -605,27 +652,19 @@ export async function mountDashboardCompany(root) {
   } catch {
     cars = []
   }
+  if (gen !== dashMountGen) return
   try {
     bookings = await listBookingRequestsForCompany(company.id)
   } catch {
     bookings = []
   }
+  if (gen !== dashMountGen) return
 
-  stopRescueLiveUpdates()
-  stopOverlayCountdown()
-
-  let rescueFlags = {
-    enabled: false,
-    decisionSeconds: ORIGINAL_COMPANY_DECISION_SECONDS,
-    opportunitySeconds: RESCUE_OPPORTUNITY_SECONDS,
-  }
-  let rescueOpportunities = []
-  try {
-    rescueFlags = await fetchRescueGloballyEnabled()
-    rescueOpportunities = await listRescueOpportunitiesForCompany(company.id)
-  } catch (e) {
-    console.warn('[dashboard] rescue load', e)
-  }
+  // Rescue must never prevent the normal dashboard from loading
+  const rescueLoaded = await loadRescueDashboardData(company.id)
+  if (gen !== dashMountGen) return
+  const rescueFlags = rescueLoaded.flags
+  const rescueOpportunities = rescueLoaded.opportunities
 
   // Drop local expiry markers once booking is no longer pending-new
   const newIds = new Set((bookings || []).filter((b) => String(b.status || 'new') === 'new').map((b) => b.id))
@@ -962,8 +1001,10 @@ export async function mountDashboardCompany(root) {
       </div>`
   }
 
+  if (gen !== dashMountGen) return
+
   root.innerHTML = `
-    <div class="${DASH_SHELL}">
+    <div class="${DASH_SHELL}" data-dash-root="1">
       ${renderDrawer(td, t, company.name, avail, dashState.drawerOpen)}
       <header class="${DASH_HEADER} sticky top-0 z-30">
         <div class="mx-auto flex h-[3.25rem] max-w-6xl items-center justify-between gap-1.5 px-3 sm:h-14 sm:gap-2 sm:px-4">
@@ -1396,12 +1437,14 @@ export async function mountDashboardCompany(root) {
     company.id,
     async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      if (gen !== dashMountGen) return
       try {
-        const [freshBookings, opps, flags] = await Promise.all([
-          listBookingRequestsForCompany(company.id),
-          listRescueOpportunitiesForCompany(company.id),
-          fetchRescueGloballyEnabled(),
+        const [freshBookings, rescueLive] = await Promise.all([
+          listBookingRequestsForCompany(company.id).catch(() => []),
+          loadRescueDashboardData(company.id),
         ])
+        const flags = rescueLive.flags
+        const opps = rescueLive.opportunities
         const pending = pickPendingDecisionBooking(freshBookings, dashState.expiredDecisionIds)
         const sig = JSON.stringify({
           g: flags.enabled,
@@ -1412,9 +1455,10 @@ export async function mountDashboardCompany(root) {
           flash: dashState.rescueFlash,
         })
         if (sig === dashState.rescueSig) return
-        mountDashboardCompany(root)
+        // Soft remount: never flash Loading from Rescue background refresh
+        mountDashboardCompany(root, { soft: true })
       } catch {
-        /* ignore live refresh errors */
+        /* Rescue live refresh must never break the dashboard */
       }
     },
     { accessToken: session.access_token }
@@ -1428,7 +1472,7 @@ export async function mountDashboardCompany(root) {
       '#rescue-b-overlay [data-mvp-countdown]',
       () => {
         // Close B/C/D overlay at 0s — do not freeze dashboard
-        mountDashboardCompany(root)
+        mountDashboardCompany(root, { soft: true })
       }
     )
   } else if (pendingDecision) {
@@ -1444,7 +1488,7 @@ export async function mountDashboardCompany(root) {
         }
         // Close modal immediately; server cron/tick starts Rescue (browser not required)
         showRescueFlash(root, td.rescueActiveLooking || td.rescueActivateSuccess)
-        mountDashboardCompany(root)
+        mountDashboardCompany(root, { soft: true })
         if (rescueFlags.enabled && session?.access_token) {
           tickRescueTimeouts(session.access_token).catch(() => null)
         }
