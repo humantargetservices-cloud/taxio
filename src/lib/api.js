@@ -511,9 +511,27 @@ export async function updateBookingRequestStatus(companyId, bookingId, status) {
   if (!BOOKING_STATUSES.includes(status)) {
     return { error: new Error('Invalid booking status.') }
   }
+  // ACCEPT may only claim still-pending bookings; clears Company A decision deadline.
+  // Blocks late accept after Rescue auto-activation (status already rejected / no longer new).
+  if (status === 'accepted') {
+    const { data, error } = await supabase
+      .from('booking_requests')
+      .update({ status, decision_deadline_at: null })
+      .eq('id', bookingId)
+      .eq('company_id', companyId)
+      .eq('status', 'new')
+      .select('id')
+    if (error) return { error }
+    if (!data?.length) {
+      return { error: new Error('Booking is no longer available to accept.') }
+    }
+    return { error: null }
+  }
+  const patch = { status }
+  if (status === 'rejected') patch.decision_deadline_at = null
   const { error } = await supabase
     .from('booking_requests')
-    .update({ status })
+    .update(patch)
     .eq('id', bookingId)
     .eq('company_id', companyId)
   return { error }

@@ -61,10 +61,18 @@ export function renderRescueOpportunityOverlay(td, opportunity, remainingSec, to
   </div>`
 }
 
-export function pickPendingDecisionBooking(bookings) {
+/**
+ * Pending Company A decision overlay candidate.
+ * Expired deadlines never keep the blocking modal open (server activates Rescue).
+ * @param {object[]} bookings
+ * @param {Iterable<string>|Set<string>|null} [excludeIds] locally dismissed / expired booking ids
+ */
+export function pickPendingDecisionBooking(bookings, excludeIds = null) {
   const now = Date.now()
+  const excluded = excludeIds ? new Set(excludeIds) : null
   const pending = (bookings || []).filter((b) => {
     if (String(b.status || 'new') !== 'new') return false
+    if (excluded?.has(b.id)) return false
     if (!b.decision_deadline_at) return true
     return new Date(b.decision_deadline_at).getTime() > now
   })
