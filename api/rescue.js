@@ -1,14 +1,13 @@
 /**
  * POST /api/rescue
- * Combined Rescue activate + accept (Hobby plan ≤12 serverless functions).
+ * Rescue activate / accept / tick / passenger confirm|cancel|preview
+ * (Hobby plan: single serverless function.)
  *
- * Body:
- *   { action: 'activate', bookingRequestId, companyId }
- *   { action: 'accept', rescueRequestId, companyId }
- * Auth: Bearer company user JWT.
+ * Auth company actions: Bearer JWT
+ * Passenger actions: token only (no login)
  */
 import { createClient } from '@supabase/supabase-js'
-import { json, validateSupabaseServiceEnv } from './_utils.js'
+import { json, validateSupabaseServiceEnv, makeSupabaseServiceClient } from './_utils.js'
 
 function makeUserClient(token) {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -20,14 +19,19 @@ function makeUserClient(token) {
   })
 }
 
+function makeAnonClient() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const anon = process.env.VITE_SUPABASE_ANON_KEY
+  if (!url || !anon) throw new Error('Missing SUPABASE_URL / VITE_SUPABASE_ANON_KEY')
+  return createClient(url, anon, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+}
+
 async function getBearerUser(token) {
   const msg = validateSupabaseServiceEnv()
   if (msg) throw new Error(msg)
-  const url = process.env.SUPABASE_URL
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const admin = createClient(url, service, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  })
+  const admin = makeSupabaseServiceClient()
   const { data, error } = await admin.auth.getUser(token)
   if (error || !data?.user) return null
   return data.user
@@ -46,6 +50,48 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' })
 
   try {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}
+    const action = String(body.action || body.op || '').trim().toLowerCase()
+
+    // --- Passenger token actions (no company auth) ---
+    if (action === 'passenger_preview' || action === 'passenger_confirm' || action === 'passenger_cancel') {
+      const token = String(body.token || body.passenger_confirm_token || '').trim()
+      if (token.length < 20) {
+        return json(res, 400, { ok: false, code: 'INVALID_TOKEN', error: 'Invalid confirmation link.' })
+      }
+      const sb = makeAnonClient()
+      const rpcName =
+        action === 'passenger_preview'
+          ? 'taxio_rescue_passenger_preview'
+          : action === 'passenger_confirm'
+            ? 'taxio_rescue_passenger_confirm'
+            : 'taxio_rescue_passenger_cancel'
+      const { data, error } = await sb.rpc(rpcName, { p_token: token })
+      if (error) {
+        console.error('[rescue:passenger]', error.message)
+        return json(res, 500, { ok: false, code: 'RPC_ERROR', error: error.message })
+      }
+      const result = data && typeof data === 'object' ? data : { ok: false, code: 'EMPTY' }
+      const http = result.ok ? 200 : result.code === 'INVALID_TOKEN' ? 404 : 409
+      return json(res, http, result)
+    }
+
+    // --- Timeout tick (authenticated company dashboard) ---
+    if (action === 'tick') {
+      const authHeader = req.headers.authorization || ''
+      const bearer = String(authHeader).replace(/^Bearer\s+/i, '').trim()
+      if (!bearer) return json(res, 401, { error: 'Missing bearer token.', code: 'NOT_AUTHENTICATED' })
+      const user = await getBearerUser(bearer)
+      if (!user) return json(res, 401, { error: 'Invalid auth token.', code: 'NOT_AUTHENTICATED' })
+      const userSb = makeUserClient(bearer)
+      const { data, error } = await userSb.rpc('taxio_rescue_process_timeouts')
+      if (error) {
+        console.error('[rescue:tick]', error.message)
+        return json(res, 500, { error: error.message, code: 'RPC_ERROR' })
+      }
+      return json(res, 200, data && typeof data === 'object' ? data : { ok: true })
+    }
+
     const authHeader = req.headers.authorization || ''
     const token = String(authHeader).replace(/^Bearer\s+/i, '').trim()
     if (!token) return json(res, 401, { error: 'Missing bearer token.', code: 'NOT_AUTHENTICATED' })
@@ -53,12 +99,13 @@ export default async function handler(req, res) {
     const user = await getBearerUser(token)
     if (!user) return json(res, 401, { error: 'Invalid auth token.', code: 'NOT_AUTHENTICATED' })
 
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}
-    const action = String(body.action || body.op || '').trim().toLowerCase()
     const companyId = String(body.companyId || body.company_id || '').trim()
     const userSb = makeUserClient(token)
 
-    if (action === 'activate') {
+    // Always process due timeouts before activate/accept
+    await userSb.rpc('taxio_rescue_process_timeouts').catch(() => null)
+
+    if (action === 'activate' || action === 'decline') {
       const bookingRequestId = String(body.bookingRequestId || body.booking_request_id || '').trim()
       if (!bookingRequestId || !companyId) {
         return json(res, 400, {
@@ -102,14 +149,14 @@ export default async function handler(req, res) {
       const result = data && typeof data === 'object' ? data : { ok: false, code: 'EMPTY' }
       let http = 409
       if (result.ok) http = 200
-      else if (result.code === 'ALREADY_TAKEN') http = 409
+      else if (result.code === 'ALREADY_TAKEN' || result.code === 'OPPORTUNITY_EXPIRED') http = 409
       else if (result.code === 'FORBIDDEN' || result.code === 'NOT_AUTHENTICATED') http = 403
       else if (result.code === 'NOT_FOUND') http = 404
       return json(res, http, result)
     }
 
     return json(res, 400, {
-      error: "action must be 'activate' or 'accept'.",
+      error: "action must be 'activate', 'decline', 'accept', 'tick', or passenger_*",
       code: 'INVALID_INPUT',
     })
   } catch (err) {

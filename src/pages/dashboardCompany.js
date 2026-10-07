@@ -17,23 +17,22 @@ import {
 } from '../lib/api.js'
 import {
   fetchRescueGloballyEnabled,
-  listRescueRequestsForOriginCompany,
   listRescueOpportunitiesForCompany,
-  fetchCompanyNamesByIds,
   activateRescueRequest,
   acceptRescueRequest,
-  getRescueBookingDetails,
-  mapRescuesByBookingId,
-  countOpenOpportunities,
   startRescueLiveUpdates,
   stopRescueLiveUpdates,
+  ORIGINAL_COMPANY_DECISION_SECONDS,
+  RESCUE_OPPORTUNITY_SECONDS,
 } from '../lib/rescue.js'
+import { tripPriceLabelFromBooking } from '../lib/rescueUi.js'
 import {
-  renderRescueConfirmModal,
-  renderRescueTab,
-  renderBookingDecisionActions,
-  tripPriceLabelFromBooking,
-} from '../lib/rescueUi.js'
+  renderNewTripDecisionOverlay,
+  renderRescueOpportunityOverlay,
+  pickPendingDecisionBooking,
+  pickOpenOpportunity,
+  overlayRemaining,
+} from '../lib/rescueMvpUi.js'
 import { signOutEverywhere } from '../lib/auth.js'
 import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
@@ -72,12 +71,36 @@ const dashState = {
   editingCarId: null,
   drawerOpen: false,
   qrOpen: false,
-  /** @type {string | null} */
-  rescueConfirmBookingId: null,
   /** Cached fingerprint to avoid needless remounts from live updates */
   rescueSig: '',
-  /** @type {Record<string, any>} */
-  rescueAcceptedDetails: {},
+  /** Brief toast after already-taken / flash messages */
+  rescueFlash: null,
+}
+
+/** @type {ReturnType<typeof setInterval> | null} */
+let overlayCountdownTimer = null
+
+function stopOverlayCountdown() {
+  if (overlayCountdownTimer) {
+    clearInterval(overlayCountdownTimer)
+    overlayCountdownTimer = null
+  }
+}
+
+function startOverlayCountdown(deadlineIso, totalSec, barSelector, labelSelector) {
+  stopOverlayCountdown()
+  const total = Math.max(1, Number(totalSec) || 1)
+  const tick = () => {
+    const left = overlayRemaining(deadlineIso, 0)
+    const pct = Math.max(0, Math.min(100, (left / total) * 100))
+    const bar = document.querySelector(barSelector)
+    const label = document.querySelector(labelSelector)
+    if (bar) bar.style.width = `${pct}%`
+    if (label) label.textContent = `${left}s`
+    if (left <= 0) stopOverlayCountdown()
+  }
+  tick()
+  overlayCountdownTimer = setInterval(tick, 1000)
 }
 
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
@@ -225,7 +248,6 @@ function renderDrawer(td, currentTab, companyName, avail, open) {
   ]
   const operations = [
     { id: 'ride-requests', label: td.tabRides },
-    { id: 'rescue', label: td.tabRescue },
     { id: 'license', label: td.tabLicense },
   ]
   const availLabel =
@@ -387,7 +409,6 @@ function renderOverviewBody(td, ctx, tpwa) {
         ${manageTile({ id: 'pricing', title: td.cardPricing, subtitle: td.qaPricingDesc, iconBg: 'bg-violet-500/10 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400', iconHtml: `<span class="text-lg font-bold">€</span>` })}
         ${manageTile({ id: 'customize', title: td.cardCustomize, subtitle: td.qaCompanyDesc, iconBg: 'bg-yellow-400/20 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300', iconHtml: icon.palette('h-5 w-5') })}
         ${manageTile({ id: 'company', title: td.cardEssential, subtitle: td.essentialSub, iconBg: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400', iconHtml: icon.building2('h-5 w-5') })}
-        ${manageTile({ id: 'rescue', title: td.cardRescue, subtitle: td.cardRescueSub, iconBg: 'bg-amber-500/10 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300', iconHtml: icon.users('h-5 w-5') })}
         ${manageTile({ id: 'vehicle-types', title: td.cardCarTypes, subtitle: td.pricingSub, iconBg: 'bg-orange-500/10 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400', iconHtml: icon.car('h-5 w-5') })}
       </div>
     </section>
@@ -569,42 +590,31 @@ export async function mountDashboardCompany(root) {
   }
 
   stopRescueLiveUpdates()
+  stopOverlayCountdown()
 
-  let rescueGlobalOn = false
-  let rescueOutbound = []
+  let rescueFlags = {
+    enabled: false,
+    decisionSeconds: ORIGINAL_COMPANY_DECISION_SECONDS,
+    opportunitySeconds: RESCUE_OPPORTUNITY_SECONDS,
+  }
   let rescueOpportunities = []
-  let rescueWinnerNames = {}
   try {
-    rescueGlobalOn = await fetchRescueGloballyEnabled()
-    ;[rescueOutbound, rescueOpportunities] = await Promise.all([
-      listRescueRequestsForOriginCompany(company.id),
-      listRescueOpportunitiesForCompany(company.id),
-    ])
-    const nameIds = [
-      ...rescueOutbound.map((r) => r.accepted_by_company_id),
-      ...rescueOpportunities.map((o) => o.rescue?.accepted_by_company_id),
-    ]
-    rescueWinnerNames = await fetchCompanyNamesByIds(nameIds)
-    // Prefetch booking details for wins (PII only after accept)
-    for (const o of rescueOpportunities) {
-      if (o.status !== 'ACCEPTED' || !o.rescue_request_id) continue
-      if (dashState.rescueAcceptedDetails[o.rescue_request_id]?.ok) continue
-      const details = await getRescueBookingDetails(o.rescue_request_id)
-      if (details?.ok) dashState.rescueAcceptedDetails[o.rescue_request_id] = details
-    }
+    rescueFlags = await fetchRescueGloballyEnabled()
+    rescueOpportunities = await listRescueOpportunitiesForCompany(company.id)
   } catch (e) {
     console.warn('[dashboard] rescue load', e)
   }
 
-  const rescueByBooking = mapRescuesByBookingId(rescueOutbound)
-  const openOppCount = countOpenOpportunities(rescueOpportunities)
-  const companyRescueOn = company.rescue_enabled === true
+  const pendingDecision = pickPendingDecisionBooking(bookings)
+  const openOpp = pickOpenOpportunity(rescueOpportunities)
   dashState.rescueSig = JSON.stringify({
-    g: rescueGlobalOn,
-    o: rescueOpportunities.map((x) => [x.id, x.status, x.rescue?.status]),
-    r: rescueOutbound.map((x) => [x.id, x.status, x.accepted_by_company_id]),
+    g: rescueFlags.enabled,
+    d: pendingDecision ? [pendingDecision.id, pendingDecision.decision_deadline_at, pendingDecision.status] : null,
+    o: rescueOpportunities.map((x) => [x.id, x.status, x.expires_at, x.rescue?.status, x.rescue?.passenger_confirm_status]),
+    b: bookings.filter((b) => b.status === 'new').map((b) => [b.id, b.decision_deadline_at]),
   })
 
+  if (dashState.tab === 'rescue') dashState.tab = 'overview'
   const dashLang = getLocale()
   const td = tDashboard(dashLang)
   const tpwa = buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name)
@@ -850,6 +860,12 @@ export async function mountDashboardCompany(root) {
       </div>`
   } else if (t === 'ride-requests') {
     const filtered = [...bookings]
+    const statusLabel = (st) => {
+      const s = String(st || 'new')
+      if (s === 'accepted') return td.bookingAccepted || 'Accepted'
+      if (s === 'rejected') return td.bookingRefused || 'Refused'
+      return td.requestsPending || 'Pending'
+    }
     bodyHtml = `
       <div class="${DASH_PANEL}">
         <div class="flex flex-wrap items-start justify-between gap-3">
@@ -857,11 +873,6 @@ export async function mountDashboardCompany(root) {
             <h2 class="text-lg font-bold ${DASH_TEXT}">${td.ridesHead}</h2>
             <p class="text-sm ${DASH_MUTED}">${td.ridesSub}</p>
           </div>
-          ${
-            openOppCount > 0
-              ? `<button type="button" data-dash-tab="rescue" class="inline-flex items-center gap-2 rounded-full bg-amber-400 px-3 py-1.5 text-xs font-black text-slate-900 shadow-sm">${escapeHtml(td.tabRescue)} · ${openOppCount}</button>`
-              : ''
-          }
         </div>
         <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
           <input type="search" id="ride-search" placeholder="${escapeHtml(td.ridesSearch)}" class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" />
@@ -870,14 +881,14 @@ export async function mountDashboardCompany(root) {
           </button>
         </div>
         <div class="mt-4 overflow-x-auto">
-          <table class="w-full min-w-[880px] text-left text-sm">
+          <table class="w-full min-w-[720px] text-left text-sm">
             <thead>
               <tr class="border-b border-gray-200 text-xs font-semibold uppercase text-gray-500">
                 <th class="py-3 pr-4">${td.thPassenger}</th>
                 <th class="py-3 pr-4">${escapeHtml(td.thRoute)}</th>
                 <th class="py-3 pr-4">${td.thWhen}</th>
-                <th class="py-3 pr-4">${escapeHtml(td.rescueTripPrice || td.rescueEstPrice)}</th>
-                <th class="py-3 pr-4">${escapeHtml(td.thDecision)}</th>
+                <th class="py-3 pr-4">${escapeHtml(td.rescueTripPrice || 'Trip price')}</th>
+                <th class="py-3 pr-4">${escapeHtml(td.thStatus || 'Status')}</th>
                 <th class="py-3">${td.thActions}</th>
               </tr>
             </thead>
@@ -887,18 +898,8 @@ export async function mountDashboardCompany(root) {
                   const wa = company.phone
                     ? `https://wa.me/${String(company.phone).replace(/\D/g, '')}?text=${encodeURIComponent(`Regarding booking from ${b.pickup_address}`)}`
                     : ''
-                  const em = `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent('Booking')}&body=${encodeURIComponent(`Passenger: ${b.customer_name || '—'}\nFrom: ${b.pickup_address}\nTo: ${b.dropoff_address}`)}`
-                  const rescue = rescueByBooking[b.id]
-                  const winnerLabel = rescue?.accepted_by_company_id
-                    ? rescueWinnerNames[rescue.accepted_by_company_id]
-                    : null
-                  const est = tripPriceLabelFromBooking(b, rescue) || '—'
-                  const decision = renderBookingDecisionActions(td, b, rescue, {
-                    rescueGlobalOn,
-                    companyRescueOn,
-                    winnerName: winnerLabel,
-                    tripPrice: est !== '—' ? est : null,
-                  })
+                  const em = `mailto:${encodeURIComponent(company.email || '')}?subject=${encodeURIComponent('Booking')}&body=${encodeURIComponent(`Passenger: ${b.customer_name || '—'}\nFrom: ${b.pickup_address}\nTo: ${b.dropoff_address}`)}`
+                  const est = tripPriceLabelFromBooking(b) || '—'
                   return `
                 <tr class="border-b border-gray-100 ride-row" data-search="${escapeHtml(`${b.customer_name} ${b.pickup_address} ${b.dropoff_address} ${b.ride_datetime}`.toLowerCase())}">
                   <td class="py-3 pr-4 font-medium text-gray-900 dark:text-slate-100">${escapeHtml(b.customer_name || '—')}</td>
@@ -908,7 +909,7 @@ export async function mountDashboardCompany(root) {
                   </td>
                   <td class="py-3 pr-4 whitespace-nowrap text-gray-600 dark:text-slate-300">${escapeHtml(formatDateTime(b.ride_datetime))}</td>
                   <td class="py-3 pr-4 font-semibold text-amber-700 dark:text-amber-300">${escapeHtml(est)}</td>
-                  <td class="py-3 pr-4">${decision}</td>
+                  <td class="py-3 pr-4 text-xs font-semibold text-gray-600 dark:text-slate-300">${escapeHtml(statusLabel(b.status))}</td>
                   <td class="py-3">
                     <div class="flex flex-wrap gap-2">
                       <a href="${wa ? escapeHtml(wa) : '#'}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800 ${!company.phone ? 'pointer-events-none opacity-40' : ''}">${icon.messageCircle('h-3.5 w-3.5')}${td.wa}</a>
@@ -923,16 +924,6 @@ export async function mountDashboardCompany(root) {
           ${filtered.length === 0 ? `<p class="py-8 text-center text-sm text-gray-500">${td.noRides}</p>` : ''}
         </div>
       </div>`
-  } else if (t === 'rescue') {
-    bodyHtml = renderRescueTab(td, {
-      companyRescueOn,
-      rescueGlobalOn,
-      openOppCount,
-      opportunities: rescueOpportunities,
-      outbound: rescueOutbound,
-      winnerNames: rescueWinnerNames,
-      acceptedDetails: dashState.rescueAcceptedDetails,
-    })
   } else if (t === 'license') {
     const plan = company.subscription_plan === 'premium' ? 'Premium' : 'Basic'
     bodyHtml = `
@@ -987,7 +978,30 @@ export async function mountDashboardCompany(root) {
       ${renderMobileBottomNav(td, t)}
       ${showPwaCard ? renderDashboardPwaCard(td, tpwa) : ''}
       <div id="dash-modal-root"></div>
-      ${dashState.rescueConfirmBookingId ? renderRescueConfirmModal(td) : ''}
+      ${
+        dashState.rescueFlash
+          ? `<div id="rescue-flash" class="fixed inset-x-0 top-4 z-[80] flex justify-center px-4 pointer-events-none">
+              <p class="rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold text-amber-900 shadow-lg dark:border-amber-500/40 dark:bg-slate-900 dark:text-amber-100">${escapeHtml(dashState.rescueFlash)}</p>
+            </div>`
+          : ''
+      }
+      ${
+        openOpp
+          ? renderRescueOpportunityOverlay(
+              td,
+              openOpp,
+              overlayRemaining(openOpp.expires_at, rescueFlags.opportunitySeconds),
+              rescueFlags.opportunitySeconds
+            )
+          : pendingDecision
+            ? renderNewTripDecisionOverlay(
+                td,
+                pendingDecision,
+                overlayRemaining(pendingDecision.decision_deadline_at, rescueFlags.decisionSeconds),
+                rescueFlags.decisionSeconds
+              )
+            : ''
+      }
     </div>`
 
   root.querySelectorAll('[data-dash-tab]').forEach((btn) => {
@@ -1200,209 +1214,182 @@ export async function mountDashboardCompany(root) {
         mountDashboardCompany(root)
         return
       }
-      if (id === 'rescue') {
-        dashState.tab = 'rescue'
-        dashState.drawerOpen = false
-        mountDashboardCompany(root)
-        return
-      }
       if (id === 'help') {
         handleSetupAction('support')
       }
     })
   })
 
-  // --- Booking Accept / Refuse → Rescue ---
-  root.querySelectorAll('[data-booking-accept]').forEach((btn) => {
+  // --- MVP: Company A Accept / Decline overlays ---
+  root.querySelectorAll('[data-mvp-accept-booking]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const bookingId = btn.getAttribute('data-booking-accept')
+      const bookingId = btn.getAttribute('data-mvp-accept-booking')
       if (!bookingId) return
       btn.disabled = true
+      const msg = root.querySelector('#rescue-a-msg')
       const { error } = await updateBookingRequestStatus(company.id, bookingId, 'accepted')
       if (error) {
         btn.disabled = false
-        window.alert(td.bookingAcceptError || error.message)
+        if (msg) {
+          msg.textContent = td.bookingAcceptError || error.message
+          msg.classList.remove('hidden')
+        }
         return
       }
       mountDashboardCompany(root)
     })
   })
 
-  root.querySelectorAll('[data-booking-refuse]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      dashState.rescueConfirmBookingId = btn.getAttribute('data-booking-refuse')
-      mountDashboardCompany(root)
-    })
-  })
-
-  root.querySelector('#rescue-confirm-cancel')?.addEventListener('click', () => {
-    dashState.rescueConfirmBookingId = null
-    mountDashboardCompany(root)
-  })
-
-  root.querySelector('#rescue-confirm-send')?.addEventListener('click', async () => {
-    const bookingId = dashState.rescueConfirmBookingId
-    const msgEl = root.querySelector('#rescue-confirm-msg')
-    const sendBtn = root.querySelector('#rescue-confirm-send')
-    if (!bookingId) return
-    if (sendBtn) sendBtn.disabled = true
-    try {
-      const canRescue = rescueGlobalOn && companyRescueOn
-      if (canRescue) {
-        const result = await activateRescueRequest({
-          bookingRequestId: bookingId,
-          companyId: company.id,
-          accessToken: session.access_token,
-        })
-        if (!result.ok && result.body?.code !== 'RESCUE_ALREADY_EXISTS') {
-          const code = result.body?.code
-          // Rescue unavailable → still refuse booking without network
-          if (code === 'RESCUE_GLOBALLY_DISABLED' || code === 'COMPANY_RESCUE_DISABLED') {
-            const { error } = await updateBookingRequestStatus(company.id, bookingId, 'rejected')
-            if (error) {
-              if (msgEl) {
-                msgEl.textContent = td.bookingRefuseError || error.message
-                msgEl.classList.remove('hidden')
+  root.querySelectorAll('[data-mvp-decline-booking]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const bookingId = btn.getAttribute('data-mvp-decline-booking')
+      if (!bookingId) return
+      btn.disabled = true
+      const msg = root.querySelector('#rescue-a-msg')
+      try {
+        if (rescueFlags.enabled) {
+          const result = await activateRescueRequest({
+            bookingRequestId: bookingId,
+            companyId: company.id,
+            accessToken: session.access_token,
+          })
+          if (!result.ok && result.body?.code !== 'RESCUE_ALREADY_EXISTS') {
+            if (
+              result.body?.code === 'RESCUE_GLOBALLY_DISABLED' ||
+              result.body?.code === 'COMPANY_RESCUE_DISABLED'
+            ) {
+              const { error } = await updateBookingRequestStatus(company.id, bookingId, 'rejected')
+              if (error) {
+                btn.disabled = false
+                if (msg) {
+                  msg.textContent = td.bookingRefuseError || error.message
+                  msg.classList.remove('hidden')
+                }
+                return
               }
-              if (sendBtn) sendBtn.disabled = false
+              mountDashboardCompany(root)
               return
             }
-            dashState.rescueConfirmBookingId = null
-            mountDashboardCompany(root)
+            btn.disabled = false
+            if (msg) {
+              msg.textContent = result.body?.error || td.rescueActivateError
+              msg.classList.remove('hidden')
+            }
             return
           }
-          const text =
-            code === 'RESCUE_ALREADY_EXISTS'
-              ? td.rescueAlreadyActive
-              : result.body?.error || td.rescueActivateError
-          if (msgEl) {
-            msgEl.textContent = text
-            msgEl.classList.remove('hidden')
-          }
-          if (sendBtn) sendBtn.disabled = false
+          await updateBookingRequestStatus(company.id, bookingId, 'rejected')
+          mountDashboardCompany(root)
           return
         }
-        // Mark refused for original company history; ownership stays A
-        await updateBookingRequestStatus(company.id, bookingId, 'rejected')
-        dashState.rescueConfirmBookingId = null
-        dashState.tab = 'ride-requests'
-        mountDashboardCompany(root)
-        return
-      }
-
-      // Rescue off: refuse only
-      const { error } = await updateBookingRequestStatus(company.id, bookingId, 'rejected')
-      if (error) {
-        if (msgEl) {
-          msgEl.textContent = td.bookingRefuseError || error.message
-          msgEl.classList.remove('hidden')
+        const { error } = await updateBookingRequestStatus(company.id, bookingId, 'rejected')
+        if (error) {
+          btn.disabled = false
+          if (msg) {
+            msg.textContent = td.bookingRefuseError || error.message
+            msg.classList.remove('hidden')
+          }
+          return
         }
-        if (sendBtn) sendBtn.disabled = false
-        return
+        mountDashboardCompany(root)
+      } catch {
+        btn.disabled = false
+        if (msg) {
+          msg.textContent = td.rescueActivateError
+          msg.classList.remove('hidden')
+        }
       }
-      dashState.rescueConfirmBookingId = null
-      mountDashboardCompany(root)
-    } catch {
-      if (msgEl) {
-        msgEl.textContent = td.rescueActivateError
-        msgEl.classList.remove('hidden')
-      }
-      if (sendBtn) sendBtn.disabled = false
-    }
+    })
   })
 
-  root.querySelector('#save-rescue-enabled')?.addEventListener('click', async () => {
-    const enabled = !!root.querySelector('#dash-rescue-enabled')?.checked
-    const msg = root.querySelector('#dash-rescue-msg')
-    const { error } = await updateCompanyByOwner(company.id, { rescue_enabled: enabled })
-    if (msg) {
-      msg.textContent = error ? td.rescueSaveError : td.rescueSaveSuccess
-      msg.className = `mt-2 text-sm font-medium ${error ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-300'}`
-    }
-    if (!error) setTimeout(() => mountDashboardCompany(root), 400)
-  })
-
-  root.querySelectorAll('[data-rescue-accept]').forEach((btn) => {
+  // --- MVP: Company B Accept overlay ---
+  root.querySelectorAll('[data-mvp-accept-rescue]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const rescueId = btn.getAttribute('data-rescue-accept')
+      const rescueId = btn.getAttribute('data-mvp-accept-rescue')
       if (!rescueId) return
       btn.disabled = true
-      const card = btn.closest('[data-rescue-opp]')
-      const msg = card?.querySelector('.rescue-accept-msg')
+      const msg = root.querySelector('#rescue-b-msg')
       try {
         const result = await acceptRescueRequest({
           rescueRequestId: rescueId,
           companyId: company.id,
           accessToken: session.access_token,
         })
-        if (result.body?.code === 'ALREADY_TAKEN') {
-          if (msg) {
-            msg.textContent = td.rescueAlreadyTaken
-            msg.className = 'rescue-accept-msg mt-2 text-sm font-medium text-amber-700 dark:text-amber-300'
-            msg.classList.remove('hidden')
-          }
-          btn.disabled = true
-          btn.textContent = td.rescueAlreadyTaken
-          setTimeout(() => mountDashboardCompany(root), 900)
+        if (result.body?.code === 'ALREADY_TAKEN' || result.body?.code === 'OPPORTUNITY_EXPIRED') {
+          dashState.rescueFlash = td.rescueAlreadyTakenShort || 'Trip already accepted.'
+          setTimeout(() => {
+            dashState.rescueFlash = null
+            mountDashboardCompany(root)
+          }, 1600)
+          mountDashboardCompany(root)
           return
         }
         if (!result.ok) {
+          btn.disabled = false
           if (msg) {
-            msg.textContent =
-              result.body?.code === 'RESCUE_GLOBALLY_DISABLED'
-                ? td.rescueGlobalOff
-                : result.body?.error || td.rescueAcceptError
-            msg.className = 'rescue-accept-msg mt-2 text-sm font-medium text-red-600 dark:text-red-400'
+            msg.textContent = result.body?.error || td.rescueAcceptError
             msg.classList.remove('hidden')
           }
-          btn.disabled = false
           return
         }
-        const details = await getRescueBookingDetails(rescueId)
-        if (details?.ok) dashState.rescueAcceptedDetails[rescueId] = details
+        // Winner: COMPANY FOUND — PII locked until passenger confirms
+        dashState.rescueFlash = td.rescueCompanyFound || 'Company found — waiting for passenger confirmation.'
+        setTimeout(() => {
+          dashState.rescueFlash = null
+          mountDashboardCompany(root)
+        }, 2000)
         mountDashboardCompany(root)
       } catch {
+        btn.disabled = false
         if (msg) {
           msg.textContent = td.rescueAcceptError
-          msg.className = 'rescue-accept-msg mt-2 text-sm font-medium text-red-600 dark:text-red-400'
           msg.classList.remove('hidden')
         }
-        btn.disabled = false
       }
     })
   })
 
-  root.querySelectorAll('[data-rescue-load-details]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const rescueId = btn.getAttribute('data-rescue-load-details')
-      if (!rescueId) return
-      btn.disabled = true
-      const details = await getRescueBookingDetails(rescueId)
-      if (details?.ok) dashState.rescueAcceptedDetails[rescueId] = details
-      mountDashboardCompany(root)
-    })
-  })
+  startRescueLiveUpdates(
+    company.id,
+    async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      try {
+        const [freshBookings, opps, flags] = await Promise.all([
+          listBookingRequestsForCompany(company.id),
+          listRescueOpportunitiesForCompany(company.id),
+          fetchRescueGloballyEnabled(),
+        ])
+        const pending = pickPendingDecisionBooking(freshBookings)
+        const sig = JSON.stringify({
+          g: flags.enabled,
+          d: pending ? [pending.id, pending.decision_deadline_at, pending.status] : null,
+          o: opps.map((x) => [x.id, x.status, x.expires_at, x.rescue?.status, x.rescue?.passenger_confirm_status]),
+          b: freshBookings.filter((b) => b.status === 'new').map((b) => [b.id, b.decision_deadline_at]),
+          flash: dashState.rescueFlash,
+        })
+        if (sig === dashState.rescueSig) return
+        mountDashboardCompany(root)
+      } catch {
+        /* ignore live refresh errors */
+      }
+    },
+    { accessToken: session.access_token }
+  )
 
-  startRescueLiveUpdates(company.id, async () => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-    try {
-      const [outs, opps, globalOn] = await Promise.all([
-        listRescueRequestsForOriginCompany(company.id),
-        listRescueOpportunitiesForCompany(company.id),
-        fetchRescueGloballyEnabled(),
-      ])
-      const sig = JSON.stringify({
-        g: globalOn,
-        o: opps.map((x) => [x.id, x.status, x.rescue?.status]),
-        r: outs.map((x) => [x.id, x.status, x.accepted_by_company_id]),
-      })
-      if (sig === dashState.rescueSig) return
-      if (dashState.rescueConfirmBookingId) return
-      mountDashboardCompany(root)
-    } catch {
-      /* ignore live refresh errors */
-    }
-  })
+  if (openOpp) {
+    startOverlayCountdown(
+      openOpp.expires_at,
+      rescueFlags.opportunitySeconds,
+      '#rescue-b-overlay [data-mvp-progress]',
+      '#rescue-b-overlay [data-mvp-countdown]'
+    )
+  } else if (pendingDecision) {
+    startOverlayCountdown(
+      pendingDecision.decision_deadline_at,
+      rescueFlags.decisionSeconds,
+      '#rescue-a-overlay [data-mvp-progress]',
+      '#rescue-a-overlay [data-mvp-countdown]'
+    )
+  }
 
   root.querySelector('#dash-pwa-add')?.addEventListener('click', () => {
     void triggerDashboardPwaInstall()
