@@ -13,6 +13,7 @@ import {
   acceptRescueRequest,
   activateRescueRequest,
   fetchRescueGloballyEnabled,
+  fetchRescueWinnerDetails,
   listRescueOpportunitiesForCompany,
   secondsRemaining,
   startRescueLiveUpdates,
@@ -22,12 +23,16 @@ import {
   overlayRemaining,
   pickOpenOpportunity,
   pickPendingDecisionBooking,
+  pickWonRescue,
   renderNewTripDecisionOverlay,
   renderRescueOpportunityOverlay,
+  renderWinnerStatusPanel,
 } from './rescueMvpUi.js'
 
 /** @type {string[]} */
 let dismissedIds = []
+/** @type {string[]} */
+let dismissedWinnerIds = []
 /** @type {string | null} */
 let flashMessage = null
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -38,9 +43,11 @@ let countdownTimer = null
 let expireFired = false
 /** @type {string} */
 let lastSig = ''
-/** @type {{ companyId: string, accessToken: string, portal: HTMLElement } | null} */
+/** @type {{ companyId: string, accessToken: string, companyName: string, portal: HTMLElement } | null} */
 let session = null
 let refreshInflight = false
+/** @type {Map<string, object>} */
+const winnerDetailsCache = new Map()
 
 function td() {
   return tDashboard(getLocale())
@@ -105,6 +112,15 @@ function startCountdown(deadlineIso, totalSec, onExpire) {
 function bindHandlers(ctx) {
   const { companyId, accessToken, portal } = ctx
   const copy = td()
+
+  portal.querySelectorAll('[data-mvp-dismiss-winner]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-mvp-dismiss-winner')
+      if (id && !dismissedWinnerIds.includes(id)) dismissedWinnerIds = [...dismissedWinnerIds, id]
+      lastSig = ''
+      void refreshNotifications()
+    })
+  })
 
   portal.querySelectorAll('[data-mvp-accept-booking]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -224,7 +240,7 @@ function bindHandlers(ctx) {
           }
           return
         }
-        showFlash(copy.rescueCompanyFound || 'Company found — waiting for passenger confirmation.')
+        showFlash(copy.rescueReservedBadge || 'Trip reserved for you')
         void refreshNotifications()
       } catch {
         btn.disabled = false
@@ -241,7 +257,7 @@ async function refreshNotifications() {
   if (!session) return
   if (refreshInflight) return
   refreshInflight = true
-  const { companyId, accessToken, portal } = session
+  const { companyId, accessToken, companyName, portal } = session
   try {
     const [flags, opportunities, bookings] = await Promise.all([
       fetchRescueGloballyEnabled(),
@@ -254,13 +270,39 @@ async function refreshNotifications() {
 
     const pendingDecision = pickPendingDecisionBooking(bookings, dismissedIds)
     const openOpp = pickOpenOpportunity(opportunities)
+    const won = pickWonRescue(opportunities, companyId)
+    const pcs = won?.rescue?.passenger_confirm_status || ''
+    const wonId = won?.rescue_request_id || won?.rescue?.id || ''
+    const winnerDismissed = wonId && dismissedWinnerIds.includes(wonId)
+
+    let winnerPhase = null
+    if (won && !winnerDismissed) {
+      if (pcs === 'WAITING_PASSENGER_CONFIRMATION') winnerPhase = 'waiting'
+      else if (pcs === 'CONFIRMED') winnerPhase = 'confirmed'
+      else if (pcs === 'CANCELLED_BY_PASSENGER') winnerPhase = 'cancelled'
+    }
+
+    let winnerDetails = null
+    if (winnerPhase === 'confirmed' && wonId) {
+      winnerDetails = winnerDetailsCache.get(wonId) || null
+      if (!winnerDetails) {
+        const det = await fetchRescueWinnerDetails({ rescueRequestId: wonId, accessToken })
+        if (det.ok) {
+          winnerDetails = det.body
+          winnerDetailsCache.set(wonId, det.body)
+        }
+      }
+    }
+
     const copy = td()
 
     const sig = JSON.stringify({
       g: flags.enabled,
       d: pendingDecision ? [pendingDecision.id, pendingDecision.decision_deadline_at] : null,
       o: openOpp ? [openOpp.id, openOpp.status, openOpp.expires_at] : null,
+      w: wonId ? [wonId, pcs, winnerPhase, !!winnerDetails] : null,
       x: dismissedIds,
+      dw: dismissedWinnerIds,
       f: flashMessage,
     })
 
@@ -273,6 +315,7 @@ async function refreshNotifications() {
     stopCountdown()
 
     let overlayHtml = ''
+    // Decision / opportunity overlays take priority over winner panel
     if (openOpp) {
       overlayHtml = renderRescueOpportunityOverlay(
         copy,
@@ -290,6 +333,13 @@ async function refreshNotifications() {
         ),
         flags.decisionSeconds || ORIGINAL_COMPANY_DECISION_SECONDS
       )
+    } else if (winnerPhase) {
+      overlayHtml = renderWinnerStatusPanel(copy, {
+        phase: winnerPhase,
+        opportunity: won,
+        details: winnerDetails,
+        companyName: companyName || '',
+      })
     }
 
     portal.innerHTML = `${renderFlashHtml()}${overlayHtml}`
@@ -329,16 +379,17 @@ async function refreshNotifications() {
  * Failures never throw — dashboard remains usable.
  * Idempotent for the same companyId (tab remounts must not tear overlays down).
  */
-export function startRescueNotifications({ companyId, accessToken }) {
+export function startRescueNotifications({ companyId, accessToken, companyName }) {
   if (!companyId || !accessToken) return
   if (session?.companyId === companyId && session?.accessToken === accessToken) {
     session.portal = ensurePortal()
+    if (companyName) session.companyName = companyName
     void refreshNotifications()
     return
   }
   stopRescueNotifications()
   const portal = ensurePortal()
-  session = { companyId, accessToken, portal }
+  session = { companyId, accessToken, companyName: companyName || '', portal }
   lastSig = ''
   void refreshNotifications()
   startRescueLiveUpdates(companyId, () => {
@@ -357,6 +408,7 @@ export function stopRescueNotifications() {
   flashMessage = null
   lastSig = ''
   session = null
+  winnerDetailsCache.clear()
   const portal = document.getElementById('rescue-notification-root')
   if (portal) portal.innerHTML = ''
 }

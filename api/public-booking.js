@@ -158,6 +158,9 @@ export default async function handler(req, res) {
     if (!companyId || !pickup) {
       return json(res, 400, { error: 'Missing booking fields.' })
     }
+    if (!riderPhoneDigits || riderPhoneDigits.length < 8 || riderPhoneDigits.length > 15) {
+      return json(res, 400, { error: 'A valid WhatsApp / mobile number is required.' })
+    }
     if (honeypot) {
       return json(res, 400, { error: 'Security verification failed. Please retry the booking form.' })
     }

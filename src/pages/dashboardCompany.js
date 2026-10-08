@@ -1147,6 +1147,7 @@ export async function mountDashboardCompany(root, opts = {}) {
     startRescueNotifications({
       companyId: company.id,
       accessToken: session.access_token,
+      companyName: company.name,
     })
   } catch (e) {
     console.warn('[dashboard] rescue notifications failed soft', e?.message || e)

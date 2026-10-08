@@ -101,3 +101,93 @@ export function overlayRemaining(deadlineIso, fallbackSec) {
   if (deadlineIso) return secondsRemaining(deadlineIso)
   return Math.max(0, Number(fallbackSec) || 0)
 }
+
+/**
+ * Most recent Rescue this company won (ACCEPTED opportunity + ACCEPTED request).
+ */
+export function pickWonRescue(opportunities, companyId) {
+  const mine = (opportunities || []).filter(
+    (o) =>
+      o.company_id === companyId &&
+      o.status === 'ACCEPTED' &&
+      o.rescue?.status === 'ACCEPTED' &&
+      o.rescue?.accepted_by_company_id === companyId
+  )
+  mine.sort((a, b) => {
+    const ta = a.rescue?.accepted_at ? new Date(a.rescue.accepted_at).getTime() : 0
+    const tb = b.rescue?.accepted_at ? new Date(b.rescue.accepted_at).getTime() : 0
+    return tb - ta
+  })
+  return mine[0] || null
+}
+
+/** Non-blocking winner panel: waiting / confirmed / cancelled. */
+export function renderWinnerStatusPanel(td, { phase, opportunity, details, companyName }) {
+  const r = opportunity?.rescue || {}
+  const pickup = r.preview_pickup_label || details?.booking?.pickup_address || '—'
+  const dropoff = r.preview_dropoff_label || details?.booking?.dropoff_address || '—'
+  const price =
+    cleanTripPriceDisplay(r.preview_estimated_price) ||
+    (details?.booking?.estimated_price_eur != null
+      ? `€${Number(details.booking.estimated_price_eur).toFixed(2)}`
+      : '—')
+  const when = formatDateTime(r.preview_ride_datetime || details?.booking?.ride_datetime) || '—'
+  const rescueId = opportunity?.rescue_request_id || r.id || ''
+
+  if (phase === 'waiting') {
+    return `<div id="rescue-winner-panel" class="pointer-events-none fixed inset-x-0 bottom-0 z-[65] flex justify-center p-4 sm:bottom-6">
+      <div class="pointer-events-auto w-full max-w-md rounded-2xl border border-amber-200 bg-white p-5 shadow-2xl dark:border-amber-500/30 dark:bg-slate-900">
+        <p class="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">${escapeHtml(td.rescueReservedBadge || 'Trip reserved for you')}</p>
+        <h3 class="mt-2 text-lg font-bold text-gray-900 dark:text-slate-50">${escapeHtml(pickup)} → ${escapeHtml(dropoff)}</h3>
+        <p class="mt-2 text-sm font-semibold text-amber-700 dark:text-amber-300">${escapeHtml(td.rescueTripPrice || 'Trip price')}: ${escapeHtml(price)}</p>
+        <p class="mt-3 text-sm text-gray-600 dark:text-slate-300">${escapeHtml(td.rescueWaitingPassenger || 'Waiting for passenger confirmation…')}</p>
+        <p class="mt-1 text-xs text-gray-500 dark:text-slate-400">${escapeHtml(td.rescuePiiLockedHint || 'Passenger contact stays private until they confirm.')}</p>
+      </div>
+    </div>`
+  }
+
+  if (phase === 'cancelled') {
+    return `<div id="rescue-winner-panel" class="pointer-events-none fixed inset-x-0 bottom-0 z-[65] flex justify-center p-4 sm:bottom-6">
+      <div class="pointer-events-auto w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-600 dark:bg-slate-900">
+        <p class="text-xs font-bold uppercase tracking-wide text-slate-500">${escapeHtml(td.rescueCancelledBadge || 'Trip cancelled by passenger')}</p>
+        <h3 class="mt-2 text-lg font-bold text-gray-900 dark:text-slate-50">${escapeHtml(pickup)} → ${escapeHtml(dropoff)}</h3>
+        <p class="mt-2 text-sm text-gray-600 dark:text-slate-300">${escapeHtml(td.rescueCancelledBody || 'The passenger cancelled this reassignment. No passenger contact was shared.')}</p>
+        <button type="button" data-mvp-dismiss-winner="${escapeHtml(rescueId)}" class="mt-4 w-full min-h-[44px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100">${escapeHtml(td.rescueDismiss || 'Dismiss')}</button>
+      </div>
+    </div>`
+  }
+
+  if (phase === 'confirmed') {
+    const b = details?.booking || {}
+    const phone = String(b.customer_phone || '').trim()
+    const name = String(b.customer_name || '').trim()
+    const exactPickup = b.pickup_address || pickup
+    const exactDrop = b.dropoff_address || dropoff
+    let waDigits = phone.replace(/\D/g, '')
+    if (waDigits.startsWith('00')) waDigits = waDigits.slice(2)
+    if (waDigits.startsWith('0')) waDigits = `32${waDigits.slice(1)}`
+    const prefill = `Hello, this is ${companyName || 'TAXIO'}. I accepted your TAXIO booking from ${exactPickup} to ${exactDrop}. I am contacting you regarding your confirmed ride.`
+    const waHref =
+      waDigits.length >= 8 && waDigits.length <= 15
+        ? `https://wa.me/${waDigits}?text=${encodeURIComponent(prefill)}`
+        : ''
+    return `<div id="rescue-winner-panel" class="pointer-events-none fixed inset-x-0 bottom-0 z-[65] flex justify-center p-4 sm:bottom-6">
+      <div class="pointer-events-auto w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-5 shadow-2xl dark:border-emerald-500/30 dark:bg-slate-900">
+        <p class="text-xs font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">${escapeHtml(td.rescuePassengerConfirmed || 'Passenger confirmed')}</p>
+        <h3 class="mt-2 text-lg font-bold text-gray-900 dark:text-slate-50">${escapeHtml(exactPickup)} → ${escapeHtml(exactDrop)}</h3>
+        <p class="mt-2 text-sm font-semibold text-amber-700 dark:text-amber-300">${escapeHtml(td.rescueTripPrice || 'Trip price')}: ${escapeHtml(price)}</p>
+        <p class="mt-1 text-sm text-gray-500 dark:text-slate-400">${escapeHtml(td.rescueWhen || 'When')}: ${escapeHtml(when)}</p>
+        ${name && name !== 'Booking request' ? `<p class="mt-3 text-sm text-gray-800 dark:text-slate-200"><span class="font-semibold">${escapeHtml(td.rescuePassengerName || 'Passenger')}:</span> ${escapeHtml(name)}</p>` : ''}
+        ${phone ? `<p class="mt-1 text-sm text-gray-800 dark:text-slate-200"><span class="font-semibold">${escapeHtml(td.rescuePassengerPhone || 'WhatsApp / mobile')}:</span> ${escapeHtml(phone)}</p>` : ''}
+        ${
+          waHref
+            ? `<a href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer" class="mt-4 flex min-h-[48px] w-full items-center justify-center rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-emerald-500">${escapeHtml(td.rescueWhatsappPassenger || 'WHATSAPP PASSENGER')}</a>`
+            : `<p class="mt-4 text-sm font-medium text-amber-800 dark:text-amber-200">${escapeHtml(td.rescueNoPassengerPhone || 'No passenger WhatsApp number on this booking.')}</p>`
+        }
+        <button type="button" data-mvp-dismiss-winner="${escapeHtml(rescueId)}" class="mt-2 w-full min-h-[40px] rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">${escapeHtml(td.rescueDismiss || 'Dismiss')}</button>
+      </div>
+    </div>`
+  }
+
+  return ''
+}

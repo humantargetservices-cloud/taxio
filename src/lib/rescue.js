@@ -111,6 +111,24 @@ export async function acceptRescueRequest({ rescueRequestId, companyId, accessTo
   return { ok: res.ok && body?.ok === true, status: res.status, body }
 }
 
+/** Winner PII unlock details (only after passenger CONFIRMED). Soft-fails. */
+export async function fetchRescueWinnerDetails({ rescueRequestId, accessToken }) {
+  try {
+    const res = await fetch(apiUrl('/api/rescue'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ action: 'winner_details', rescueRequestId }),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { ok: res.ok && body?.ok === true, status: res.status, body }
+  } catch (e) {
+    return { ok: false, status: 0, body: { code: 'NETWORK', error: e?.message || 'failed' } }
+  }
+}
+
 export async function passengerRescuePreview(token) {
   const res = await fetch(apiUrl('/api/rescue'), {
     method: 'POST',

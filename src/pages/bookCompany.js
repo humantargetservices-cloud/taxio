@@ -710,6 +710,12 @@ export async function mountBookCompany(root, slug) {
               </div>
             </div>
 
+            <div>
+              <label for="bk-rider-phone" class="block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">${escapeHtml(tb.riderPhoneLabel || 'WhatsApp / mobile number')}</label>
+              <input id="bk-rider-phone" type="tel" inputmode="tel" autocomplete="tel" required placeholder="${escapeHtml(tb.riderPhonePh || '+32 …')}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:bg-slate-800 dark:focus:ring-amber-400/25" />
+              <p class="mt-1.5 text-[0.6875rem] leading-snug text-slate-500 dark:text-slate-400">${escapeHtml(tb.riderPhoneHint || 'Required so TAXIO can reach you if another company takes your trip.')}</p>
+            </div>
+
             <div class="rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-4 ring-1 ring-slate-900/[0.04] dark:border-slate-700/60 dark:bg-slate-800/40 dark:ring-white/[0.04] sm:px-5 sm:py-5">
               <label class="flex cursor-pointer items-start gap-3">
                 <input type="checkbox" id="bk-terms" class="mt-0.5 h-[18px] w-[18px] shrink-0 rounded border-slate-300 bg-white text-amber-500 focus:ring-amber-400/40 focus:ring-offset-0 dark:border-slate-500 dark:bg-slate-800 dark:text-amber-400" />
@@ -1683,6 +1689,14 @@ Estimate price: ${estimatePrice}`
       errEl.classList.remove('hidden')
       return
     }
+    const riderPhoneRaw = String(root.querySelector('#bk-rider-phone')?.value || '').trim()
+    const riderPhoneDigits = whatsappDigitsForWaMe(riderPhoneRaw)
+    if (!riderPhoneDigits) {
+      errEl.textContent = msgs.errRiderPhone || 'Please enter a valid WhatsApp / mobile number.'
+      errEl.classList.remove('hidden')
+      root.querySelector('#bk-rider-phone')?.focus()
+      return
+    }
     let rideDateIso = null
     if (hourlyActive) {
       const raw = hourlyStartEl?.value || ''
@@ -1757,7 +1771,7 @@ Estimate price: ${estimatePrice}`
         !hourlyActive && latestEstimate?.estimatedPrice != null ? latestEstimate.estimatedPrice : null,
       price_currency: 'EUR',
       customer_name: 'Booking request',
-      customer_phone: '',
+      customer_phone: riderPhoneDigits,
       customer_email: null,
       ride_datetime: rideDateIso,
       notes: logNotes,
