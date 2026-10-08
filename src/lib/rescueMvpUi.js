@@ -1,12 +1,12 @@
 import { escapeHtml } from './html.js'
 import { formatDateTime } from './format.js'
-import { cleanTripPriceDisplay, tripPriceLabelFromBooking } from './rescueUi.js'
+import { cleanTripPriceDisplay, tripPriceLabelFromBooking } from './rescuePrice.js'
 import { secondsRemaining } from './rescue.js'
 
-export { cleanTripPriceDisplay, tripPriceLabelFromBooking, estimateLabelFromBookingNotes } from './rescueUi.js'
+export { cleanTripPriceDisplay, tripPriceLabelFromBooking } from './rescuePrice.js'
 
 /**
- * Company A foreground decision overlay (25s UX countdown).
+ * Company A foreground decision overlay (25s UX countdown — display only).
  */
 export function renderNewTripDecisionOverlay(td, booking, remainingSec, totalSec) {
   if (!booking) return ''
@@ -35,7 +35,7 @@ export function renderNewTripDecisionOverlay(td, booking, remainingSec, totalSec
 }
 
 /**
- * Company B/C/D opportunity overlay (10s UX countdown).
+ * Company B/C/D opportunity overlay (10s UX countdown — display only).
  */
 export function renderRescueOpportunityOverlay(td, opportunity, remainingSec, totalSec) {
   if (!opportunity) return ''
@@ -62,10 +62,8 @@ export function renderRescueOpportunityOverlay(td, opportunity, remainingSec, to
 }
 
 /**
- * Pending Company A decision overlay candidate.
- * Expired deadlines never keep the blocking modal open (server activates Rescue).
- * @param {object[]} bookings
- * @param {Iterable<string>|Set<string>|null} [excludeIds] locally dismissed / expired booking ids
+ * Pending Company A decision — only while deadline is still in the future.
+ * Missing/expired deadlines never keep a blocking modal open (server owns Rescue).
  */
 export function pickPendingDecisionBooking(bookings, excludeIds = null) {
   const now = Date.now()
@@ -73,7 +71,7 @@ export function pickPendingDecisionBooking(bookings, excludeIds = null) {
   const pending = (bookings || []).filter((b) => {
     if (String(b.status || 'new') !== 'new') return false
     if (excluded?.has(b.id)) return false
-    if (!b.decision_deadline_at) return true
+    if (!b.decision_deadline_at) return false
     return new Date(b.decision_deadline_at).getTime() > now
   })
   pending.sort((a, b) => {

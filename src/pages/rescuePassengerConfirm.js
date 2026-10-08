@@ -3,7 +3,7 @@ import {
   passengerRescueConfirm,
   passengerRescueCancel,
 } from '../lib/rescue.js'
-import { cleanTripPriceDisplay } from '../lib/rescueUi.js'
+import { cleanTripPriceDisplay } from '../lib/rescuePrice.js'
 import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
 import { taxioLogoImg } from '../lib/taxioLogo.js'

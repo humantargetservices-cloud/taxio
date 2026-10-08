@@ -76,7 +76,8 @@ export default async function handler(req, res) {
       return json(res, http, result)
     }
 
-    // --- Timeout tick (authenticated company dashboard) ---
+    // Timeout authority is pg_cron (taxio-rescue-process-timeouts).
+    // Optional diagnostic tick remains available but is not used by the dashboard.
     if (action === 'tick') {
       const authHeader = req.headers.authorization || ''
       const bearer = String(authHeader).replace(/^Bearer\s+/i, '').trim()
@@ -84,12 +85,17 @@ export default async function handler(req, res) {
       const user = await getBearerUser(bearer)
       if (!user) return json(res, 401, { error: 'Invalid auth token.', code: 'NOT_AUTHENTICATED' })
       const userSb = makeUserClient(bearer)
-      const { data, error } = await userSb.rpc('taxio_rescue_process_timeouts')
-      if (error) {
-        console.error('[rescue:tick]', error.message)
-        return json(res, 500, { error: error.message, code: 'RPC_ERROR' })
+      try {
+        const { data, error } = await userSb.rpc('taxio_rescue_process_timeouts')
+        if (error) {
+          console.error('[rescue:tick]', error.message)
+          return json(res, 500, { error: error.message, code: 'RPC_ERROR' })
+        }
+        return json(res, 200, data && typeof data === 'object' ? data : { ok: true })
+      } catch (err) {
+        console.error('[rescue:tick]', err?.message || err)
+        return json(res, 500, { error: err?.message || 'tick failed', code: 'RPC_ERROR' })
       }
-      return json(res, 200, data && typeof data === 'object' ? data : { ok: true })
     }
 
     const authHeader = req.headers.authorization || ''
@@ -101,16 +107,6 @@ export default async function handler(req, res) {
 
     const companyId = String(body.companyId || body.company_id || '').trim()
     const userSb = makeUserClient(token)
-
-    // Always process due timeouts before activate/accept (best-effort; never block Rescue actions)
-    try {
-      const { error: timeoutErr } = await userSb.rpc('taxio_rescue_process_timeouts')
-      if (timeoutErr) {
-        console.warn('[rescue] timeout processing failed', timeoutErr.message || timeoutErr)
-      }
-    } catch (err) {
-      console.warn('[rescue] timeout processing failed', err?.message || err)
-    }
 
     if (action === 'activate' || action === 'decline') {
       const bookingRequestId = String(body.bookingRequestId || body.booking_request_id || '').trim()

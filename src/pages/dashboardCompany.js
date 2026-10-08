@@ -10,30 +10,12 @@ import {
   updateCar,
   deleteCar,
   updateCompanyByOwner,
-  updateBookingRequestStatus,
   uploadCompanyLogo,
   removeCompanyLogo,
   DEFAULT_PRICING,
 } from '../lib/api.js'
-import {
-  fetchRescueGloballyEnabled,
-  listRescueOpportunitiesForCompany,
-  activateRescueRequest,
-  acceptRescueRequest,
-  tickRescueTimeouts,
-  startRescueLiveUpdates,
-  stopRescueLiveUpdates,
-  ORIGINAL_COMPANY_DECISION_SECONDS,
-  RESCUE_OPPORTUNITY_SECONDS,
-} from '../lib/rescue.js'
-import { tripPriceLabelFromBooking } from '../lib/rescueUi.js'
-import {
-  renderNewTripDecisionOverlay,
-  renderRescueOpportunityOverlay,
-  pickPendingDecisionBooking,
-  pickOpenOpportunity,
-  overlayRemaining,
-} from '../lib/rescueMvpUi.js'
+import { tripPriceLabelFromBooking } from '../lib/rescuePrice.js'
+import { startRescueNotifications, stopRescueNotifications } from '../lib/rescueNotifications.js'
 import { signOutEverywhere } from '../lib/auth.js'
 import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
@@ -72,91 +54,10 @@ const dashState = {
   editingCarId: null,
   drawerOpen: false,
   qrOpen: false,
-  /** Cached fingerprint to avoid needless remounts from live updates */
-  rescueSig: '',
-  /** Brief toast after already-taken / flash messages */
-  rescueFlash: null,
-  /** Booking ids whose Company A modal was closed at 0s (do not re-block UI) */
-  expiredDecisionIds: /** @type {string[]} */ ([]),
 }
 
-/** @type {ReturnType<typeof setInterval> | null} */
-let overlayCountdownTimer = null
-/** Prevent double onExpire from the same countdown instance */
-let overlayExpireFired = false
-
-function stopOverlayCountdown() {
-  if (overlayCountdownTimer) {
-    clearInterval(overlayCountdownTimer)
-    overlayCountdownTimer = null
-  }
-}
-
-function startOverlayCountdown(deadlineIso, totalSec, barSelector, labelSelector, onExpire) {
-  stopOverlayCountdown()
-  overlayExpireFired = false
-  const total = Math.max(1, Number(totalSec) || 1)
-  const tick = () => {
-    const left = overlayRemaining(deadlineIso, 0)
-    const pct = Math.max(0, Math.min(100, (left / total) * 100))
-    const bar = document.querySelector(barSelector)
-    const label = document.querySelector(labelSelector)
-    if (bar) bar.style.width = `${pct}%`
-    if (label) label.textContent = `${left}s`
-    if (left <= 0) {
-      stopOverlayCountdown()
-      if (!overlayExpireFired && typeof onExpire === 'function') {
-        overlayExpireFired = true
-        onExpire()
-      }
-    }
-  }
-  tick()
-  overlayCountdownTimer = setInterval(tick, 250)
-}
-
-function showRescueFlash(root, message, ms = 2800) {
-  dashState.rescueFlash = message
-  setTimeout(() => {
-    if (dashState.rescueFlash === message) {
-      dashState.rescueFlash = null
-      mountDashboardCompany(root, { soft: true })
-    }
-  }, ms)
-}
-
-/** Invalidates overlapping mounts so Rescue live updates cannot storm the Loading gate. */
+/** Invalidates overlapping mounts (tab switches / concurrent loads). */
 let dashMountGen = 0
-
-async function loadRescueDashboardData(companyId) {
-  const defaults = {
-    flags: {
-      enabled: false,
-      decisionSeconds: ORIGINAL_COMPANY_DECISION_SECONDS,
-      opportunitySeconds: RESCUE_OPPORTUNITY_SECONDS,
-    },
-    opportunities: [],
-  }
-  try {
-    const result = await Promise.race([
-      (async () => {
-        const flags = await fetchRescueGloballyEnabled()
-        const opportunities = await listRescueOpportunitiesForCompany(companyId)
-        return { flags, opportunities }
-      })(),
-      new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('rescue-load-timeout')), 4000)
-      }),
-    ])
-    return {
-      flags: result?.flags || defaults.flags,
-      opportunities: Array.isArray(result?.opportunities) ? result.opportunities : [],
-    }
-  } catch (e) {
-    console.warn('[dashboard] rescue load failed soft', e?.message || e)
-    return defaults
-  }
-}
 
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
 const DASH_SHELL =
@@ -585,11 +486,6 @@ export async function mountDashboardCompany(root, opts = {}) {
   const soft = opts.soft === true
   const gen = ++dashMountGen
 
-  // Stop Rescue listeners immediately — must not wait for session/company awaits
-  // or live ticks re-enter and keep the Loading gate forever.
-  stopRescueLiveUpdates()
-  stopOverlayCountdown()
-
   syncDocumentLang(getLocale())
   syncPublicThemeClass()
   const dashDark = isPublicDarkMode()
@@ -660,27 +556,7 @@ export async function mountDashboardCompany(root, opts = {}) {
   }
   if (gen !== dashMountGen) return
 
-  // Rescue must never prevent the normal dashboard from loading
-  const rescueLoaded = await loadRescueDashboardData(company.id)
-  if (gen !== dashMountGen) return
-  const rescueFlags = rescueLoaded.flags
-  const rescueOpportunities = rescueLoaded.opportunities
-
-  // Drop local expiry markers once booking is no longer pending-new
-  const newIds = new Set((bookings || []).filter((b) => String(b.status || 'new') === 'new').map((b) => b.id))
-  dashState.expiredDecisionIds = (dashState.expiredDecisionIds || []).filter((id) => newIds.has(id))
-
-  const pendingDecision = pickPendingDecisionBooking(bookings, dashState.expiredDecisionIds)
-  const openOpp = pickOpenOpportunity(rescueOpportunities)
-  dashState.rescueSig = JSON.stringify({
-    g: rescueFlags.enabled,
-    d: pendingDecision ? [pendingDecision.id, pendingDecision.decision_deadline_at, pendingDecision.status] : null,
-    o: rescueOpportunities.map((x) => [x.id, x.status, x.expires_at, x.rescue?.status, x.rescue?.passenger_confirm_status]),
-    b: bookings.filter((b) => b.status === 'new').map((b) => [b.id, b.decision_deadline_at]),
-    x: dashState.expiredDecisionIds,
-    flash: dashState.rescueFlash,
-  })
-
+  // Rescue notifications run AFTER paint — never block dashboard load
   if (dashState.tab === 'rescue') dashState.tab = 'overview'
   const dashLang = getLocale()
   const td = tDashboard(dashLang)
@@ -1047,30 +923,6 @@ export async function mountDashboardCompany(root, opts = {}) {
       ${renderMobileBottomNav(td, t)}
       ${showPwaCard ? renderDashboardPwaCard(td, tpwa) : ''}
       <div id="dash-modal-root"></div>
-      ${
-        dashState.rescueFlash
-          ? `<div id="rescue-flash" class="fixed inset-x-0 top-4 z-[80] flex justify-center px-4 pointer-events-none">
-              <p class="rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold text-amber-900 shadow-lg dark:border-amber-500/40 dark:bg-slate-900 dark:text-amber-100">${escapeHtml(dashState.rescueFlash)}</p>
-            </div>`
-          : ''
-      }
-      ${
-        openOpp
-          ? renderRescueOpportunityOverlay(
-              td,
-              openOpp,
-              overlayRemaining(openOpp.expires_at, rescueFlags.opportunitySeconds),
-              rescueFlags.opportunitySeconds
-            )
-          : pendingDecision
-            ? renderNewTripDecisionOverlay(
-                td,
-                pendingDecision,
-                overlayRemaining(pendingDecision.decision_deadline_at, rescueFlags.decisionSeconds),
-                rescueFlags.decisionSeconds
-              )
-            : ''
-      }
     </div>`
 
   root.querySelectorAll('[data-dash-tab]').forEach((btn) => {
@@ -1114,6 +966,7 @@ export async function mountDashboardCompany(root, opts = {}) {
   })
 
   root.querySelector('#co-logout')?.addEventListener('click', async () => {
+    stopRescueNotifications()
     await signOutEverywhere()
     navigate('/')
   })
@@ -1289,211 +1142,14 @@ export async function mountDashboardCompany(root, opts = {}) {
     })
   })
 
-  // --- MVP: Company A Accept / Decline overlays ---
-  root.querySelectorAll('[data-mvp-accept-booking]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const bookingId = btn.getAttribute('data-mvp-accept-booking')
-      if (!bookingId) return
-      btn.disabled = true
-      const msg = root.querySelector('#rescue-a-msg')
-      // Process due timeouts first so late accept cannot race past committed Rescue
-      await tickRescueTimeouts(session.access_token).catch(() => null)
-      const { error } = await updateBookingRequestStatus(company.id, bookingId, 'accepted')
-      if (error) {
-        const gone = /no longer available/i.test(error.message || '')
-        btn.disabled = false
-        if (msg) {
-          msg.textContent = gone
-            ? td.bookingAcceptGone || error.message
-            : td.bookingAcceptError || error.message
-          msg.classList.remove('hidden')
-        }
-        if (gone) {
-          // Rescue (or other claim) already committed — close blocking overlay
-          if (!dashState.expiredDecisionIds.includes(bookingId)) {
-            dashState.expiredDecisionIds = [...dashState.expiredDecisionIds, bookingId]
-          }
-          showRescueFlash(root, td.rescueActiveLooking || td.rescueActivateSuccess)
-          mountDashboardCompany(root)
-        }
-        return
-      }
-      mountDashboardCompany(root)
+  // Rescue overlays live outside the dashboard mount (display-only vs server cron)
+  try {
+    startRescueNotifications({
+      companyId: company.id,
+      accessToken: session.access_token,
     })
-  })
-
-  root.querySelectorAll('[data-mvp-decline-booking]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const bookingId = btn.getAttribute('data-mvp-decline-booking')
-      if (!bookingId) return
-      btn.disabled = true
-      const msg = root.querySelector('#rescue-a-msg')
-      try {
-        if (rescueFlags.enabled) {
-          const result = await activateRescueRequest({
-            bookingRequestId: bookingId,
-            companyId: company.id,
-            accessToken: session.access_token,
-          })
-          if (!result.ok && result.body?.code !== 'RESCUE_ALREADY_EXISTS') {
-            if (
-              result.body?.code === 'RESCUE_GLOBALLY_DISABLED' ||
-              result.body?.code === 'COMPANY_RESCUE_DISABLED'
-            ) {
-              const { error } = await updateBookingRequestStatus(company.id, bookingId, 'rejected')
-              if (error) {
-                btn.disabled = false
-                if (msg) {
-                  msg.textContent = td.bookingRefuseError || error.message
-                  msg.classList.remove('hidden')
-                }
-                return
-              }
-              mountDashboardCompany(root)
-              return
-            }
-            btn.disabled = false
-            if (msg) {
-              msg.textContent = result.body?.error || td.rescueActivateError
-              msg.classList.remove('hidden')
-            }
-            return
-          }
-          if (!dashState.expiredDecisionIds.includes(bookingId)) {
-            dashState.expiredDecisionIds = [...dashState.expiredDecisionIds, bookingId]
-          }
-          showRescueFlash(root, td.rescueActiveLooking || td.rescueActivateSuccess)
-          mountDashboardCompany(root)
-          return
-        }
-        const { error } = await updateBookingRequestStatus(company.id, bookingId, 'rejected')
-        if (error) {
-          btn.disabled = false
-          if (msg) {
-            msg.textContent = td.bookingRefuseError || error.message
-            msg.classList.remove('hidden')
-          }
-          return
-        }
-        mountDashboardCompany(root)
-      } catch {
-        btn.disabled = false
-        if (msg) {
-          msg.textContent = td.rescueActivateError
-          msg.classList.remove('hidden')
-        }
-      }
-    })
-  })
-
-  // --- MVP: Company B Accept overlay ---
-  root.querySelectorAll('[data-mvp-accept-rescue]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const rescueId = btn.getAttribute('data-mvp-accept-rescue')
-      if (!rescueId) return
-      btn.disabled = true
-      const msg = root.querySelector('#rescue-b-msg')
-      try {
-        const result = await acceptRescueRequest({
-          rescueRequestId: rescueId,
-          companyId: company.id,
-          accessToken: session.access_token,
-        })
-        if (result.body?.code === 'ALREADY_TAKEN' || result.body?.code === 'OPPORTUNITY_EXPIRED') {
-          dashState.rescueFlash = td.rescueAlreadyTakenShort || 'Trip already accepted.'
-          setTimeout(() => {
-            dashState.rescueFlash = null
-            mountDashboardCompany(root)
-          }, 1600)
-          mountDashboardCompany(root)
-          return
-        }
-        if (!result.ok) {
-          btn.disabled = false
-          if (msg) {
-            msg.textContent = result.body?.error || td.rescueAcceptError
-            msg.classList.remove('hidden')
-          }
-          return
-        }
-        // Winner: COMPANY FOUND — PII locked until passenger confirms
-        dashState.rescueFlash = td.rescueCompanyFound || 'Company found — waiting for passenger confirmation.'
-        setTimeout(() => {
-          dashState.rescueFlash = null
-          mountDashboardCompany(root)
-        }, 2000)
-        mountDashboardCompany(root)
-      } catch {
-        btn.disabled = false
-        if (msg) {
-          msg.textContent = td.rescueAcceptError
-          msg.classList.remove('hidden')
-        }
-      }
-    })
-  })
-
-  startRescueLiveUpdates(
-    company.id,
-    async () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-      if (gen !== dashMountGen) return
-      try {
-        const [freshBookings, rescueLive] = await Promise.all([
-          listBookingRequestsForCompany(company.id).catch(() => []),
-          loadRescueDashboardData(company.id),
-        ])
-        const flags = rescueLive.flags
-        const opps = rescueLive.opportunities
-        const pending = pickPendingDecisionBooking(freshBookings, dashState.expiredDecisionIds)
-        const sig = JSON.stringify({
-          g: flags.enabled,
-          d: pending ? [pending.id, pending.decision_deadline_at, pending.status] : null,
-          o: opps.map((x) => [x.id, x.status, x.expires_at, x.rescue?.status, x.rescue?.passenger_confirm_status]),
-          b: freshBookings.filter((b) => b.status === 'new').map((b) => [b.id, b.decision_deadline_at]),
-          x: dashState.expiredDecisionIds,
-          flash: dashState.rescueFlash,
-        })
-        if (sig === dashState.rescueSig) return
-        // Soft remount: never flash Loading from Rescue background refresh
-        mountDashboardCompany(root, { soft: true })
-      } catch {
-        /* Rescue live refresh must never break the dashboard */
-      }
-    },
-    { accessToken: session.access_token }
-  )
-
-  if (openOpp) {
-    startOverlayCountdown(
-      openOpp.expires_at,
-      rescueFlags.opportunitySeconds,
-      '#rescue-b-overlay [data-mvp-progress]',
-      '#rescue-b-overlay [data-mvp-countdown]',
-      () => {
-        // Close B/C/D overlay at 0s — do not freeze dashboard
-        mountDashboardCompany(root, { soft: true })
-      }
-    )
-  } else if (pendingDecision) {
-    startOverlayCountdown(
-      pendingDecision.decision_deadline_at,
-      rescueFlags.decisionSeconds,
-      '#rescue-a-overlay [data-mvp-progress]',
-      '#rescue-a-overlay [data-mvp-countdown]',
-      () => {
-        const bookingId = pendingDecision.id
-        if (bookingId && !dashState.expiredDecisionIds.includes(bookingId)) {
-          dashState.expiredDecisionIds = [...dashState.expiredDecisionIds, bookingId]
-        }
-        // Close modal immediately; server cron/tick starts Rescue (browser not required)
-        showRescueFlash(root, td.rescueActiveLooking || td.rescueActivateSuccess)
-        mountDashboardCompany(root, { soft: true })
-        if (rescueFlags.enabled && session?.access_token) {
-          tickRescueTimeouts(session.access_token).catch(() => null)
-        }
-      }
-    )
+  } catch (e) {
+    console.warn('[dashboard] rescue notifications failed soft', e?.message || e)
   }
 
   root.querySelector('#dash-pwa-add')?.addEventListener('click', () => {
