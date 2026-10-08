@@ -102,8 +102,15 @@ export default async function handler(req, res) {
     const companyId = String(body.companyId || body.company_id || '').trim()
     const userSb = makeUserClient(token)
 
-    // Always process due timeouts before activate/accept
-    await userSb.rpc('taxio_rescue_process_timeouts').catch(() => null)
+    // Always process due timeouts before activate/accept (best-effort; never block Rescue actions)
+    try {
+      const { error: timeoutErr } = await userSb.rpc('taxio_rescue_process_timeouts')
+      if (timeoutErr) {
+        console.warn('[rescue] timeout processing failed', timeoutErr.message || timeoutErr)
+      }
+    } catch (err) {
+      console.warn('[rescue] timeout processing failed', err?.message || err)
+    }
 
     if (action === 'activate' || action === 'decline') {
       const bookingRequestId = String(body.bookingRequestId || body.booking_request_id || '').trim()
