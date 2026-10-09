@@ -6,6 +6,7 @@ import {
   verifyTurnstileToken,
   validateSupabaseServiceEnv,
 } from './_utils.js'
+import { generateBookingReference } from './_bookingReference.js'
 
 const MAX_NOTES_LEN = 500
 const VEHICLE_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
@@ -158,8 +159,10 @@ export default async function handler(req, res) {
     if (!companyId || !pickup) {
       return json(res, 400, { error: 'Missing booking fields.' })
     }
-    if (!riderPhoneDigits || riderPhoneDigits.length < 8 || riderPhoneDigits.length > 15) {
-      return json(res, 400, { error: 'A valid WhatsApp / mobile number is required.' })
+    // customer_phone is optional on booking create. Final Rescue model captures passenger
+    // WhatsApp contact later via Company A inbound Meta webhook (not the booking form).
+    if (riderPhoneDigits && (riderPhoneDigits.length < 8 || riderPhoneDigits.length > 15)) {
+      return json(res, 400, { error: 'Invalid WhatsApp / mobile number.' })
     }
     if (honeypot) {
       return json(res, 400, { error: 'Security verification failed. Please retry the booking form.' })
@@ -386,6 +389,7 @@ export default async function handler(req, res) {
       })
     }
 
+    const bookingReference = generateBookingReference()
     const payload = {
       company_id: companyId,
       pickup_address: pickup,
@@ -404,6 +408,7 @@ export default async function handler(req, res) {
       ride_datetime: requestedRideDate,
       notes: notes || null,
       status,
+      booking_reference: bookingReference,
       rider_terms_accepted: true,
       rider_terms_accepted_at: new Date().toISOString(),
       rider_terms_version: String(body?.termsAcceptance?.terms_version || '').trim() || null,
@@ -413,10 +418,32 @@ export default async function handler(req, res) {
       turnstile_error: turnstile.enabled && !turnstile.passed ? String(turnstile.reason || '') : null,
     }
 
-    let { error: insertErr } = await supabase.from('booking_requests').insert(payload)
+    async function insertReturning(row) {
+      return supabase.from('booking_requests').insert(row).select('id,booking_reference').maybeSingle()
+    }
+
+    let inserted = null
+    let insertErr = null
+    ;({ data: inserted, error: insertErr } = await insertReturning(payload))
+
+    // Unique collision on reference — retry once with a new code
+    if (insertErr && /booking_reference|duplicate key|unique/i.test(insertErr.message || '')) {
+      payload.booking_reference = generateBookingReference()
+      ;({ data: inserted, error: insertErr } = await insertReturning(payload))
+    }
+
+    if (insertErr && missingColumn(insertErr, 'booking_reference')) {
+      const { booking_reference: _br, ...withoutRef } = payload
+      ;({ data: inserted, error: insertErr } = await supabase
+        .from('booking_requests')
+        .insert(withoutRef)
+        .select('id')
+        .maybeSingle())
+      if (!insertErr && inserted) inserted = { ...inserted, booking_reference: null }
+    }
     if (insertErr && missingColumn(insertErr, 'turnstile_')) {
       const { turnstile_passed: _tp, turnstile_error: _te, ...withoutTurnstile } = payload
-      ;({ error: insertErr } = await supabase.from('booking_requests').insert(withoutTurnstile))
+      ;({ data: inserted, error: insertErr } = await insertReturning(withoutTurnstile))
     }
     if (insertErr && (missingColumn(insertErr, 'ip_address') || missingColumn(insertErr, 'user_agent'))) {
       const {
@@ -426,7 +453,7 @@ export default async function handler(req, res) {
         turnstile_error: _te2,
         ...withoutMeta
       } = payload
-      ;({ error: insertErr } = await supabase.from('booking_requests').insert(withoutMeta))
+      ;({ data: inserted, error: insertErr } = await insertReturning(withoutMeta))
     }
     if (
       insertErr &&
@@ -440,14 +467,14 @@ export default async function handler(req, res) {
         rider_terms_version: _rtv,
         ...withoutLegal
       } = payload
-      ;({ error: insertErr } = await supabase.from('booking_requests').insert(withoutLegal))
+      ;({ data: inserted, error: insertErr } = await insertReturning(withoutLegal))
     }
     if (
       insertErr &&
       (missingColumn(insertErr, 'estimated_price_eur') || missingColumn(insertErr, 'price_currency'))
     ) {
       const { estimated_price_eur: _ep, price_currency: _pc, ...withoutPriceCols } = payload
-      ;({ error: insertErr } = await supabase.from('booking_requests').insert(withoutPriceCols))
+      ;({ data: inserted, error: insertErr } = await insertReturning(withoutPriceCols))
     }
     if (
       insertErr &&
@@ -474,15 +501,22 @@ export default async function handler(req, res) {
           ? `${withoutHourlyCols.notes} | ${hourlyMeta}`
           : hourlyMeta
         : withoutHourlyCols.notes
-      ;({ error: insertErr } = await supabase
-        .from('booking_requests')
-        .insert({ ...withoutHourlyCols, notes: notesWithHourly || null }))
+      ;({ data: inserted, error: insertErr } = await insertReturning({
+        ...withoutHourlyCols,
+        notes: notesWithHourly || null,
+      }))
     }
     if (insertErr) {
       console.error('[public-booking:insert]', insertErr)
       return json(res, 500, { error: `Could not save booking request: ${insertErr.message}` })
     }
-    return json(res, 200, { data: { ok: true } })
+    return json(res, 200, {
+      data: {
+        ok: true,
+        id: inserted?.id || null,
+        booking_reference: inserted?.booking_reference || payload.booking_reference || null,
+      },
+    })
   } catch (err) {
     console.error('[public-booking]', err)
     return json(res, 500, { error: err?.message || 'Internal server error.' })

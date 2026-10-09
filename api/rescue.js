@@ -8,69 +8,8 @@
  */
 import { createClient } from '@supabase/supabase-js'
 import { json, validateSupabaseServiceEnv, makeSupabaseServiceClient } from './_utils.js'
-import { sendRescuePassengerConfirmTemplate, whatsappCloudConfigured } from './_whatsapp.js'
-
-/**
- * Soft-send ONE passenger confirm WhatsApp after Rescue win.
- * Never throws. Duplicate-protected via passenger_confirm_whatsapp_sent_at claim.
- */
-async function softNotifyPassengerAfterWin(rescueRequestId) {
-  try {
-    if (!whatsappCloudConfigured()) {
-      console.warn('[rescue:wa] skipped — WhatsApp Cloud env not configured')
-      return
-    }
-    const admin = makeSupabaseServiceClient()
-    const { data: claimed, error: claimErr } = await admin
-      .from('rescue_requests')
-      .update({ passenger_confirm_whatsapp_sent_at: new Date().toISOString() })
-      .eq('id', rescueRequestId)
-      .eq('status', 'ACCEPTED')
-      .eq('passenger_confirm_status', 'WAITING_PASSENGER_CONFIRMATION')
-      .is('passenger_confirm_whatsapp_sent_at', null)
-      .select(
-        'id,passenger_confirm_token,booking_request_id,accepted_by_company_id,preview_pickup_label,preview_dropoff_label,preview_estimated_price'
-      )
-      .maybeSingle()
-    if (claimErr) {
-      console.warn('[rescue:wa] claim', claimErr.message)
-      return
-    }
-    if (!claimed) return // already sent or not waiting
-
-    const [{ data: booking }, { data: company }] = await Promise.all([
-      admin
-        .from('booking_requests')
-        .select('customer_phone,pickup_address,dropoff_address,estimated_price_eur')
-        .eq('id', claimed.booking_request_id)
-        .maybeSingle(),
-      admin
-        .from('companies')
-        .select('name')
-        .eq('id', claimed.accepted_by_company_id)
-        .maybeSingle(),
-    ])
-
-    const priceLabel =
-      claimed.preview_estimated_price ||
-      (booking?.estimated_price_eur != null ? `€${Number(booking.estimated_price_eur).toFixed(2)}` : '—')
-
-    const send = await sendRescuePassengerConfirmTemplate({
-      toPhone: booking?.customer_phone,
-      companyName: company?.name || 'a TAXIO company',
-      pickup: claimed.preview_pickup_label || booking?.pickup_address || '—',
-      dropoff: claimed.preview_dropoff_label || booking?.dropoff_address || '—',
-      priceLabel,
-      confirmToken: claimed.passenger_confirm_token,
-    })
-    if (!send.ok) {
-      console.warn('[rescue:wa] send soft-fail', send.error || send.status)
-      // Claim kept to prevent duplicate spam; clear column manually to retry.
-    }
-  } catch (e) {
-    console.warn('[rescue:wa] soft-fail', e?.message || e)
-  }
-}
+// Passenger confirm WhatsApp send is deferred until Meta inbound webhook captures
+// passenger WhatsApp ID (see api/_whatsapp.js — REUSE LATER). Do not send from accept.
 
 function makeUserClient(token) {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -218,10 +157,6 @@ export default async function handler(req, res) {
       else if (result.code === 'ALREADY_TAKEN' || result.code === 'OPPORTUNITY_EXPIRED') http = 409
       else if (result.code === 'FORBIDDEN' || result.code === 'NOT_AUTHENTICATED') http = 403
       else if (result.code === 'NOT_FOUND') http = 404
-      if (result.ok && result.rescue_request_id) {
-        // Fire-and-forget — never delay/fail accept on WhatsApp
-        void softNotifyPassengerAfterWin(result.rescue_request_id)
-      }
       return json(res, http, result)
     }
 

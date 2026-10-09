@@ -1,6 +1,10 @@
 /**
- * WhatsApp Business Cloud API helpers (staging Rescue passenger notify).
- * Soft-fail only — callers must never let errors break Rescue.
+ * WhatsApp Business Cloud API helpers — REUSE LATER.
+ *
+ * Final model: passenger WhatsApp contact is captured via Company A inbound
+ * Meta webhook (not the booking form). After Rescue win + captured contact,
+ * call sendRescuePassengerConfirmTemplate once (guarded by
+ * passenger_confirm_whatsapp_sent_at). Soft-fail only — never break Rescue.
  */
 
 function digitsOnly(phone) {

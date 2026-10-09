@@ -710,12 +710,6 @@ export async function mountBookCompany(root, slug) {
               </div>
             </div>
 
-            <div>
-              <label for="bk-rider-phone" class="block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">${escapeHtml(tb.riderPhoneLabel || 'WhatsApp / mobile number')}</label>
-              <input id="bk-rider-phone" type="tel" inputmode="tel" autocomplete="tel" required placeholder="${escapeHtml(tb.riderPhonePh || '+32 …')}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:placeholder:text-slate-500 dark:focus:border-amber-400 dark:focus:bg-slate-800 dark:focus:ring-amber-400/25" />
-              <p class="mt-1.5 text-[0.6875rem] leading-snug text-slate-500 dark:text-slate-400">${escapeHtml(tb.riderPhoneHint || 'Required so TAXIO can reach you if another company takes your trip.')}</p>
-            </div>
-
             <div class="rounded-2xl border border-slate-200/90 bg-slate-50/80 px-4 py-4 ring-1 ring-slate-900/[0.04] dark:border-slate-700/60 dark:bg-slate-800/40 dark:ring-white/[0.04] sm:px-5 sm:py-5">
               <label class="flex cursor-pointer items-start gap-3">
                 <input type="checkbox" id="bk-terms" class="mt-0.5 h-[18px] w-[18px] shrink-0 rounded border-slate-300 bg-white text-amber-500 focus:ring-amber-400/40 focus:ring-offset-0 dark:border-slate-500 dark:bg-slate-800 dark:text-amber-400" />
@@ -902,10 +896,15 @@ export async function mountBookCompany(root, slug) {
     })
   }
 
-  function buildWhatsappBookingMessage() {
+  function buildWhatsappBookingMessage(bookingReference) {
     const msgs = tBooking(getLocale())
     const pu = pickupEl.value.trim()
     const carLabel = bookingCarTypeLabel(selectedCar, msgs)
+    const refLine =
+      bookingReference &&
+      fillWaTemplate(msgs.waLineBookingReference || 'Booking reference: {ref}', {
+        ref: bookingReference,
+      })
 
     if (isHourlyMode()) {
       const startRaw = hourlyStartEl?.value || ''
@@ -926,6 +925,7 @@ export async function mountBookCompany(root, slug) {
         min: String(hourlyCfg.minHours),
       })
       if (refPrice) lines.push(fillWaTemplate(msgs.waLineRefPrice, { estimate: refPrice }))
+      if (refLine) lines.push(refLine)
       return lines.join('\n')
     }
 
@@ -950,6 +950,7 @@ export async function mountBookCompany(root, slug) {
         })
       )
     }
+    if (refLine) lines.push(refLine)
     return lines.join('\n')
   }
 
@@ -1669,126 +1670,129 @@ Estimate price: ${estimatePrice}`
 
   waBtn.addEventListener('click', (e) => {
     e.preventDefault()
-    const msgs = tBooking(getLocale())
-    const waDisabled = waBtn.getAttribute('aria-disabled') === 'true'
-    if (waDisabled) return
-    if (isDemo) {
-      errEl.textContent = msgs.demoNoWhatsapp
-      errEl.classList.remove('hidden')
-      return
-    }
-    if (!bookingContactGate(true)) return
-
-    const pu = pickupEl.value.trim()
-    const hourlyActive = isHourlyMode()
-    const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
-    const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
-
-    if (!companyWhatsAppDigits) {
-      errEl.textContent = msgs.errNoPhone
-      errEl.classList.remove('hidden')
-      return
-    }
-    const riderPhoneRaw = String(root.querySelector('#bk-rider-phone')?.value || '').trim()
-    const riderPhoneDigits = whatsappDigitsForWaMe(riderPhoneRaw)
-    if (!riderPhoneDigits) {
-      errEl.textContent = msgs.errRiderPhone || 'Please enter a valid WhatsApp / mobile number.'
-      errEl.classList.remove('hidden')
-      root.querySelector('#bk-rider-phone')?.focus()
-      return
-    }
-    let rideDateIso = null
-    if (hourlyActive) {
-      const raw = hourlyStartEl?.value || ''
-      const d = new Date(raw)
-      if (Number.isNaN(d.getTime())) {
-        errEl.textContent = msgs.errHourlyStart
+    void (async () => {
+      const msgs = tBooking(getLocale())
+      const waDisabled = waBtn.getAttribute('aria-disabled') === 'true'
+      if (waDisabled) return
+      if (isDemo) {
+        errEl.textContent = msgs.demoNoWhatsapp
         errEl.classList.remove('hidden')
         return
       }
-      rideDateIso = d.toISOString()
-    } else if (rideMode === 'schedule') {
-      const raw = scheduleInput?.value || ''
-      if (!raw) {
-        errEl.textContent = msgs.errSchedule
+      if (!bookingContactGate(true)) return
+
+      const pu = pickupEl.value.trim()
+      const hourlyActive = isHourlyMode()
+      const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
+      const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
+
+      if (!companyWhatsAppDigits) {
+        errEl.textContent = msgs.errNoPhone
         errEl.classList.remove('hidden')
         return
       }
-      const d = new Date(raw)
-      if (Number.isNaN(d.getTime())) {
-        errEl.textContent = msgs.errScheduleBad
-        errEl.classList.remove('hidden')
-        return
+      let rideDateIso = null
+      if (hourlyActive) {
+        const raw = hourlyStartEl?.value || ''
+        const d = new Date(raw)
+        if (Number.isNaN(d.getTime())) {
+          errEl.textContent = msgs.errHourlyStart
+          errEl.classList.remove('hidden')
+          return
+        }
+        rideDateIso = d.toISOString()
+      } else if (rideMode === 'schedule') {
+        const raw = scheduleInput?.value || ''
+        if (!raw) {
+          errEl.textContent = msgs.errSchedule
+          errEl.classList.remove('hidden')
+          return
+        }
+        const d = new Date(raw)
+        if (Number.isNaN(d.getTime())) {
+          errEl.textContent = msgs.errScheduleBad
+          errEl.classList.remove('hidden')
+          return
+        }
+        rideDateIso = d.toISOString()
       }
-      rideDateIso = d.toISOString()
-    }
-    const estimateLineForNotes = latestEstimate
-      ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
-      : ''
-    const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
-    const fingerprint = [
-      company.id,
-      hourlyActive ? 'hourly' : 'standard',
-      pu.toLowerCase(),
-      hourlyActive ? '' : doff.toLowerCase(),
-      String(selectedCar || ''),
-      hourlyActive ? String(hourlyHoursEl?.value || '') : '',
-      String(rideDateIso || 'ride_now'),
-    ].join('|')
-    const bookingMessageText = buildWhatsappBookingMessage()
-    const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
-    if (!url) {
-      errEl.textContent = msgs.errNoPhone
-      errEl.classList.remove('hidden')
-      return
-    }
+      const estimateLineForNotes = latestEstimate
+        ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+        : ''
+      const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
+      const fingerprint = [
+        company.id,
+        hourlyActive ? 'hourly' : 'standard',
+        pu.toLowerCase(),
+        hourlyActive ? '' : doff.toLowerCase(),
+        String(selectedCar || ''),
+        hourlyActive ? String(hourlyHoursEl?.value || '') : '',
+        String(rideDateIso || 'ride_now'),
+      ].join('|')
 
-    const waSource = parseBookingAnalyticsSource(window.location.search)
-    trackCompanyAnalyticsEvent({
-      companyId: company.id,
-      slug,
-      eventType: 'whatsapp_click',
-      source: waSource,
-    })
+      const logNotes = hourlyActive
+        ? `WhatsApp by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+        : `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
 
-    openWaMeUrl(url)
+      // Create booking first so the WA message includes the server reference.
+      waBtn.setAttribute('aria-busy', 'true')
+      const { error: bookingErr, data: bookingData } = await createQuickBookingLog({
+        company_id: company.id,
+        pickup_address: pu,
+        dropoff_address: doff,
+        car_type: selectedCar,
+        service_type: hourlyActive ? 'hourly' : 'standard',
+        duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
+        hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
+        hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
+        estimated_price_eur:
+          !hourlyActive && latestEstimate?.estimatedPrice != null ? latestEstimate.estimatedPrice : null,
+        price_currency: 'EUR',
+        customer_name: 'Booking request',
+        // Passenger WhatsApp contact captured later via Company A inbound Meta webhook.
+        customer_phone: '',
+        customer_email: null,
+        ride_datetime: rideDateIso,
+        notes: logNotes,
+        termsAcceptance: {
+          terms_accepted: true,
+          accepted_at: new Date().toISOString(),
+          terms_version: TERMS_VERSION_BOOKING_RIDER,
+        },
+        turnstileToken,
+        website: honeypot,
+        formStartedAt,
+        submissionFingerprint: fingerprint,
+        humanConfirmed: true,
+      })
+      waBtn.removeAttribute('aria-busy')
 
-    const logNotes = hourlyActive
-      ? `WhatsApp by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
-      : `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
-
-    void createQuickBookingLog({
-      company_id: company.id,
-      pickup_address: pu,
-      dropoff_address: doff,
-      car_type: selectedCar,
-      service_type: hourlyActive ? 'hourly' : 'standard',
-      duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
-      hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
-      hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
-      // Frozen passenger-facing trip price (point-to-point only). Hourly unchanged.
-      estimated_price_eur:
-        !hourlyActive && latestEstimate?.estimatedPrice != null ? latestEstimate.estimatedPrice : null,
-      price_currency: 'EUR',
-      customer_name: 'Booking request',
-      customer_phone: riderPhoneDigits,
-      customer_email: null,
-      ride_datetime: rideDateIso,
-      notes: logNotes,
-      termsAcceptance: {
-        terms_accepted: true,
-        accepted_at: new Date().toISOString(),
-        terms_version: TERMS_VERSION_BOOKING_RIDER,
-      },
-      turnstileToken,
-      website: honeypot,
-      formStartedAt,
-      submissionFingerprint: fingerprint,
-      humanConfirmed: true,
-    }).then(({ error: bookingErr }) => {
       if (bookingErr) {
         console.warn('[createQuickBookingLog]', bookingErr.message || bookingErr)
+        errEl.textContent = bookingErr.message || msgs.errSecurityRetry || 'Could not create booking.'
+        errEl.classList.remove('hidden')
+        return
       }
-    })
+
+      const bookingReference = String(bookingData?.booking_reference || '').trim()
+      const bookingMessageText = buildWhatsappBookingMessage(bookingReference || null)
+      const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
+      if (!url) {
+        errEl.textContent = msgs.errNoPhone
+        errEl.classList.remove('hidden')
+        return
+      }
+
+      const waSource = parseBookingAnalyticsSource(window.location.search)
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'whatsapp_click',
+        source: waSource,
+      })
+
+      // Recipient remains Company A — never TAXIO WhatsApp.
+      openWaMeUrl(url)
+    })()
   })
 }
