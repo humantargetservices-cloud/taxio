@@ -1,5 +1,12 @@
 /**
  * Inbound Meta WhatsApp → booking contact capture (soft-fail helpers).
+ *
+ * CENTRAL TAXIO MODEL:
+ * - Incoming messages are accepted only on TAXIO's registered Cloud number
+ *   (metadata.phone_number_id === process.env.WHATSAPP_PHONE_NUMBER_ID).
+ * - Company A is derived from booking_requests.company_id via TX reference.
+ * - company_whatsapp_waba is NOT required for this flow (kept for future use).
+ *
  * Does NOT send outbound Rescue messages.
  */
 import { extractBookingReferenceFromText } from './_bookingReference.js'
@@ -17,9 +24,17 @@ export function normalizeInboundSenderPhone(waIdOrPhone) {
   return d
 }
 
+/** True when inbound phone_number_id is TAXIO's central Cloud API number. */
+export function isCentralTaxioPhoneNumberId(phoneNumberId) {
+  const expected = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim()
+  const got = String(phoneNumberId || '').trim()
+  if (!expected || !got) return false
+  return expected === got
+}
+
 /**
- * Resolve Meta phone_number_id → TAXIO company_id via company_whatsapp_waba.
- * @returns {Promise<{ companyId: string|null, error?: string }>}
+ * Optional future helper: resolve Meta phone_number_id → company via company_whatsapp_waba.
+ * Not used by the central TAXIO-number inbound flow.
  */
 export async function resolveCompanyByPhoneNumberId(admin, phoneNumberId) {
   const id = String(phoneNumberId || '').trim()
@@ -46,16 +61,15 @@ export async function resolveCompanyByPhoneNumberId(admin, phoneNumberId) {
  * Match inbound message to booking and store passenger WhatsApp contact.
  * Soft-fail: never throws to callers for business mismatches.
  *
- * @returns {Promise<{ ok: boolean, code: string, bookingId?: string }>}
+ * @returns {Promise<{ ok: boolean, code: string, bookingId?: string, companyId?: string }>}
  */
 export async function capturePassengerContactFromInbound(admin, {
   phoneNumberId,
   senderWaId,
   messageText,
 }) {
-  const resolved = await resolveCompanyByPhoneNumberId(admin, phoneNumberId)
-  if (!resolved.companyId) {
-    return { ok: false, code: resolved.error || 'UNKNOWN_COMPANY' }
+  if (!isCentralTaxioPhoneNumberId(phoneNumberId)) {
+    return { ok: false, code: 'NOT_CENTRAL_TAXIO_NUMBER' }
   }
 
   const ref = extractBookingReferenceFromText(messageText)
@@ -75,15 +89,16 @@ export async function capturePassengerContactFromInbound(admin, {
     return { ok: false, code: 'BOOKING_QUERY_FAILED' }
   }
   if (!booking) return { ok: false, code: 'BOOKING_NOT_FOUND' }
-  if (booking.company_id !== resolved.companyId) {
-    return { ok: false, code: 'WRONG_COMPANY' }
-  }
+
+  // Company A comes from the booking — not from phone_number_id mapping.
+  const companyId = booking.company_id
 
   const existing = digitsOnly(booking.customer_phone)
   if (existing) {
-    if (existing === sender) return { ok: true, code: 'ALREADY_CAPTURED', bookingId: booking.id }
-    // Do not overwrite a different captured number
-    return { ok: true, code: 'ALREADY_CAPTURED_OTHER', bookingId: booking.id }
+    if (existing === sender) {
+      return { ok: true, code: 'ALREADY_CAPTURED', bookingId: booking.id, companyId }
+    }
+    return { ok: true, code: 'ALREADY_CAPTURED_OTHER', bookingId: booking.id, companyId }
   }
 
   const patch = {
@@ -93,8 +108,10 @@ export async function capturePassengerContactFromInbound(admin, {
   }
 
   let { error: updErr } = await admin.from('booking_requests').update(patch).eq('id', booking.id)
-  if (updErr && /customer_phone_captured_at|customer_phone_source|schema cache|Could not find/i.test(updErr.message || '')) {
-    // Column not applied yet — still store phone only
+  if (
+    updErr &&
+    /customer_phone_captured_at|customer_phone_source|schema cache|Could not find/i.test(updErr.message || '')
+  ) {
     ;({ error: updErr } = await admin
       .from('booking_requests')
       .update({ customer_phone: sender })
@@ -104,7 +121,7 @@ export async function capturePassengerContactFromInbound(admin, {
     console.warn('[wa-inbound] update', updErr.message)
     return { ok: false, code: 'UPDATE_FAILED' }
   }
-  return { ok: true, code: 'CAPTURED', bookingId: booking.id }
+  return { ok: true, code: 'CAPTURED', bookingId: booking.id, companyId }
 }
 
 /**

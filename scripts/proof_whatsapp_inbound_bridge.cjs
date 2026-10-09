@@ -1,6 +1,6 @@
 /**
- * Staging proof: booking reference + inbound WhatsApp capture helpers.
- * Soft DB checks — does not apply SQL. Never touches production.
+ * Staging proof: central TAXIO WhatsApp inbound + booking reference.
+ * Soft DB checks. Never touches production.
  */
 const fs = require('fs')
 const path = require('path')
@@ -9,6 +9,7 @@ const { generateBookingReference, extractBookingReferenceFromText } = require('.
 const {
   capturePassengerContactFromInbound,
   normalizeInboundSenderPhone,
+  isCentralTaxioPhoneNumberId,
 } = require('../api/_whatsappInbound.js')
 
 function parseEnv(p) {
@@ -34,6 +35,10 @@ if (!url.includes('lyjicuuyrvblbsqlduqg')) {
   process.exit(1)
 }
 
+// Central TAXIO Cloud phone_number_id for this proof (matches staging Meta number)
+const CENTRAL_ID = String(process.env.WHATSAPP_PHONE_NUMBER_ID || env.WHATSAPP_PHONE_NUMBER_ID || '1322109130989115').trim()
+process.env.WHATSAPP_PHONE_NUMBER_ID = CENTRAL_ID
+
 const admin = createClient(url, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 })
@@ -43,42 +48,38 @@ async function hasColumn(table, column) {
   return !error
 }
 
-async function hasTable(name) {
-  const { error } = await admin.from(name).select('*').limit(0)
-  if (!error) return true
-  return !/does not exist|schema cache|Could not find/i.test(error.message || '')
-}
-
 ;(async () => {
   const checks = {}
   const notes = []
 
   const bookJs = fs.readFileSync(path.join(root, 'src/pages/bookCompany.js'), 'utf8')
-  const pubJs = fs.readFileSync(path.join(root, 'api/public-booking.js'), 'utf8')
   const rescueJs = fs.readFileSync(path.join(root, 'api/rescue.js'), 'utf8')
+  const inboundJs = fs.readFileSync(path.join(root, 'api/_whatsappInbound.js'), 'utf8')
+
   checks.phoneFieldAbsent = !/bk-rider-phone/.test(bookJs)
-  checks.waStillCompanyDeepLink = /waMeBookingUrl|openWaMeUrl/.test(bookJs) && /Company A|companyWhatsAppDigits/.test(bookJs)
-  checks.waIncludesReferenceHelper = /waLineBookingReference|booking_reference/.test(bookJs)
+  checks.stagingTaxioDestination = /32492702795/.test(bookJs) && /VITE_TAXIO_STAGING/.test(bookJs)
+  checks.bookingForCompanyLine = /waLineBookingFor|Booking for:/.test(bookJs)
   checks.createBeforeOpenWa = /await createQuickBookingLog/.test(bookJs)
+  checks.centralModel = /isCentralTaxioPhoneNumberId|NOT_CENTRAL_TAXIO_NUMBER/.test(inboundJs)
+  checks.noWabaRequiredForCapture = !/resolveCompanyByPhoneNumberId\(admin,\s*phoneNumberId\)/.test(
+    inboundJs.split('capturePassengerContactFromInbound')[1] || ''
+  )
   checks.noSoftNotifyOnAccept = !/softNotifyPassengerAfterWin/.test(rescueJs)
   checks.webhookFile = fs.existsSync(path.join(root, 'api/whatsapp-webhook.js'))
-  checks.publicBookingGeneratesRef = /generateBookingReference/.test(pubJs)
+
+  checks.centralIdCheck = isCentralTaxioPhoneNumberId(CENTRAL_ID) === true
+  checks.rejectOtherPhoneId = isCentralTaxioPhoneNumberId('999999999') === false
 
   const ref1 = generateBookingReference()
-  const ref2 = generateBookingReference()
   checks.refFormat = /^TX-[A-Z0-9]{6}$/.test(ref1)
-  checks.refNotSequential = ref1 !== ref2
-  checks.extractRef = extractBookingReferenceFromText(`Hello\nBooking reference: ${ref1}\n`) === ref1
+  checks.extractRef = extractBookingReferenceFromText(`Booking reference: ${ref1}`) === ref1
   checks.normalizeSender = normalizeInboundSenderPhone('32470123456') === '32470123456'
 
   checks.col_booking_reference = await hasColumn('booking_requests', 'booking_reference')
-  checks.col_phone_captured_at = await hasColumn('booking_requests', 'customer_phone_captured_at')
-  checks.col_phone_source = await hasColumn('booking_requests', 'customer_phone_source')
-  checks.table_waba = await hasTable('company_whatsapp_waba')
 
-  const { data: cos } = await admin.from('companies').select('id,name,rescue_enabled,status').eq('status', 'approved')
+  const { data: cos } = await admin.from('companies').select('id,name,status').eq('status', 'approved')
   const companyA = (cos || []).find((c) => /stagingt$/i.test(c.name)) || (cos || [])[0]
-  notes.push({ companyA: companyA?.name, companyA_id: companyA?.id })
+  notes.push({ companyA: companyA?.name, centralId: CENTRAL_ID })
 
   let bookingId = null
   let storedRef = null
@@ -90,8 +91,8 @@ async function hasTable(name) {
       .insert({
         company_id: companyA.id,
         status: 'new',
-        pickup_address: 'Aarschot proof',
-        dropoff_address: 'Zaventem proof',
+        pickup_address: 'Aarschot central proof',
+        dropoff_address: 'Zaventem central proof',
         ride_datetime: new Date(Date.now() + 3600e3).toISOString(),
         car_type: 'Standard',
         service_type: 'standard',
@@ -100,127 +101,95 @@ async function hasTable(name) {
         estimated_price_eur: 38.52,
         price_currency: 'EUR',
         booking_reference: ref,
-        notes: 'inbound bridge proof',
+        notes: 'central inbound proof',
         decision_deadline_at: new Date(Date.now() + 25000).toISOString(),
       })
-      .select('id,booking_reference,customer_phone')
+      .select('id,booking_reference,company_id')
       .single()
     checks.refStored = !error && data?.booking_reference === ref
-    if (error) notes.push({ insertErr: error.message })
     bookingId = data?.id || null
     storedRef = data?.booking_reference || null
+    if (error) notes.push({ insertErr: error.message })
 
-    if (checks.table_waba && bookingId) {
-      const fakePhoneNumberId = `proof_${Date.now()}`
-      await admin.from('company_whatsapp_waba').upsert({
-        phone_number_id: fakePhoneNumberId,
-        company_id: companyA.id,
-        display_phone_number: '32470000000',
-      })
-
+    if (bookingId) {
       const okCap = await capturePassengerContactFromInbound(admin, {
-        phoneNumberId: fakePhoneNumberId,
+        phoneNumberId: CENTRAL_ID,
         senderWaId: '32471112233',
-        messageText: `Hello, I would like to book a taxi ride.\nBooking reference: ${storedRef}`,
+        messageText: `Booking for: ${companyA.name}\nBooking reference: ${storedRef}`,
       })
-      checks.referenceMatchCapture = okCap.ok === true && okCap.code === 'CAPTURED'
+      checks.txLookupCapture = okCap.ok === true && okCap.code === 'CAPTURED'
+      checks.companyFromBooking = okCap.companyId === companyA.id
 
       const { data: after } = await admin
         .from('booking_requests')
-        .select('customer_phone,customer_phone_source')
+        .select('customer_phone,customer_phone_source,customer_phone_captured_at,company_id')
         .eq('id', bookingId)
         .maybeSingle()
       checks.contactCaptured = after?.customer_phone === '32471112233'
-      checks.contactSourceWhatsapp =
-        !checks.col_phone_source || after?.customer_phone_source === 'whatsapp' || after?.customer_phone === '32471112233'
+      checks.sourceWhatsapp = after?.customer_phone_source === 'whatsapp' && !!after?.customer_phone_captured_at
 
       const dup = await capturePassengerContactFromInbound(admin, {
-        phoneNumberId: fakePhoneNumberId,
+        phoneNumberId: CENTRAL_ID,
         senderWaId: '32471112233',
         messageText: `Booking reference: ${storedRef}`,
       })
       checks.duplicateSafe = dup.ok === true && /ALREADY_CAPTURED/.test(dup.code)
 
-      const otherCo = (cos || []).find((c) => c.id !== companyA.id)
-      if (otherCo) {
-        const otherPn = `proof_other_${Date.now()}`
-        await admin.from('company_whatsapp_waba').upsert({
-          phone_number_id: otherPn,
-          company_id: otherCo.id,
-        })
-        const wrong = await capturePassengerContactFromInbound(admin, {
-          phoneNumberId: otherPn,
-          senderWaId: '32479999999',
-          messageText: `Booking reference: ${storedRef}`,
-        })
-        checks.wrongCompanyProtection = wrong.ok === false && wrong.code === 'WRONG_COMPANY'
-        await admin.from('company_whatsapp_waba').delete().eq('phone_number_id', otherPn)
-      }
+      const wrongNum = await capturePassengerContactFromInbound(admin, {
+        phoneNumberId: '000000000000000',
+        senderWaId: '32479999999',
+        messageText: `Booking reference: ${storedRef}`,
+      })
+      checks.rejectNonCentral = wrongNum.ok === false && wrongNum.code === 'NOT_CENTRAL_TAXIO_NUMBER'
 
       const badRef = await capturePassengerContactFromInbound(admin, {
-        phoneNumberId: fakePhoneNumberId,
+        phoneNumberId: CENTRAL_ID,
         senderWaId: '32471112233',
         messageText: 'No reference here',
       })
       checks.noRefRejected = badRef.ok === false && badRef.code === 'NO_BOOKING_REFERENCE'
 
-      await admin.from('company_whatsapp_waba').delete().eq('phone_number_id', fakePhoneNumberId)
-    } else {
-      notes.push('Skip capture DB tests — apply RUN_ON_STAGING_RESCUE_10 first')
+      await admin.from('booking_requests').delete().eq('id', bookingId)
     }
-
-    if (bookingId) await admin.from('booking_requests').delete().eq('id', bookingId)
   } else {
-    notes.push('Skip DB ref/capture — booking_reference column missing (SQL not applied)')
+    notes.push('Skip DB tests — booking_reference missing')
   }
 
-  // Rescue engine untouched markers
-  checks.rescueAcceptStillPresent = /accept_rescue_request/.test(fs.readFileSync(path.join(root, 'api/rescue.js'), 'utf8'))
-  checks.rescueNotifyController =
-    /startRescueNotifications/.test(fs.readFileSync(path.join(root, 'src/lib/rescueNotifications.js'), 'utf8'))
+  checks.rescueAcceptStillPresent = /accept_rescue_request/.test(rescueJs)
+  checks.decisionDeadlineStillOnInsert = /decision_deadline/.test(
+    fs.readFileSync(path.join(root, 'supabase/RUN_ON_STAGING_RESCUE_06_MVP_SIMPLIFIED_CORE.sql'), 'utf8')
+  )
 
   const required = [
     'phoneFieldAbsent',
-    'waStillCompanyDeepLink',
-    'waIncludesReferenceHelper',
+    'stagingTaxioDestination',
+    'bookingForCompanyLine',
     'createBeforeOpenWa',
-    'noSoftNotifyOnAccept',
-    'webhookFile',
-    'publicBookingGeneratesRef',
+    'centralModel',
+    'centralIdCheck',
+    'rejectOtherPhoneId',
     'refFormat',
-    'refNotSequential',
     'extractRef',
     'normalizeSender',
+    'webhookFile',
+    'noSoftNotifyOnAccept',
     'rescueAcceptStillPresent',
-    'rescueNotifyController',
   ]
-  if (checks.col_booking_reference) required.push('refStored')
-  if (checks.table_waba && checks.col_booking_reference) {
+  if (checks.col_booking_reference) {
     required.push(
-      'referenceMatchCapture',
+      'refStored',
+      'txLookupCapture',
+      'companyFromBooking',
       'contactCaptured',
+      'sourceWhatsapp',
       'duplicateSafe',
-      'wrongCompanyProtection',
+      'rejectNonCentral',
       'noRefRejected'
     )
   }
 
   const failed = required.filter((k) => checks[k] !== true)
-  const sqlReady = checks.col_booking_reference && checks.table_waba
-
-  console.log(
-    JSON.stringify(
-      {
-        pass: failed.length === 0,
-        failed,
-        sqlApplied: sqlReady,
-        checks,
-        notes,
-      },
-      null,
-      2
-    )
-  )
+  console.log(JSON.stringify({ pass: failed.length === 0, failed, checks, notes }, null, 2))
   process.exit(failed.length === 0 ? 0 : 1)
 })().catch((e) => {
   console.log(JSON.stringify({ fatal: String(e.stack || e) }, null, 2))

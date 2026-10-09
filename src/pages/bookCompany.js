@@ -835,7 +835,16 @@ export async function mountBookCompany(root, slug) {
   const mailA = root.querySelector('#bk-mail')
   const callA = root.querySelector('#bk-call')
   const normalizedCompanyPhone = normalizeContactPhone(phone)
-  const companyWhatsAppDigits = whatsappDigitsForWaMe(company.phone || '')
+  const isStagingTaxio =
+    String(import.meta.env.VITE_TAXIO_STAGING || '')
+      .trim()
+      .toLowerCase() === 'true'
+  // Staging: passenger WhatsApp opens TAXIO central number for silent contact capture.
+  // Company A still receives the TAXIO booking / 25s decision notification from booking create.
+  const STAGING_TAXIO_WA_DIGITS = '32492702795'
+  const companyWhatsAppDigits = isStagingTaxio
+    ? STAGING_TAXIO_WA_DIGITS
+    : whatsappDigitsForWaMe(company.phone || '')
   let turnstileToken = ''
 
   const carWrapEl = root.querySelector('#bk-car-wrap')
@@ -906,12 +915,16 @@ export async function mountBookCompany(root, slug) {
         ref: bookingReference,
       })
 
+    const companyLine = isStagingTaxio
+      ? fillWaTemplate(msgs.waLineBookingFor || 'Booking for: {company}', { company: company.name })
+      : fillWaTemplate(msgs.waLineCompany, { company: company.name })
+
     if (isHourlyMode()) {
       const startRaw = hourlyStartEl?.value || ''
       const hours = Number(hourlyHoursEl?.value)
       const notes = String(hourlyNotesEl?.value || '').trim()
       const lines = [msgs.waHourlyIntro]
-      lines.push(fillWaTemplate(msgs.waLineCompany, { company: company.name }))
+      lines.push(companyLine)
       lines.push(fillWaTemplate(msgs.waLinePickup, { pickup: pu }))
       lines.push(fillWaTemplate(msgs.waLineStartTime, { startTime: startRaw }))
       const durationVal = fillWaTemplate(msgs.waDurationHours, {
@@ -938,7 +951,7 @@ export async function mountBookCompany(root, slug) {
         : msgs.waWhenRideNow
 
     const lines = [msgs.waStandardIntro]
-    lines.push(fillWaTemplate(msgs.waLineCompany, { company: company.name }))
+    lines.push(companyLine)
     lines.push(fillWaTemplate(msgs.waLinePickup, { pickup: pu }))
     lines.push(fillWaTemplate(msgs.waLineDropoff, { dropoff: doff }))
     lines.push(fillWaTemplate(msgs.waLineWhen, { when: whenText }))
