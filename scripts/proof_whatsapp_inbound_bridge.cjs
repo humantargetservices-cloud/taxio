@@ -71,7 +71,7 @@ async function hasColumn(table, column) {
   checks.noWabaRequiredForCapture = !/resolveCompanyByPhoneNumberId\(admin,\s*phoneNumberId\)/.test(
     inboundJs.split('capturePassengerContactFromInbound')[1] || ''
   )
-  checks.noSoftNotifyOnAccept = !/softNotifyPassengerAfterWin/.test(rescueJs)
+  checks.serverNotifyOnAccept = /notifyRescuePassengerConfirmWhatsApp/.test(rescueJs)
   checks.webhookFile = fs.existsSync(path.join(root, 'api/whatsapp-webhook.js'))
 
   checks.centralIdCheck = isCentralTaxioPhoneNumberId(CENTRAL_ID) === true
@@ -183,7 +183,7 @@ async function hasColumn(table, column) {
     'extractRef',
     'normalizeSender',
     'webhookFile',
-    'noSoftNotifyOnAccept',
+    'serverNotifyOnAccept',
     'rescueAcceptStillPresent',
   ]
   if (checks.col_booking_reference) {

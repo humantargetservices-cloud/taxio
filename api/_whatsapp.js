@@ -1,10 +1,9 @@
 /**
- * WhatsApp Business Cloud API helpers — REUSE LATER.
+ * WhatsApp Business Cloud API helpers (TAXIO central number).
  *
- * Final model: passenger WhatsApp contact is captured via Company A inbound
- * Meta webhook (not the booking form). After Rescue win + captured contact,
- * call sendRescuePassengerConfirmTemplate once (guarded by
- * passenger_confirm_whatsapp_sent_at). Soft-fail only — never break Rescue.
+ * Template: taxio_rescue_confirmation_staging (en)
+ * Body: {{1}} = original Company A, {{2}} = Rescue winner
+ * Buttons: Confirm (QR), Cancel (QR), Review details (dynamic URL + token)
  */
 
 function digitsOnly(phone) {
@@ -29,57 +28,138 @@ export function whatsappCloudConfigured() {
   )
 }
 
+/** Quick-reply payload embedded in Confirm button (webhook parses this). */
+export function buildRescueConfirmButtonPayload(confirmToken) {
+  const t = String(confirmToken || '').trim()
+  return `TAXIO_CONFIRM:${t}`
+}
+
+/** Quick-reply payload embedded in Cancel button. */
+export function buildRescueCancelButtonPayload(confirmToken) {
+  const t = String(confirmToken || '').trim()
+  return `TAXIO_CANCEL:${t}`
+}
+
 /**
- * Send approved Rescue passenger-confirm template (one URL CTA).
- * Template body params (order): companyName, pickup, dropoff, priceLabel
- * Template URL button dynamic suffix: confirm token
+ * Parse Confirm/Cancel quick-reply payload from inbound webhook.
+ * @returns {{ action: 'CONFIRM'|'CANCEL', token: string } | null}
+ */
+export function parseRescueButtonPayload(rawPayload) {
+  const p = String(rawPayload || '').trim()
+  if (!p) return null
+  const m = p.match(/^TAXIO_(CONFIRM|CANCEL):(.+)$/i)
+  if (!m) return null
+  const action = m[1].toUpperCase() === 'CANCEL' ? 'CANCEL' : 'CONFIRM'
+  const token = String(m[2] || '').trim()
+  if (token.length < 20) return null
+  return { action, token }
+}
+
+/**
+ * Build Cloud API template components for taxio_rescue_confirmation_staging.
+ * Body params: [originalCompanyA, winnerCompany]
+ * Buttons: index0 Confirm QR, index1 Cancel QR, index2 Review details URL
+ */
+export function buildRescueConfirmTemplateComponents({
+  originalCompanyName,
+  winnerCompanyName,
+  confirmToken,
+}) {
+  const token = String(confirmToken || '').trim()
+  const a = String(originalCompanyName || 'Your taxi company').slice(0, 60)
+  const b = String(winnerCompanyName || 'A taxi company').slice(0, 60)
+  return {
+    bodyParameters: [
+      { type: 'text', text: a },
+      { type: 'text', text: b },
+    ],
+    components: [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: a },
+          { type: 'text', text: b },
+        ],
+      },
+      {
+        type: 'button',
+        sub_type: 'quick_reply',
+        index: '0',
+        parameters: [{ type: 'payload', payload: buildRescueConfirmButtonPayload(token) }],
+      },
+      {
+        type: 'button',
+        sub_type: 'quick_reply',
+        index: '1',
+        parameters: [{ type: 'payload', payload: buildRescueCancelButtonPayload(token) }],
+      },
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '2',
+        parameters: [{ type: 'text', text: token }],
+      },
+    ],
+  }
+}
+
+/**
+ * Send Rescue passenger-confirm template (2 body vars + Confirm/Cancel/URL).
  *
- * @returns {{ ok: boolean, skipped?: boolean, status?: number, error?: string, response?: any }}
+ * @returns {{ ok: boolean, skipped?: boolean, status?: number, error?: string, response?: any, dryRunPayload?: any }}
  */
 export async function sendRescuePassengerConfirmTemplate({
   toPhone,
-  companyName,
-  pickup,
-  dropoff,
-  priceLabel,
+  originalCompanyName,
+  winnerCompanyName,
   confirmToken,
+  dryRun = false,
 }) {
+  const token = String(confirmToken || '').trim()
+  if (token.length < 20) return { ok: false, skipped: true, error: 'INVALID_TOKEN' }
+
+  const built = buildRescueConfirmTemplateComponents({
+    originalCompanyName,
+    winnerCompanyName,
+    confirmToken: token,
+  })
+
+  const templateName =
+    String(process.env.WHATSAPP_TEMPLATE_NAME || '').trim() || 'taxio_rescue_confirmation_staging'
+  const lang = String(process.env.WHATSAPP_TEMPLATE_LANG || 'en').trim() || 'en'
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: whatsappCloudRecipient(toPhone) || '',
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: lang },
+      components: built.components,
+    },
+  }
+
+  if (dryRun) {
+    return {
+      ok: true,
+      dryRun: true,
+      dryRunPayload: payload,
+      bodyParameters: built.bodyParameters,
+      confirmPayload: buildRescueConfirmButtonPayload(token),
+      cancelPayload: buildRescueCancelButtonPayload(token),
+      urlToken: token,
+    }
+  }
+
   if (!whatsappCloudConfigured()) {
     return { ok: false, skipped: true, error: 'WHATSAPP_ENV_MISSING' }
   }
   const to = whatsappCloudRecipient(toPhone)
   if (!to) return { ok: false, skipped: true, error: 'INVALID_PASSENGER_PHONE' }
-  const token = String(confirmToken || '').trim()
-  if (token.length < 20) return { ok: false, skipped: true, error: 'INVALID_TOKEN' }
+  payload.to = to
 
   const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim()
   const accessToken = String(process.env.WHATSAPP_CLOUD_TOKEN || '').trim()
-  const templateName = String(process.env.WHATSAPP_TEMPLATE_NAME || '').trim()
-  const lang = String(process.env.WHATSAPP_TEMPLATE_LANG || 'en').trim() || 'en'
-
-  const bodyParams = [companyName, pickup, dropoff, priceLabel].map((t) => ({
-    type: 'text',
-    text: String(t || '—').slice(0, 600),
-  }))
-
-  const payload = {
-    messaging_product: 'whatsapp',
-    to,
-    type: 'template',
-    template: {
-      name: templateName,
-      language: { code: lang },
-      components: [
-        { type: 'body', parameters: bodyParams },
-        {
-          type: 'button',
-          sub_type: 'url',
-          index: '0',
-          parameters: [{ type: 'text', text: token }],
-        },
-      ],
-    },
-  }
 
   try {
     const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {

@@ -1,15 +1,13 @@
 /**
- * Inbound Meta WhatsApp → booking contact capture (soft-fail helpers).
+ * Inbound Meta WhatsApp — TAXIO central number.
  *
- * CENTRAL TAXIO MODEL:
- * - Incoming messages are accepted only on TAXIO's registered Cloud number
- *   (metadata.phone_number_id === process.env.WHATSAPP_PHONE_NUMBER_ID).
- * - Company A is derived from booking_requests.company_id via TX reference.
- * - company_whatsapp_waba is NOT required for this flow (kept for future use).
+ * 1) Confirm/Cancel quick-reply → same RPCs as browser confirm page
+ * 2) Text with TX reference → booking customer_phone capture
  *
- * Does NOT send outbound Rescue messages.
+ * Soft-fail only. Never blocks booking or dashboard.
  */
 import { extractBookingReferenceFromText } from './_bookingReference.js'
+import { parseRescueButtonPayload } from './_whatsapp.js'
 
 function digitsOnly(phone) {
   return String(phone || '').replace(/\D/g, '')
@@ -59,9 +57,6 @@ export async function resolveCompanyByPhoneNumberId(admin, phoneNumberId) {
 
 /**
  * Match inbound message to booking and store passenger WhatsApp contact.
- * Soft-fail: never throws to callers for business mismatches.
- *
- * @returns {Promise<{ ok: boolean, code: string, bookingId?: string, companyId?: string }>}
  */
 export async function capturePassengerContactFromInbound(admin, {
   phoneNumberId,
@@ -90,9 +85,7 @@ export async function capturePassengerContactFromInbound(admin, {
   }
   if (!booking) return { ok: false, code: 'BOOKING_NOT_FOUND' }
 
-  // Company A comes from the booking — not from phone_number_id mapping.
   const companyId = booking.company_id
-
   const existing = digitsOnly(booking.customer_phone)
   if (existing) {
     if (existing === sender) {
@@ -125,8 +118,72 @@ export async function capturePassengerContactFromInbound(admin, {
 }
 
 /**
- * Walk Meta Cloud API webhook payload; process text messages only.
- * Always soft — returns summary, never throws.
+ * Extract Confirm/Cancel payload from a Meta inbound message (button or interactive).
+ */
+export function extractRescueButtonPayloadFromMessage(msg) {
+  if (!msg || typeof msg !== 'object') return null
+  const type = String(msg.type || '')
+
+  if (type === 'button') {
+    return parseRescueButtonPayload(msg.button?.payload || msg.button?.text)
+  }
+
+  if (type === 'interactive') {
+    const ir = msg.interactive || {}
+    if (String(ir.type || '') === 'button_reply') {
+      return parseRescueButtonPayload(ir.button_reply?.id || ir.button_reply?.title)
+    }
+  }
+
+  // Some Cloud payloads nest button under type text with button object — ignore.
+  return null
+}
+
+/**
+ * Handle Confirm/Cancel quick-reply via same RPCs as /rescue/confirm/:token page.
+ * Idempotent: ALREADY_CONFIRMED / ALREADY_CANCELLED are success.
+ */
+export async function handleRescuePassengerButtonReply(admin, { phoneNumberId, payloadRaw, parsed }) {
+  if (!isCentralTaxioPhoneNumberId(phoneNumberId)) {
+    return { ok: false, code: 'NOT_CENTRAL_TAXIO_NUMBER' }
+  }
+
+  const actionToken = parsed || parseRescueButtonPayload(payloadRaw)
+  if (!actionToken) return { ok: false, code: 'NOT_RESCUE_BUTTON' }
+
+  const rpcName =
+    actionToken.action === 'CANCEL'
+      ? 'taxio_rescue_passenger_cancel'
+      : 'taxio_rescue_passenger_confirm'
+
+  try {
+    const { data, error } = await admin.rpc(rpcName, { p_token: actionToken.token })
+    if (error) {
+      console.warn('[wa-inbound:rescue-button]', error.message)
+      return { ok: false, code: 'RPC_ERROR', error: error.message, action: actionToken.action }
+    }
+    const result = data && typeof data === 'object' ? data : { ok: false, code: 'EMPTY' }
+    return {
+      ok: result.ok === true,
+      code: result.code || (result.ok ? 'OK' : 'FAILED'),
+      action: actionToken.action,
+      rpc: rpcName,
+      result,
+    }
+  } catch (e) {
+    console.warn('[wa-inbound:rescue-button]', e?.message || e)
+    return {
+      ok: false,
+      code: 'RPC_EXCEPTION',
+      error: String(e?.message || e),
+      action: actionToken.action,
+    }
+  }
+}
+
+/**
+ * Walk Meta Cloud API webhook payload.
+ * Order: Confirm/Cancel buttons first, then TX text capture, else ignore.
  */
 export async function processWhatsappWebhookPayload(admin, body) {
   const summary = { processed: 0, results: [] }
@@ -140,19 +197,36 @@ export async function processWhatsappWebhookPayload(admin, body) {
         const phoneNumberId = value?.metadata?.phone_number_id
         const messages = Array.isArray(value?.messages) ? value.messages : []
         for (const msg of messages) {
-          if (String(msg?.type || '') !== 'text') {
-            summary.results.push({ code: 'UNSUPPORTED_TYPE', type: msg?.type })
+          const type = String(msg?.type || '')
+
+          // 1) Confirm / Cancel quick replies
+          const buttonParsed = extractRescueButtonPayloadFromMessage(msg)
+          if (buttonParsed) {
+            const result = await handleRescuePassengerButtonReply(admin, {
+              phoneNumberId,
+              parsed: buttonParsed,
+            })
+            summary.processed += 1
+            summary.results.push(result)
             continue
           }
-          const text = msg?.text?.body || ''
-          const from = msg?.from || ''
-          const result = await capturePassengerContactFromInbound(admin, {
-            phoneNumberId,
-            senderWaId: from,
-            messageText: text,
-          })
-          summary.processed += 1
-          summary.results.push(result)
+
+          // 2) Text → booking reference contact capture
+          if (type === 'text') {
+            const text = msg?.text?.body || ''
+            const from = msg?.from || ''
+            const result = await capturePassengerContactFromInbound(admin, {
+              phoneNumberId,
+              senderWaId: from,
+              messageText: text,
+            })
+            summary.processed += 1
+            summary.results.push(result)
+            continue
+          }
+
+          // 3) Everything else — safe ignore
+          summary.results.push({ ok: true, code: 'IGNORED', type })
         }
       }
     }

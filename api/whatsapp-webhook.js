@@ -1,9 +1,11 @@
 /**
  * Official Meta WhatsApp Cloud API webhook.
  * GET  — verification challenge
- * POST — inbound messages → booking reference match → customer_phone capture
+ * POST — inbound messages:
+ *   - Confirm/Cancel quick-reply → rescue passenger RPC (same as browser)
+ *   - text + TX reference → customer_phone capture
  *
- * Soft-fail only. Never blocks booking or dashboard. No outbound Rescue send.
+ * Soft-fail only. Never blocks booking or dashboard.
  */
 import crypto from 'crypto'
 import { json, makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'

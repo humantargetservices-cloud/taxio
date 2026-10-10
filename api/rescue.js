@@ -8,8 +8,10 @@
  */
 import { createClient } from '@supabase/supabase-js'
 import { json, validateSupabaseServiceEnv, makeSupabaseServiceClient } from './_utils.js'
-// Passenger confirm WhatsApp send is deferred until Meta inbound webhook captures
-// passenger WhatsApp ID (see api/_whatsapp.js — REUSE LATER). Do not send from accept.
+import {
+  notifyPendingRescuePassengerWhatsApps,
+  notifyRescuePassengerConfirmWhatsApp,
+} from './_rescuePassengerNotify.js'
 
 function makeUserClient(token) {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -93,6 +95,13 @@ export default async function handler(req, res) {
           console.error('[rescue:tick]', error.message)
           return json(res, 500, { error: error.message, code: 'RPC_ERROR' })
         }
+        // Retry any eligible winner→passenger WhatsApp (send-once claim is authoritative).
+        try {
+          const admin = makeSupabaseServiceClient()
+          await notifyPendingRescuePassengerWhatsApps(admin, { dryRun: false, limit: 10 })
+        } catch (notifyErr) {
+          console.error('[rescue:tick:notify]', notifyErr?.message || notifyErr)
+        }
         return json(res, 200, data && typeof data === 'object' ? data : { ok: true })
       } catch (err) {
         console.error('[rescue:tick]', err?.message || err)
@@ -162,6 +171,25 @@ export default async function handler(req, res) {
         http = 409
       else if (result.code === 'FORBIDDEN' || result.code === 'NOT_AUTHENTICATED') http = 403
       else if (result.code === 'NOT_FOUND') http = 404
+
+      // Winner only: server-side passenger WhatsApp (never from browser; soft-fail).
+      if (result.ok && result.rescue_request_id) {
+        try {
+          const admin = makeSupabaseServiceClient()
+          const notify = await notifyRescuePassengerConfirmWhatsApp(admin, {
+            rescueRequestId: result.rescue_request_id,
+            dryRun: false,
+          })
+          result.passenger_whatsapp = {
+            code: notify.code,
+            ok: notify.ok === true,
+          }
+        } catch (notifyErr) {
+          console.error('[rescue:accept:notify]', notifyErr?.message || notifyErr)
+          result.passenger_whatsapp = { ok: false, code: 'NOTIFY_ERROR' }
+        }
+      }
+
       return json(res, http, result)
     }
 
