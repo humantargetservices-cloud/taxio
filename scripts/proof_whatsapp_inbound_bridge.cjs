@@ -56,10 +56,11 @@ async function hasColumn(table, column) {
   const rescueJs = fs.readFileSync(path.join(root, 'api/rescue.js'), 'utf8')
   const inboundJs = fs.readFileSync(path.join(root, 'api/_whatsappInbound.js'), 'utf8')
 
-  checks.phoneFieldAbsent = !/bk-rider-phone/.test(bookJs)
-  checks.stagingTaxioDestination = /32492702795/.test(bookJs) && /VITE_TAXIO_STAGING/.test(bookJs)
-  checks.bookingForCompanyLine = /waLineBookingFor|Booking for:/.test(bookJs)
+  checks.completionPhonePresent = /bk-complete-phone/.test(bookJs)
+  checks.normalBookingNoTaxioWa = !/32492702795/.test(bookJs)
+  checks.companyAWhatsAppDigits = /whatsappDigitsForWaMe\(company\.phone/.test(bookJs)
   checks.createBeforeOpenWa = /await createQuickBookingLog/.test(bookJs)
+  checks.timerOnlyOnChannel = /Opening completion must NOT create/.test(bookJs)
   checks.centralModel = /isCentralTaxioPhoneNumberId|NOT_CENTRAL_TAXIO_NUMBER/.test(inboundJs)
   checks.noWabaRequiredForCapture = !/resolveCompanyByPhoneNumberId\(admin,\s*phoneNumberId\)/.test(
     inboundJs.split('capturePassengerContactFromInbound')[1] || ''
@@ -161,10 +162,11 @@ async function hasColumn(table, column) {
   )
 
   const required = [
-    'phoneFieldAbsent',
-    'stagingTaxioDestination',
-    'bookingForCompanyLine',
+    'completionPhonePresent',
+    'normalBookingNoTaxioWa',
+    'companyAWhatsAppDigits',
     'createBeforeOpenWa',
+    'timerOnlyOnChannel',
     'centralModel',
     'centralIdCheck',
     'rejectOtherPhoneId',

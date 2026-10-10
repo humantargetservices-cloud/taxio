@@ -408,7 +408,7 @@ function whatsappBookingIcon(className = 'h-5 w-5') {
   return `<svg class="${className} shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z"/></svg>`
 }
 
-const BK_WA_DISABLED_CLASSES = [
+const BK_BOOK_DISABLED_CLASSES = [
   'pointer-events-none',
   'bg-slate-200',
   'text-slate-500',
@@ -417,12 +417,12 @@ const BK_WA_DISABLED_CLASSES = [
   'dark:text-slate-400',
   'dark:ring-slate-700',
 ]
-const BK_WA_ENABLED_CLASSES = [
-  'bg-[#25D366]',
-  'text-white',
-  'ring-[#1fb855]/50',
-  'hover:bg-[#1ebe5d]',
-  'shadow-[0_12px_40px_rgba(37,211,102,0.25)]',
+const BK_BOOK_ENABLED_CLASSES = [
+  'bg-amber-400',
+  'text-slate-900',
+  'ring-amber-400/50',
+  'hover:bg-amber-300',
+  'shadow-[0_12px_40px_rgba(251,191,36,0.28)]',
 ]
 
 /** Optional company logo (if column / field exists). Safe fallback when missing or broken. */
@@ -629,7 +629,7 @@ export async function mountBookCompany(root, slug) {
           </div>
         </div>
 
-        <div class="relative z-0 rounded-3xl border border-slate-200/90 bg-white p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:ring-white/[0.05] sm:p-6">
+        <div id="bk-trip-step" class="relative z-0 rounded-3xl border border-slate-200/90 bg-white p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:ring-white/[0.05] sm:p-6">
           <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-600/90 dark:text-amber-400/75">${escapeHtml(tb.tripEyebrow)}</p>
           ${isDemo ? `<div class="mb-1 rounded-xl border border-amber-400/35 bg-amber-50 px-3 py-2.5 text-xs font-medium leading-snug text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-50">${escapeHtml(tb.demoRibbon)}</div>` : ''}
           <div class="mt-5 space-y-6">
@@ -724,21 +724,9 @@ export async function mountBookCompany(root, slug) {
 
             <input type="text" id="bk-hp" name="website" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
 
-            <a id="bk-wa" href="#" rel="noopener noreferrer" aria-disabled="true" class="pointer-events-none flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-slate-200 text-sm font-bold text-slate-500 shadow-md ring-1 ring-slate-300 transition dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700 dark:shadow-black/20">
-              ${whatsappBookingIcon('h-5 w-5')}
-              ${escapeHtml(tb.bookWhatsapp)}
-            </a>
-
-            <div class="grid grid-cols-2 gap-3">
-              <a id="bk-mail" href="#" class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:shadow-md dark:shadow-black/15 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
-                ${icon.mail('h-[18px] w-[18px] text-amber-600 dark:text-amber-400/90')}
-                ${escapeHtml(tb.email)}
-              </a>
-              <a id="bk-call" href="#" class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:shadow-md dark:shadow-black/15 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
-                ${icon.phone('h-[18px] w-[18px] text-amber-600 dark:text-amber-400/90')}
-                ${escapeHtml(tb.call)}
-              </a>
-            </div>
+            <button type="button" id="bk-book" aria-disabled="true" class="pointer-events-none flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-slate-200 text-sm font-bold uppercase tracking-[0.08em] text-slate-500 shadow-md ring-1 ring-slate-300 transition dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700 dark:shadow-black/20">
+              ${escapeHtml(tb.bookCta || 'Book')}
+            </button>
           </div>
         </div>
 
@@ -747,6 +735,55 @@ export async function mountBookCompany(root, slug) {
           <p class="mt-2 font-bold tracking-tight text-amber-600 dark:text-amber-400/90">${escapeHtml(tb.footerPowered)}</p>
           <p class="mt-2.5"><a href="/contact" class="font-semibold text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-amber-700 dark:text-slate-400 dark:decoration-slate-600 dark:hover:text-amber-200/90">${escapeHtml(tb.footerContact)}</a></p>
         </footer>
+      </div>
+
+      <div id="bk-complete" class="fixed inset-0 z-[280] hidden" aria-hidden="true">
+        <button type="button" id="bk-complete-backdrop" class="absolute inset-0 border-0 bg-black/50 backdrop-blur-[2px] dark:bg-black/70" tabindex="-1" aria-label="${escapeHtml(tb.editTrip || 'Edit trip')}"></button>
+        <div class="absolute inset-x-0 bottom-0 z-10 flex max-h-[92vh] flex-col rounded-t-3xl border border-slate-200/90 bg-white shadow-2xl ring-1 ring-slate-900/[0.06] dark:border-slate-700/80 dark:bg-slate-900 dark:shadow-black/50 dark:ring-white/[0.06] sm:inset-x-auto sm:left-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2" role="dialog" aria-modal="true" aria-labelledby="bk-complete-heading">
+          <div class="overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 sm:px-6">
+            <button type="button" id="bk-complete-edit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 transition hover:text-amber-700 dark:text-slate-300 dark:hover:text-amber-200">
+              <span aria-hidden="true">←</span> ${escapeHtml(tb.editTrip || 'Edit trip')}
+            </button>
+            <h2 id="bk-complete-heading" class="mt-3 text-xl font-bold tracking-tight text-slate-900 dark:text-white">${escapeHtml(tb.completeBookingTitle || 'Complete your booking')}</h2>
+
+            <div class="mt-5 rounded-2xl border border-slate-200/90 bg-slate-50/90 px-4 py-3.5 dark:border-slate-700/60 dark:bg-slate-800/50">
+              <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.tripSummaryTitle || 'Trip summary')}</p>
+              <dl class="mt-2.5 space-y-1.5 text-sm">
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryCompany || 'Company')}</dt><dd id="bk-sum-company" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryPickup || 'Pickup')}</dt><dd id="bk-sum-pickup" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div id="bk-sum-drop-row" class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryDestination || 'Destination')}</dt><dd id="bk-sum-drop" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryWhen || 'Date/time')}</dt><dd id="bk-sum-when" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryVehicle || 'Vehicle')}</dt><dd id="bk-sum-vehicle" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryPrice || 'Estimated price')}</dt><dd id="bk-sum-price" class="min-w-0 text-right font-semibold text-amber-700 dark:text-amber-300"></dd></div>
+              </dl>
+            </div>
+
+            <div class="mt-5">
+              <label for="bk-complete-phone" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.mobileNumberLabel || 'Mobile number')}</label>
+              <input id="bk-complete-phone" type="tel" autocomplete="tel" inputmode="tel" value="+32" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+            </div>
+
+            <p class="mt-5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.sendBookingVia || 'Send booking via')}</p>
+            <div class="mt-3 space-y-2.5">
+              <button type="button" id="bk-channel-whatsapp" class="${whatsappDigitsForWaMe(company.phone || '') ? '' : 'hidden '}flex w-full items-center gap-3 rounded-2xl bg-[#25D366] px-4 py-3.5 text-left text-white shadow-[0_10px_28px_rgba(37,211,102,0.28)] ring-1 ring-[#1fb855]/40 transition hover:bg-[#1ebe5d]">
+                ${whatsappBookingIcon('h-6 w-6')}
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-bold">WhatsApp</span>
+                  <span class="block text-[11px] font-semibold text-white/85">${escapeHtml(tb.channelRecommended || 'Recommended')}</span>
+                </span>
+              </button>
+              <button type="button" id="bk-channel-sms" class="${normalizeContactPhone(phone) ? '' : 'hidden '}flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+                ${icon.phone('h-5 w-5 text-amber-600 dark:text-amber-400/90')}
+                <span class="text-sm font-bold text-slate-900 dark:text-white">SMS</span>
+              </button>
+              <button type="button" id="bk-channel-email" class="${company.email ? '' : 'hidden '}flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+                ${icon.mail('h-5 w-5 text-amber-600 dark:text-amber-400/90')}
+                <span class="text-sm font-bold text-slate-900 dark:text-white">${escapeHtml(tb.email)}</span>
+              </button>
+            </div>
+            <p id="bk-complete-err" class="mt-3 hidden rounded-xl bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800 ring-1 ring-red-200 dark:bg-red-950/60 dark:text-red-200 dark:ring-red-500/30"></p>
+          </div>
+        </div>
       </div>
 
       <div id="bk-qr-modal" class="fixed inset-0 z-[300] hidden items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] dark:bg-black/70 sm:items-center sm:p-4" aria-hidden="true">
@@ -814,7 +851,11 @@ export async function mountBookCompany(root, slug) {
     return hourlyOffered && serviceMode === 'hourly'
   }
   const termsEl = root.querySelector('#bk-terms')
-  const waBtn = root.querySelector('#bk-wa')
+  const bookBtn = root.querySelector('#bk-book')
+  const tripStepEl = root.querySelector('#bk-trip-step')
+  const completeEl = root.querySelector('#bk-complete')
+  const completePhoneEl = root.querySelector('#bk-complete-phone')
+  const completeErrEl = root.querySelector('#bk-complete-err')
   const errEl = root.querySelector('#bk-err')
   const estWrap = root.querySelector('#bk-estimate')
   const estHint = root.querySelector('#bk-estimate-hint')
@@ -831,20 +872,11 @@ export async function mountBookCompany(root, slug) {
   let latestEstimate = null
   const estimateSessionCache = new Map()
   let estimateRequestId = 0
+  let channelBusy = false
 
-  const mailA = root.querySelector('#bk-mail')
-  const callA = root.querySelector('#bk-call')
+  // Company A = the company whose booking page the passenger opened. Never TAXIO platform number.
   const normalizedCompanyPhone = normalizeContactPhone(phone)
-  const isStagingTaxio =
-    String(import.meta.env.VITE_TAXIO_STAGING || '')
-      .trim()
-      .toLowerCase() === 'true'
-  // Staging: passenger WhatsApp opens TAXIO central number for silent contact capture.
-  // Company A still receives the TAXIO booking / 25s decision notification from booking create.
-  const STAGING_TAXIO_WA_DIGITS = '32492702795'
-  const companyWhatsAppDigits = isStagingTaxio
-    ? STAGING_TAXIO_WA_DIGITS
-    : whatsappDigitsForWaMe(company.phone || '')
+  const companyWhatsAppDigits = whatsappDigitsForWaMe(company.phone || '')
   let turnstileToken = ''
 
   const carWrapEl = root.querySelector('#bk-car-wrap')
@@ -915,9 +947,7 @@ export async function mountBookCompany(root, slug) {
         ref: bookingReference,
       })
 
-    const companyLine = isStagingTaxio
-      ? fillWaTemplate(msgs.waLineBookingFor || 'Booking for: {company}', { company: company.name })
-      : fillWaTemplate(msgs.waLineCompany, { company: company.name })
+    const companyLine = fillWaTemplate(msgs.waLineCompany, { company: company.name })
 
     if (isHourlyMode()) {
       const startRaw = hourlyStartEl?.value || ''
@@ -967,9 +997,10 @@ export async function mountBookCompany(root, slug) {
     return lines.join('\n')
   }
 
-  function buildMailtoHref() {
+  function buildMailtoHref(bookingReference) {
     if (!company.email) return '#'
     const pu = pickupEl.value.trim() || 'Not provided'
+    const refLine = bookingReference ? `\nBooking reference: ${bookingReference}` : ''
     if (isHourlyMode()) {
       const startRaw = hourlyStartEl?.value || 'Not provided'
       const hours = Number(hourlyHoursEl?.value) || hourlyCfg.minHours
@@ -986,7 +1017,7 @@ Start time: ${startRaw}
 Duration: ${hours} hours
 Car type: ${selectedCar}
 Reference price: from €${hourlyCfg.rateEur}/hour, minimum ${hourlyCfg.minHours} hours
-Notes: ${notes}
+Notes: ${notes}${refLine}
 
 Final price to be confirmed with the taxi company.`
       return `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
@@ -1013,25 +1044,86 @@ Date/Time: ${whenLine}
 Car type: ${selectedCar}
 Estimate distance: ${estimateDistance}
 Estimate duration: ${estimateDuration}
-Estimate price: ${estimatePrice}`
+Estimate price: ${estimatePrice}${refLine}`
     return `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
   }
 
-  function refreshContactLinks() {
-    if (company.email) {
-      mailA.href = buildMailtoHref()
-      mailA.classList.remove('pointer-events-none', 'opacity-40')
-    } else {
-      mailA.href = '#'
-      mailA.classList.add('pointer-events-none', 'opacity-40')
+  function smsBookingUrl(e164Phone, message) {
+    const normalized = normalizeContactPhone(e164Phone)
+    if (!normalized) return null
+    return `sms:${normalized}?body=${encodeURIComponent(message)}`
+  }
+
+  function formatSummaryWhen() {
+    const msgs = tBooking(getLocale())
+    if (isHourlyMode()) {
+      return hourlyStartEl?.value || '—'
     }
-    if (normalizedCompanyPhone) {
-      callA.href = `tel:${normalizedCompanyPhone}`
-      callA.classList.remove('pointer-events-none', 'opacity-40')
-    } else {
-      callA.href = '#'
-      callA.classList.add('pointer-events-none', 'opacity-40')
+    if (rideMode === 'schedule') {
+      return scheduleInput?.value
+        ? `${msgs.waWhenScheduled}: ${scheduleInput.value}`
+        : msgs.waWhenScheduled
     }
+    return msgs.waWhenRideNow
+  }
+
+  function formatSummaryPrice() {
+    if (isHourlyMode()) {
+      return `from €${hourlyCfg.rateEur}/h`
+    }
+    if (latestEstimate?.estimatedPrice != null) {
+      return `€${latestEstimate.estimatedPrice}`
+    }
+    return '—'
+  }
+
+  function fillTripSummary() {
+    const msgs = tBooking(getLocale())
+    const setText = (id, value) => {
+      const el = root.querySelector(id)
+      if (el) el.textContent = value
+    }
+    setText('#bk-sum-company', company.name || '—')
+    setText('#bk-sum-pickup', pickupEl.value.trim() || '—')
+    const dropRow = root.querySelector('#bk-sum-drop-row')
+    if (isHourlyMode()) {
+      dropRow?.classList.add('hidden')
+    } else {
+      dropRow?.classList.remove('hidden')
+      setText('#bk-sum-drop', dropEl.value.trim() || '—')
+    }
+    setText('#bk-sum-when', formatSummaryWhen())
+    setText('#bk-sum-vehicle', bookingCarTypeLabel(selectedCar, msgs))
+    setText('#bk-sum-price', formatSummaryPrice())
+  }
+
+  function showCompleteStep() {
+    fillTripSummary()
+    if (completePhoneEl && !String(completePhoneEl.value || '').trim()) {
+      completePhoneEl.value = '+32'
+    }
+    completeErrEl?.classList.add('hidden')
+    tripStepEl?.classList.add('hidden')
+    completeEl?.classList.remove('hidden')
+    completeEl?.setAttribute('aria-hidden', 'false')
+    completePhoneEl?.focus()
+  }
+
+  function hideCompleteStep() {
+    completeEl?.classList.add('hidden')
+    completeEl?.setAttribute('aria-hidden', 'true')
+    tripStepEl?.classList.remove('hidden')
+    completeErrEl?.classList.add('hidden')
+  }
+
+  function showCompleteError(message) {
+    if (!completeErrEl) return
+    completeErrEl.textContent = message
+    completeErrEl.classList.remove('hidden')
+  }
+
+  function passengerPhoneDigits() {
+    return whatsappDigitsForWaMe(completePhoneEl?.value || '')
   }
 
   function bookingContactGate(requireTripFields) {
@@ -1113,21 +1205,19 @@ Estimate price: ${estimatePrice}`
   }
 
   function refreshWaState() {
+    if (!bookBtn) return
     const puOk = !!pickupEl.value.trim()
     const tripOk = isHourlyMode()
       ? puOk &&
         !!hourlyStartEl?.value &&
         Number(hourlyHoursEl?.value) >= hourlyCfg.minHours
       : puOk && !!dropEl.value.trim()
-    const ok =
-      termsEl.checked &&
-      tripOk &&
-      !!companyWhatsAppDigits
-    waBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
-    BK_WA_DISABLED_CLASSES.forEach((cls) => waBtn.classList.toggle(cls, !ok))
-    BK_WA_ENABLED_CLASSES.forEach((cls) => waBtn.classList.toggle(cls, ok))
+    const hasChannel = !!(companyWhatsAppDigits || normalizedCompanyPhone || company.email)
+    const ok = termsEl.checked && tripOk && hasChannel
+    bookBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
+    BK_BOOK_DISABLED_CLASSES.forEach((cls) => bookBtn.classList.toggle(cls, !ok))
+    BK_BOOK_ENABLED_CLASSES.forEach((cls) => bookBtn.classList.toggle(cls, ok))
     errEl.classList.add('hidden')
-    refreshContactLinks()
   }
 
   function syncRideTimingUi() {
@@ -1649,163 +1739,207 @@ Estimate price: ${estimatePrice}`
     w.document.close()
   })
 
-  mailA.addEventListener('click', (e) => {
-    if (!company.email || mailA.classList.contains('pointer-events-none')) return
-    if (!bookingContactGate(false)) {
-      e.preventDefault()
+  bookBtn?.addEventListener('click', () => {
+    const msgs = tBooking(getLocale())
+    if (bookBtn.getAttribute('aria-disabled') === 'true') return
+    if (isDemo) {
+      errEl.textContent = msgs.demoNoWhatsapp
+      errEl.classList.remove('hidden')
       return
     }
-    if (!isDemo) {
-      trackCompanyAnalyticsEvent({
-        companyId: company.id,
-        slug,
-        eventType: 'email_click',
-        source: parseBookingAnalyticsSource(window.location.search),
-      })
-    }
+    // Opening completion must NOT create a booking or start the 25s timer.
+    if (!bookingContactGate(true)) return
+    showCompleteStep()
   })
 
-  callA.addEventListener('click', (e) => {
-    if (!normalizedCompanyPhone || callA.classList.contains('pointer-events-none')) return
-    if (!bookingContactGate(false)) {
-      e.preventDefault()
+  root.querySelector('#bk-complete-edit')?.addEventListener('click', () => {
+    hideCompleteStep()
+  })
+  root.querySelector('#bk-complete-backdrop')?.addEventListener('click', () => {
+    hideCompleteStep()
+  })
+
+  async function finalizeBookingAndOpenChannel(channel) {
+    const msgs = tBooking(getLocale())
+    if (channelBusy) return
+    completeErrEl?.classList.add('hidden')
+
+    if (!bookingContactGate(true)) {
+      hideCompleteStep()
       return
     }
-    if (!isDemo) {
-      trackCompanyAnalyticsEvent({
-        companyId: company.id,
-        slug,
-        eventType: 'call_click',
-        source: parseBookingAnalyticsSource(window.location.search),
-      })
+
+    const passengerDigits = passengerPhoneDigits()
+    if (!passengerDigits) {
+      showCompleteError(msgs.errMobileNumber || 'Please enter a valid mobile number.')
+      return
     }
-  })
 
-  waBtn.addEventListener('click', (e) => {
-    e.preventDefault()
-    void (async () => {
-      const msgs = tBooking(getLocale())
-      const waDisabled = waBtn.getAttribute('aria-disabled') === 'true'
-      if (waDisabled) return
-      if (isDemo) {
-        errEl.textContent = msgs.demoNoWhatsapp
-        errEl.classList.remove('hidden')
+    if (channel === 'whatsapp' && !companyWhatsAppDigits) {
+      showCompleteError(msgs.errNoPhone)
+      return
+    }
+    if (channel === 'sms' && !normalizedCompanyPhone) {
+      showCompleteError(msgs.errNoCompanyPhone || msgs.errNoPhone)
+      return
+    }
+    if (channel === 'email' && !company.email) {
+      showCompleteError(msgs.errNoEmail || 'This company has no email address.')
+      return
+    }
+
+    const pu = pickupEl.value.trim()
+    const hourlyActive = isHourlyMode()
+    const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
+    const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
+
+    let rideDateIso = null
+    if (hourlyActive) {
+      const raw = hourlyStartEl?.value || ''
+      const d = new Date(raw)
+      if (Number.isNaN(d.getTime())) {
+        showCompleteError(msgs.errHourlyStart)
         return
       }
-      if (!bookingContactGate(true)) return
-
-      const pu = pickupEl.value.trim()
-      const hourlyActive = isHourlyMode()
-      const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
-      const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
-
-      if (!companyWhatsAppDigits) {
-        errEl.textContent = msgs.errNoPhone
-        errEl.classList.remove('hidden')
+      rideDateIso = d.toISOString()
+    } else if (rideMode === 'schedule') {
+      const raw = scheduleInput?.value || ''
+      if (!raw) {
+        showCompleteError(msgs.errSchedule)
         return
       }
-      let rideDateIso = null
-      if (hourlyActive) {
-        const raw = hourlyStartEl?.value || ''
-        const d = new Date(raw)
-        if (Number.isNaN(d.getTime())) {
-          errEl.textContent = msgs.errHourlyStart
-          errEl.classList.remove('hidden')
-          return
-        }
-        rideDateIso = d.toISOString()
-      } else if (rideMode === 'schedule') {
-        const raw = scheduleInput?.value || ''
-        if (!raw) {
-          errEl.textContent = msgs.errSchedule
-          errEl.classList.remove('hidden')
-          return
-        }
-        const d = new Date(raw)
-        if (Number.isNaN(d.getTime())) {
-          errEl.textContent = msgs.errScheduleBad
-          errEl.classList.remove('hidden')
-          return
-        }
-        rideDateIso = d.toISOString()
-      }
-      const estimateLineForNotes = latestEstimate
-        ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
-        : ''
-      const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
-      const fingerprint = [
-        company.id,
-        hourlyActive ? 'hourly' : 'standard',
-        pu.toLowerCase(),
-        hourlyActive ? '' : doff.toLowerCase(),
-        String(selectedCar || ''),
-        hourlyActive ? String(hourlyHoursEl?.value || '') : '',
-        String(rideDateIso || 'ride_now'),
-      ].join('|')
-
-      const logNotes = hourlyActive
-        ? `WhatsApp by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
-        : `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
-
-      // Create booking first so the WA message includes the server reference.
-      waBtn.setAttribute('aria-busy', 'true')
-      const { error: bookingErr, data: bookingData } = await createQuickBookingLog({
-        company_id: company.id,
-        pickup_address: pu,
-        dropoff_address: doff,
-        car_type: selectedCar,
-        service_type: hourlyActive ? 'hourly' : 'standard',
-        duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
-        hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
-        hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
-        estimated_price_eur:
-          !hourlyActive && latestEstimate?.estimatedPrice != null ? latestEstimate.estimatedPrice : null,
-        price_currency: 'EUR',
-        customer_name: 'Booking request',
-        // Passenger WhatsApp contact captured later via Company A inbound Meta webhook.
-        customer_phone: '',
-        customer_email: null,
-        ride_datetime: rideDateIso,
-        notes: logNotes,
-        termsAcceptance: {
-          terms_accepted: true,
-          accepted_at: new Date().toISOString(),
-          terms_version: TERMS_VERSION_BOOKING_RIDER,
-        },
-        turnstileToken,
-        website: honeypot,
-        formStartedAt,
-        submissionFingerprint: fingerprint,
-        humanConfirmed: true,
-      })
-      waBtn.removeAttribute('aria-busy')
-
-      if (bookingErr) {
-        console.warn('[createQuickBookingLog]', bookingErr.message || bookingErr)
-        errEl.textContent = bookingErr.message || msgs.errSecurityRetry || 'Could not create booking.'
-        errEl.classList.remove('hidden')
+      const d = new Date(raw)
+      if (Number.isNaN(d.getTime())) {
+        showCompleteError(msgs.errScheduleBad)
         return
       }
+      rideDateIso = d.toISOString()
+    }
 
-      const bookingReference = String(bookingData?.booking_reference || '').trim()
-      const bookingMessageText = buildWhatsappBookingMessage(bookingReference || null)
+    const estimateLineForNotes = latestEstimate
+      ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+      : ''
+    const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
+    const fingerprint = [
+      company.id,
+      hourlyActive ? 'hourly' : 'standard',
+      pu.toLowerCase(),
+      hourlyActive ? '' : doff.toLowerCase(),
+      String(selectedCar || ''),
+      hourlyActive ? String(hourlyHoursEl?.value || '') : '',
+      String(rideDateIso || 'ride_now'),
+      passengerDigits,
+      channel,
+    ].join('|')
+
+    const channelLabel =
+      channel === 'whatsapp' ? 'WhatsApp' : channel === 'sms' ? 'SMS' : 'Email'
+    const logNotes = hourlyActive
+      ? `${channelLabel} by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+      : `${channelLabel} quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
+
+    channelBusy = true
+    const channelBtn = root.querySelector(`#bk-channel-${channel}`)
+    channelBtn?.setAttribute('aria-busy', 'true')
+
+    // Create/finalize booking here — starts Company A 25s decision_deadline_at server-side.
+    const { error: bookingErr, data: bookingData } = await createQuickBookingLog({
+      company_id: company.id,
+      pickup_address: pu,
+      dropoff_address: doff,
+      car_type: selectedCar,
+      service_type: hourlyActive ? 'hourly' : 'standard',
+      duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
+      hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
+      hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
+      estimated_price_eur:
+        !hourlyActive && latestEstimate?.estimatedPrice != null
+          ? latestEstimate.estimatedPrice
+          : null,
+      price_currency: 'EUR',
+      customer_name: 'Booking request',
+      customer_phone: passengerDigits,
+      customer_email: null,
+      ride_datetime: rideDateIso,
+      notes: logNotes,
+      termsAcceptance: {
+        terms_accepted: true,
+        accepted_at: new Date().toISOString(),
+        terms_version: TERMS_VERSION_BOOKING_RIDER,
+      },
+      turnstileToken,
+      website: honeypot,
+      formStartedAt,
+      submissionFingerprint: fingerprint,
+      humanConfirmed: true,
+    })
+
+    channelBusy = false
+    channelBtn?.removeAttribute('aria-busy')
+
+    if (bookingErr) {
+      console.warn('[createQuickBookingLog]', bookingErr.message || bookingErr)
+      showCompleteError(bookingErr.message || msgs.errSecurityRetry || 'Could not create booking.')
+      return
+    }
+
+    const bookingReference = String(bookingData?.booking_reference || '').trim()
+    const bookingMessageText = buildWhatsappBookingMessage(bookingReference || null)
+    const analyticsSource = parseBookingAnalyticsSource(window.location.search)
+
+    if (channel === 'whatsapp') {
       const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
       if (!url) {
-        errEl.textContent = msgs.errNoPhone
-        errEl.classList.remove('hidden')
+        showCompleteError(msgs.errNoPhone)
         return
       }
-
-      const waSource = parseBookingAnalyticsSource(window.location.search)
       trackCompanyAnalyticsEvent({
         companyId: company.id,
         slug,
         eventType: 'whatsapp_click',
-        source: waSource,
+        source: analyticsSource,
       })
-
-      // Recipient remains Company A — never TAXIO WhatsApp.
       openWaMeUrl(url)
-    })()
+      return
+    }
+
+    if (channel === 'sms') {
+      const url = smsBookingUrl(normalizedCompanyPhone, bookingMessageText)
+      if (!url) {
+        showCompleteError(msgs.errNoCompanyPhone || msgs.errNoPhone)
+        return
+      }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'call_click',
+        source: analyticsSource,
+      })
+      window.location.assign(url)
+      return
+    }
+
+    const mailUrl = buildMailtoHref(bookingReference || null)
+    if (!mailUrl || mailUrl === '#') {
+      showCompleteError(msgs.errNoEmail || 'This company has no email address.')
+      return
+    }
+    trackCompanyAnalyticsEvent({
+      companyId: company.id,
+      slug,
+      eventType: 'email_click',
+      source: analyticsSource,
+    })
+    window.location.assign(mailUrl)
+  }
+
+  root.querySelector('#bk-channel-whatsapp')?.addEventListener('click', () => {
+    void finalizeBookingAndOpenChannel('whatsapp')
+  })
+  root.querySelector('#bk-channel-sms')?.addEventListener('click', () => {
+    void finalizeBookingAndOpenChannel('sms')
+  })
+  root.querySelector('#bk-channel-email')?.addEventListener('click', () => {
+    void finalizeBookingAndOpenChannel('email')
   })
 }
