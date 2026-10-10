@@ -101,6 +101,114 @@ async function logBlockedBooking(supabase, { ipAddress, companyId, contactKey, r
   }
 }
 
+async function activateDraftBooking(res, body) {
+  const bookingId = String(body.booking_id || '').trim()
+  const companyId = String(body.company_id || '').trim()
+  const riderPhoneDigits = normalizePhoneDigits(body.customer_phone)
+  const notesRaw = String(body.notes || '')
+  const notes = notesRaw.slice(0, MAX_NOTES_LEN)
+
+  if (!bookingId || !companyId) {
+    return json(res, 400, { error: 'Missing booking fields.' })
+  }
+  if (!riderPhoneDigits || riderPhoneDigits.length < 8 || riderPhoneDigits.length > 15) {
+    return json(res, 400, { error: 'Invalid WhatsApp / mobile number.' })
+  }
+
+  const supabase = makeSupabaseServiceClient()
+  const { data: existing, error: loadErr } = await supabase
+    .from('booking_requests')
+    .select('id, company_id, status, booking_reference, decision_deadline_at')
+    .eq('id', bookingId)
+    .eq('company_id', companyId)
+    .maybeSingle()
+
+  if (loadErr) {
+    console.error('[public-booking:activate-load]', loadErr)
+    return json(res, 500, { error: 'Could not activate booking.' })
+  }
+  if (!existing) {
+    return json(res, 404, { error: 'Booking draft not found.' })
+  }
+
+  // Already activated — idempotent success (prevents duplicate bookings on re-tap).
+  if (String(existing.status || '') === 'new') {
+    return json(res, 200, {
+      data: {
+        ok: true,
+        id: existing.id,
+        booking_reference: existing.booking_reference || null,
+        activated: true,
+        already: true,
+      },
+    })
+  }
+
+  if (String(existing.status || '') !== 'draft') {
+    return json(res, 409, { error: 'Booking is no longer a draft.' })
+  }
+
+  let decisionSeconds = 25
+  try {
+    const { data: secs } = await supabase.rpc('taxio_rescue_decision_seconds')
+    const n = Number(secs)
+    if (Number.isFinite(n) && n > 0 && n <= 120) decisionSeconds = n
+  } catch {
+    /* keep default 25s */
+  }
+
+  const deadlineIso = new Date(Date.now() + decisionSeconds * 1000).toISOString()
+  const patch = {
+    status: 'new',
+    customer_phone: riderPhoneDigits,
+    decision_deadline_at: deadlineIso,
+  }
+  if (notes) patch.notes = notes
+
+  const { data: updated, error: updErr } = await supabase
+    .from('booking_requests')
+    .update(patch)
+    .eq('id', bookingId)
+    .eq('company_id', companyId)
+    .eq('status', 'draft')
+    .select('id, booking_reference')
+    .maybeSingle()
+
+  if (updErr) {
+    console.error('[public-booking:activate]', updErr)
+    return json(res, 500, { error: `Could not activate booking: ${updErr.message}` })
+  }
+  if (!updated) {
+    // Race: another activate won — reload
+    const { data: again } = await supabase
+      .from('booking_requests')
+      .select('id, booking_reference, status')
+      .eq('id', bookingId)
+      .maybeSingle()
+    if (again && String(again.status) === 'new') {
+      return json(res, 200, {
+        data: {
+          ok: true,
+          id: again.id,
+          booking_reference: again.booking_reference || null,
+          activated: true,
+          already: true,
+        },
+      })
+    }
+    return json(res, 409, { error: 'Could not activate booking draft.' })
+  }
+
+  return json(res, 200, {
+    data: {
+      ok: true,
+      id: updated.id,
+      booking_reference: updated.booking_reference || existing.booking_reference || null,
+      activated: true,
+    },
+  })
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' })
   const envErr = validateSupabaseServiceEnv()
@@ -109,6 +217,11 @@ export default async function handler(req, res) {
   try {
     const body =
       typeof req.body === 'string' && req.body ? JSON.parse(req.body) : req.body || {}
+    const bookingPhase = String(body.booking_phase || 'create').trim().toLowerCase()
+    if (bookingPhase === 'activate') {
+      return await activateDraftBooking(res, body)
+    }
+
     const companyId = String(body.company_id || '').trim()
     const pickup = normalizeAddress(body.pickup_address)
     const dropoff = normalizeAddress(body.dropoff_address)
@@ -125,7 +238,8 @@ export default async function handler(req, res) {
         : null
     const bodyHourlyRate = Number(body.hourly_rate_eur)
     const bodyHourlyMin = parseInt(String(body.hourly_min_hours ?? ''), 10)
-    const status = 'new'
+    // draft = prepared on BOOK (no Company A timer). create/default = live booking (status new).
+    const status = bookingPhase === 'draft' ? 'draft' : 'new'
     const turnstileToken = String(body.turnstileToken || '').trim()
     const honeypot = String(body.website || '').trim()
     const formStartedAt = Number(body.formStartedAt || 0)
@@ -365,12 +479,15 @@ export default async function handler(req, res) {
       console.error('[public-booking:abuse-log]', rateLogErr)
     }
 
+    // Drafts are unfinished passenger prep — ignore them for duplicate blocking.
+    // Live bookings (status new / accepted / …) still block identical re-submits.
     let duplicateQuery = supabase
       .from('booking_requests')
       .select('id')
       .eq('company_id', companyId)
       .eq('pickup_address', pickup)
       .eq('dropoff_address', dropoffFinal)
+      .neq('status', 'draft')
       .gte('created_at', fifteenMinutesAgo)
       .limit(1)
     duplicateQuery = carType ? duplicateQuery.eq('car_type', carType) : duplicateQuery.is('car_type', null)

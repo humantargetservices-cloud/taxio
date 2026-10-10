@@ -224,11 +224,29 @@ export async function createQuickBookingLog(row) {
   })
 }
 
+/** Prepare booking on BOOK (TX + frozen price). Does not start Company A 25s timer. */
+export async function createDraftBookingLog(row) {
+  return createBookingRequest({
+    ...row,
+    booking_phase: 'draft',
+    notes: bookingLegalNotesFallback(row, row.notes || ''),
+  })
+}
+
+/** Activate draft when passenger picks WhatsApp/SMS/Email/Call — starts 25s deadline. */
+export async function activateDraftBookingLog(row) {
+  return createBookingRequest({
+    ...row,
+    booking_phase: 'activate',
+  })
+}
+
 export async function listBookingRequestsForCompany(companyId) {
   const { data, error } = await supabase
     .from('booking_requests')
     .select('*')
     .eq('company_id', companyId)
+    .neq('status', 'draft')
     .order('created_at', { ascending: false })
   if (error) throw error
   return data || []

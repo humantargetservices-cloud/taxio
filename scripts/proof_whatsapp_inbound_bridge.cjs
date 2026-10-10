@@ -59,8 +59,14 @@ async function hasColumn(table, column) {
   checks.completionPhonePresent = /bk-complete-phone/.test(bookJs)
   checks.normalBookingNoTaxioWa = !/32492702795/.test(bookJs)
   checks.companyAWhatsAppDigits = /whatsappDigitsForWaMe\(company\.phone/.test(bookJs)
-  checks.createBeforeOpenWa = /await createQuickBookingLog/.test(bookJs)
-  checks.timerOnlyOnChannel = /Opening completion must NOT create/.test(bookJs)
+  checks.draftOnBook = /createDraftBookingLog|booking_phase:\s*'draft'/.test(bookJs)
+  checks.activateOnChannel = /activateDraftBookingLog|booking_phase:\s*'activate'/.test(bookJs)
+  checks.timerOnlyOnChannel = /must NOT start the 25s timer/.test(bookJs)
+  checks.horizontalChannels = /bk-channel-whatsapp[\s\S]*bk-channel-sms[\s\S]*bk-channel-email/.test(
+    bookJs
+  )
+  checks.callCompanyChannel = /bk-channel-call/.test(bookJs)
+  checks.smsMessageIcon = /messageCircle/.test(bookJs)
   checks.centralModel = /isCentralTaxioPhoneNumberId|NOT_CENTRAL_TAXIO_NUMBER/.test(inboundJs)
   checks.noWabaRequiredForCapture = !/resolveCompanyByPhoneNumberId\(admin,\s*phoneNumberId\)/.test(
     inboundJs.split('capturePassengerContactFromInbound')[1] || ''
@@ -165,8 +171,11 @@ async function hasColumn(table, column) {
     'completionPhonePresent',
     'normalBookingNoTaxioWa',
     'companyAWhatsAppDigits',
-    'createBeforeOpenWa',
+    'draftOnBook',
+    'activateOnChannel',
     'timerOnlyOnChannel',
+    'callCompanyChannel',
+    'smsMessageIcon',
     'centralModel',
     'centralIdCheck',
     'rejectOtherPhoneId',

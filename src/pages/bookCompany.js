@@ -1,6 +1,7 @@
 import {
   fetchApprovedCompanyBySlug,
-  createQuickBookingLog,
+  createDraftBookingLog,
+  activateDraftBookingLog,
 } from '../lib/api.js'
 import { TERMS_VERSION_BOOKING_RIDER } from '../lib/legalVersions.js'
 import { resolveBookingVehicleTypes } from '../lib/bookingCarTypes.js'
@@ -764,23 +765,24 @@ export async function mountBookCompany(root, slug) {
             </div>
 
             <p class="mt-5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.sendBookingVia || 'Send booking via')}</p>
-            <div class="mt-3 space-y-2.5">
-              <button type="button" id="bk-channel-whatsapp" class="${whatsappDigitsForWaMe(company.phone || '') ? '' : 'hidden '}flex w-full items-center gap-3 rounded-2xl bg-[#25D366] px-4 py-3.5 text-left text-white shadow-[0_10px_28px_rgba(37,211,102,0.28)] ring-1 ring-[#1fb855]/40 transition hover:bg-[#1ebe5d]">
+            <div class="mt-3 flex gap-2">
+              <button type="button" id="bk-channel-whatsapp" class="${whatsappDigitsForWaMe(company.phone || '') ? '' : 'hidden '}flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl bg-[#25D366] px-2 py-3 text-white shadow-[0_8px_22px_rgba(37,211,102,0.28)] ring-1 ring-[#1fb855]/40 transition hover:bg-[#1ebe5d]">
                 ${whatsappBookingIcon('h-6 w-6')}
-                <span class="min-w-0 flex-1">
-                  <span class="block text-sm font-bold">WhatsApp</span>
-                  <span class="block text-[11px] font-semibold text-white/85">${escapeHtml(tb.channelRecommended || 'Recommended')}</span>
-                </span>
+                <span class="text-[11px] font-bold leading-tight">WhatsApp</span>
               </button>
-              <button type="button" id="bk-channel-sms" class="${normalizeContactPhone(phone) ? '' : 'hidden '}flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
-                ${icon.phone('h-5 w-5 text-amber-600 dark:text-amber-400/90')}
-                <span class="text-sm font-bold text-slate-900 dark:text-white">SMS</span>
+              <button type="button" id="bk-channel-sms" class="${normalizeContactPhone(phone) ? '' : 'hidden '}flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2 py-3 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+                ${icon.messageCircle('h-5 w-5 text-amber-600 dark:text-amber-400/90')}
+                <span class="text-[11px] font-bold leading-tight text-slate-900 dark:text-white">SMS</span>
               </button>
-              <button type="button" id="bk-channel-email" class="${company.email ? '' : 'hidden '}flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+              <button type="button" id="bk-channel-email" class="${company.email ? '' : 'hidden '}flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2 py-3 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
                 ${icon.mail('h-5 w-5 text-amber-600 dark:text-amber-400/90')}
-                <span class="text-sm font-bold text-slate-900 dark:text-white">${escapeHtml(tb.email)}</span>
+                <span class="text-[11px] font-bold leading-tight text-slate-900 dark:text-white">${escapeHtml(tb.email)}</span>
               </button>
             </div>
+            <button type="button" id="bk-channel-call" class="${normalizeContactPhone(phone) ? '' : 'hidden '}mt-2.5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+              <span aria-hidden="true">📞</span>
+              ${escapeHtml(tb.callUs || 'Call us')}
+            </button>
             <p id="bk-complete-err" class="mt-3 hidden rounded-xl bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800 ring-1 ring-red-200 dark:bg-red-950/60 dark:text-red-200 dark:ring-red-500/30"></p>
           </div>
         </div>
@@ -873,6 +875,10 @@ export async function mountBookCompany(root, slug) {
   const estimateSessionCache = new Map()
   let estimateRequestId = 0
   let channelBusy = false
+  /** @type {{ fp: string, promise: Promise<{id:string,booking_reference:string}>, data?: {id:string,booking_reference:string} } | null} */
+  let draftPrep = null
+  let activatedBookingId = null
+  let frozenBookingReference = ''
 
   // Company A = the company whose booking page the passenger opened. Never TAXIO platform number.
   const normalizedCompanyPhone = normalizeContactPhone(phone)
@@ -1739,6 +1745,126 @@ Estimate price: ${estimatePrice}${refLine}`
     w.document.close()
   })
 
+  function tripDraftFingerprint() {
+    const pu = pickupEl.value.trim()
+    const hourlyActive = isHourlyMode()
+    const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
+    let rideDateIso = 'ride_now'
+    if (hourlyActive) {
+      const raw = hourlyStartEl?.value || ''
+      const d = new Date(raw)
+      rideDateIso = Number.isNaN(d.getTime()) ? 'invalid' : d.toISOString()
+    } else if (rideMode === 'schedule') {
+      const raw = scheduleInput?.value || ''
+      const d = raw ? new Date(raw) : null
+      rideDateIso = d && !Number.isNaN(d.getTime()) ? d.toISOString() : 'schedule'
+    }
+    return [
+      company.id,
+      hourlyActive ? 'hourly' : 'standard',
+      pu.toLowerCase(),
+      hourlyActive ? '' : doff.toLowerCase(),
+      String(selectedCar || ''),
+      hourlyActive ? String(hourlyHoursEl?.value || '') : '',
+      rideDateIso,
+      latestEstimate?.estimatedPrice != null ? String(latestEstimate.estimatedPrice) : '',
+    ].join('|')
+  }
+
+  function buildDraftPayload() {
+    const pu = pickupEl.value.trim()
+    const hourlyActive = isHourlyMode()
+    const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
+    const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
+    let rideDateIso = null
+    if (hourlyActive) {
+      const d = new Date(hourlyStartEl?.value || '')
+      if (!Number.isNaN(d.getTime())) rideDateIso = d.toISOString()
+    } else if (rideMode === 'schedule') {
+      const d = new Date(scheduleInput?.value || '')
+      if (!Number.isNaN(d.getTime())) rideDateIso = d.toISOString()
+    }
+    const estimateLineForNotes = latestEstimate
+      ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+      : ''
+    const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
+    const logNotes = hourlyActive
+      ? `Draft by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+      : `Draft quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
+
+    return {
+      company_id: company.id,
+      pickup_address: pu,
+      dropoff_address: doff,
+      car_type: selectedCar,
+      service_type: hourlyActive ? 'hourly' : 'standard',
+      duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
+      hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
+      hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
+      estimated_price_eur:
+        !hourlyActive && latestEstimate?.estimatedPrice != null
+          ? latestEstimate.estimatedPrice
+          : null,
+      price_currency: 'EUR',
+      customer_name: 'Booking request',
+      customer_phone: '',
+      customer_email: null,
+      ride_datetime: rideDateIso,
+      notes: logNotes,
+      termsAcceptance: {
+        terms_accepted: true,
+        accepted_at: new Date().toISOString(),
+        terms_version: TERMS_VERSION_BOOKING_RIDER,
+      },
+      turnstileToken,
+      website: honeypot,
+      formStartedAt,
+      submissionFingerprint: tripDraftFingerprint(),
+      humanConfirmed: true,
+    }
+  }
+
+  function startDraftPrepare() {
+    const fp = tripDraftFingerprint()
+    if (draftPrep?.fp === fp && draftPrep.promise) return draftPrep.promise
+    if (activatedBookingId && draftPrep?.fp === fp && draftPrep.data) {
+      return Promise.resolve(draftPrep.data)
+    }
+    activatedBookingId = null
+    frozenBookingReference = ''
+    const promise = (async () => {
+      try {
+        const { error, data } = await createDraftBookingLog(buildDraftPayload())
+        if (error) throw error
+        const prepared = {
+          id: String(data?.id || ''),
+          booking_reference: String(data?.booking_reference || '').trim(),
+        }
+        if (!prepared.id || !prepared.booking_reference) {
+          throw new Error('Could not prepare booking.')
+        }
+        if (draftPrep?.fp === fp) {
+          draftPrep = { fp, promise, data: prepared }
+        }
+        frozenBookingReference = prepared.booking_reference
+        return prepared
+      } catch (err) {
+        if (draftPrep?.fp === fp) draftPrep = null
+        throw err
+      }
+    })()
+    draftPrep = { fp, promise }
+    return promise
+  }
+
+  async function ensureDraftReady() {
+    const fp = tripDraftFingerprint()
+    if (draftPrep?.fp !== fp || !draftPrep.promise) {
+      return startDraftPrepare()
+    }
+    return draftPrep.promise
+  }
+
   bookBtn?.addEventListener('click', () => {
     const msgs = tBooking(getLocale())
     if (bookBtn.getAttribute('aria-disabled') === 'true') return
@@ -1747,9 +1873,12 @@ Estimate price: ${estimatePrice}${refLine}`
       errEl.classList.remove('hidden')
       return
     }
-    // Opening completion must NOT create a booking or start the 25s timer.
+    // Opening completion must NOT start the 25s timer — draft prepare runs in background.
     if (!bookingContactGate(true)) return
     showCompleteStep()
+    void startDraftPrepare().catch((err) => {
+      console.warn('[createDraftBookingLog]', err?.message || err)
+    })
   })
 
   root.querySelector('#bk-complete-edit')?.addEventListener('click', () => {
@@ -1758,6 +1887,64 @@ Estimate price: ${estimatePrice}${refLine}`
   root.querySelector('#bk-complete-backdrop')?.addEventListener('click', () => {
     hideCompleteStep()
   })
+
+  function launchCompanyChannel(channel, bookingReference) {
+    const bookingMessageText = buildWhatsappBookingMessage(bookingReference || null)
+    const analyticsSource = parseBookingAnalyticsSource(window.location.search)
+
+    if (channel === 'whatsapp') {
+      const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
+      if (!url) return { ok: false, errorKey: 'errNoPhone' }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'whatsapp_click',
+        source: analyticsSource,
+      })
+      openWaMeUrl(url)
+      return { ok: true }
+    }
+
+    if (channel === 'sms') {
+      const url = smsBookingUrl(normalizedCompanyPhone, bookingMessageText)
+      if (!url) return { ok: false, errorKey: 'errNoCompanyPhone' }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'call_click',
+        source: analyticsSource,
+      })
+      window.location.assign(url)
+      return { ok: true }
+    }
+
+    if (channel === 'email') {
+      const mailUrl = buildMailtoHref(bookingReference || null)
+      if (!mailUrl || mailUrl === '#') return { ok: false, errorKey: 'errNoEmail' }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'email_click',
+        source: analyticsSource,
+      })
+      window.location.assign(mailUrl)
+      return { ok: true }
+    }
+
+    if (channel === 'call') {
+      if (!normalizedCompanyPhone) return { ok: false, errorKey: 'errNoCompanyPhone' }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'call_click',
+        source: analyticsSource,
+      })
+      window.location.assign(`tel:${normalizedCompanyPhone}`)
+      return { ok: true }
+    }
+
+    return { ok: false, errorKey: 'errSecurityRetry' }
+  }
 
   async function finalizeBookingAndOpenChannel(channel) {
     const msgs = tBooking(getLocale())
@@ -1779,7 +1966,7 @@ Estimate price: ${estimatePrice}${refLine}`
       showCompleteError(msgs.errNoPhone)
       return
     }
-    if (channel === 'sms' && !normalizedCompanyPhone) {
+    if ((channel === 'sms' || channel === 'call') && !normalizedCompanyPhone) {
       showCompleteError(msgs.errNoCompanyPhone || msgs.errNoPhone)
       return
     }
@@ -1788,149 +1975,82 @@ Estimate price: ${estimatePrice}${refLine}`
       return
     }
 
-    const pu = pickupEl.value.trim()
-    const hourlyActive = isHourlyMode()
-    const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
-    const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
-
-    let rideDateIso = null
-    if (hourlyActive) {
-      const raw = hourlyStartEl?.value || ''
-      const d = new Date(raw)
-      if (Number.isNaN(d.getTime())) {
-        showCompleteError(msgs.errHourlyStart)
-        return
-      }
-      rideDateIso = d.toISOString()
-    } else if (rideMode === 'schedule') {
-      const raw = scheduleInput?.value || ''
-      if (!raw) {
-        showCompleteError(msgs.errSchedule)
-        return
-      }
-      const d = new Date(raw)
-      if (Number.isNaN(d.getTime())) {
-        showCompleteError(msgs.errScheduleBad)
-        return
-      }
-      rideDateIso = d.toISOString()
-    }
-
-    const estimateLineForNotes = latestEstimate
-      ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
-      : ''
-    const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
-    const fingerprint = [
-      company.id,
-      hourlyActive ? 'hourly' : 'standard',
-      pu.toLowerCase(),
-      hourlyActive ? '' : doff.toLowerCase(),
-      String(selectedCar || ''),
-      hourlyActive ? String(hourlyHoursEl?.value || '') : '',
-      String(rideDateIso || 'ride_now'),
-      passengerDigits,
-      channel,
-    ].join('|')
-
-    const channelLabel =
-      channel === 'whatsapp' ? 'WhatsApp' : channel === 'sms' ? 'SMS' : 'Email'
-    const logNotes = hourlyActive
-      ? `${channelLabel} by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
-      : `${channelLabel} quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
-
     channelBusy = true
     const channelBtn = root.querySelector(`#bk-channel-${channel}`)
     channelBtn?.setAttribute('aria-busy', 'true')
 
-    // Create/finalize booking here — starts Company A 25s decision_deadline_at server-side.
-    const { error: bookingErr, data: bookingData } = await createQuickBookingLog({
-      company_id: company.id,
-      pickup_address: pu,
-      dropoff_address: doff,
-      car_type: selectedCar,
-      service_type: hourlyActive ? 'hourly' : 'standard',
-      duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
-      hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
-      hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
-      estimated_price_eur:
-        !hourlyActive && latestEstimate?.estimatedPrice != null
-          ? latestEstimate.estimatedPrice
-          : null,
-      price_currency: 'EUR',
-      customer_name: 'Booking request',
-      customer_phone: passengerDigits,
-      customer_email: null,
-      ride_datetime: rideDateIso,
-      notes: logNotes,
-      termsAcceptance: {
-        terms_accepted: true,
-        accepted_at: new Date().toISOString(),
-        terms_version: TERMS_VERSION_BOOKING_RIDER,
-      },
-      turnstileToken,
-      website: honeypot,
-      formStartedAt,
-      submissionFingerprint: fingerprint,
-      humanConfirmed: true,
-    })
-
-    channelBusy = false
-    channelBtn?.removeAttribute('aria-busy')
-
-    if (bookingErr) {
-      console.warn('[createQuickBookingLog]', bookingErr.message || bookingErr)
-      showCompleteError(bookingErr.message || msgs.errSecurityRetry || 'Could not create booking.')
-      return
-    }
-
-    const bookingReference = String(bookingData?.booking_reference || '').trim()
-    const bookingMessageText = buildWhatsappBookingMessage(bookingReference || null)
-    const analyticsSource = parseBookingAnalyticsSource(window.location.search)
-
-    if (channel === 'whatsapp') {
-      const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
-      if (!url) {
-        showCompleteError(msgs.errNoPhone)
+    try {
+      // Re-open after activate: same booking, open channel immediately (no second create).
+      if (activatedBookingId && frozenBookingReference) {
+        const launched = launchCompanyChannel(channel, frozenBookingReference)
+        if (!launched.ok) {
+          showCompleteError(msgs[launched.errorKey] || msgs.errSecurityRetry)
+        }
         return
       }
-      trackCompanyAnalyticsEvent({
-        companyId: company.id,
-        slug,
-        eventType: 'whatsapp_click',
-        source: analyticsSource,
-      })
-      openWaMeUrl(url)
-      return
-    }
 
-    if (channel === 'sms') {
-      const url = smsBookingUrl(normalizedCompanyPhone, bookingMessageText)
-      if (!url) {
-        showCompleteError(msgs.errNoCompanyPhone || msgs.errNoPhone)
+      // Delay cause was awaiting full insert here. Draft is prepared on BOOK; only wait if still in-flight.
+      const draft = await ensureDraftReady()
+      const bookingReference = String(draft.booking_reference || frozenBookingReference || '').trim()
+      if (!draft.id || !bookingReference) {
+        showCompleteError(msgs.errSecurityRetry || 'Could not create booking.')
         return
       }
-      trackCompanyAnalyticsEvent({
-        companyId: company.id,
-        slug,
-        eventType: 'call_click',
-        source: analyticsSource,
-      })
-      window.location.assign(url)
-      return
-    }
+      frozenBookingReference = bookingReference
 
-    const mailUrl = buildMailtoHref(bookingReference || null)
-    if (!mailUrl || mailUrl === '#') {
-      showCompleteError(msgs.errNoEmail || 'This company has no email address.')
-      return
+      const channelLabel =
+        channel === 'whatsapp'
+          ? 'WhatsApp'
+          : channel === 'sms'
+            ? 'SMS'
+            : channel === 'email'
+              ? 'Email'
+              : 'Call'
+      const hourlyActive = isHourlyMode()
+      const estimateLineForNotes = latestEstimate
+        ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+        : ''
+      const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
+      const logNotes = hourlyActive
+        ? `${channelLabel} by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+        : `${channelLabel} quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
+
+      // Launch native app immediately with known TX — booking already exists as draft.
+      const launched = launchCompanyChannel(channel, bookingReference)
+      if (!launched.ok) {
+        showCompleteError(msgs[launched.errorKey] || msgs.errSecurityRetry)
+        return
+      }
+
+      // Activate in background: status=new, store phone, start Company A 25s deadline + NEW TRIP.
+      const activateOnce = () =>
+        activateDraftBookingLog({
+          booking_id: draft.id,
+          company_id: company.id,
+          customer_phone: passengerDigits,
+          notes: logNotes,
+        })
+
+      let { error: actErr, data: actData } = await activateOnce()
+      if (actErr) {
+        ;({ error: actErr, data: actData } = await activateOnce())
+      }
+      if (actErr) {
+        console.warn('[activateDraftBookingLog]', actErr.message || actErr)
+        showCompleteError(actErr.message || msgs.errSecurityRetry || 'Could not create booking.')
+        return
+      }
+      activatedBookingId = String(actData?.id || draft.id)
+      if (actData?.booking_reference) {
+        frozenBookingReference = String(actData.booking_reference)
+      }
+    } catch (err) {
+      console.warn('[finalizeBookingAndOpenChannel]', err?.message || err)
+      showCompleteError(err?.message || msgs.errSecurityRetry || 'Could not create booking.')
+    } finally {
+      channelBusy = false
+      channelBtn?.removeAttribute('aria-busy')
     }
-    trackCompanyAnalyticsEvent({
-      companyId: company.id,
-      slug,
-      eventType: 'email_click',
-      source: analyticsSource,
-    })
-    window.location.assign(mailUrl)
   }
 
   root.querySelector('#bk-channel-whatsapp')?.addEventListener('click', () => {
@@ -1941,5 +2061,8 @@ Estimate price: ${estimatePrice}${refLine}`
   })
   root.querySelector('#bk-channel-email')?.addEventListener('click', () => {
     void finalizeBookingAndOpenChannel('email')
+  })
+  root.querySelector('#bk-channel-call')?.addEventListener('click', () => {
+    void finalizeBookingAndOpenChannel('call')
   })
 }
