@@ -35,12 +35,12 @@ export function renderNewTripDecisionOverlay(td, booking, remainingSec, totalSec
 }
 
 /**
- * Company B/C/D opportunity overlay (10s UX countdown — display only).
+ * Company B/C/D opportunity overlay (30s UX countdown — display only).
  */
 export function renderRescueOpportunityOverlay(td, opportunity, remainingSec, totalSec) {
   if (!opportunity) return ''
   const r = opportunity.rescue || {}
-  const total = Math.max(1, Number(totalSec) || 10)
+  const total = Math.max(1, Number(totalSec) || 30)
   const left = Math.max(0, Number(remainingSec) || 0)
   const pct = Math.max(0, Math.min(100, (left / total) * 100))
   const price = cleanTripPriceDisplay(r.preview_estimated_price) || '—'

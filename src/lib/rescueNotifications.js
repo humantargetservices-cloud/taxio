@@ -227,7 +227,11 @@ function bindHandlers(ctx) {
           companyId,
           accessToken,
         })
-        if (result.body?.code === 'ALREADY_TAKEN' || result.body?.code === 'OPPORTUNITY_EXPIRED') {
+        if (
+          result.body?.code === 'ALREADY_TAKEN' ||
+          result.body?.code === 'ALREADY_ASSIGNED' ||
+          result.body?.code === 'OPPORTUNITY_EXPIRED'
+        ) {
           showFlash(copy.rescueAlreadyTakenShort || 'Trip already accepted.')
           void refreshNotifications()
           return

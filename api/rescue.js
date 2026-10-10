@@ -154,7 +154,12 @@ export default async function handler(req, res) {
       const result = data && typeof data === 'object' ? data : { ok: false, code: 'EMPTY' }
       let http = 409
       if (result.ok) http = 200
-      else if (result.code === 'ALREADY_TAKEN' || result.code === 'OPPORTUNITY_EXPIRED') http = 409
+      else if (
+        result.code === 'ALREADY_TAKEN' ||
+        result.code === 'ALREADY_ASSIGNED' ||
+        result.code === 'OPPORTUNITY_EXPIRED'
+      )
+        http = 409
       else if (result.code === 'FORBIDDEN' || result.code === 'NOT_AUTHENTICATED') http = 403
       else if (result.code === 'NOT_FOUND') http = 404
       return json(res, http, result)

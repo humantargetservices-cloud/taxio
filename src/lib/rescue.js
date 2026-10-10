@@ -3,7 +3,7 @@ import { apiUrl } from './api.js'
 
 /** Client UX defaults — server deadlines (pg_cron) are authoritative. */
 export const ORIGINAL_COMPANY_DECISION_SECONDS = 25
-export const RESCUE_OPPORTUNITY_SECONDS = 10
+export const RESCUE_OPPORTUNITY_SECONDS = 30
 
 /** @type {import('@supabase/supabase-js').RealtimeChannel | null} */
 let rescueChannel = null
