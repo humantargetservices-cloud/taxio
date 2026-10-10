@@ -79,7 +79,7 @@ CREATE TABLE public.booking_requests (
   ride_datetime timestamptz NOT NULL,
   notes text,
   status text NOT NULL DEFAULT 'new'
-    CHECK (status IN ('new', 'reviewed', 'accepted', 'rejected')),
+    CHECK (status IN ('draft', 'new', 'reviewed', 'accepted', 'rejected')),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

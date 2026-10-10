@@ -875,10 +875,30 @@ export async function mountBookCompany(root, slug) {
   const estimateSessionCache = new Map()
   let estimateRequestId = 0
   let channelBusy = false
+  /** In-flight activate promise — shared so double-taps await the same request. */
+  let activateInflight = null
   /** @type {{ fp: string, promise: Promise<{id:string,booking_reference:string}>, data?: {id:string,booking_reference:string} } | null} */
   let draftPrep = null
   let activatedBookingId = null
   let frozenBookingReference = ''
+
+  const CHANNEL_IDS = [
+    'bk-channel-whatsapp',
+    'bk-channel-sms',
+    'bk-channel-email',
+    'bk-channel-call',
+  ]
+
+  function setChannelButtonsLocked(locked) {
+    for (const id of CHANNEL_IDS) {
+      const el = root.querySelector(`#${id}`)
+      if (!el) continue
+      el.disabled = !!locked
+      el.setAttribute('aria-disabled', locked ? 'true' : 'false')
+      el.classList.toggle('pointer-events-none', !!locked)
+      el.classList.toggle('opacity-50', !!locked)
+    }
+  }
 
   // Company A = the company whose booking page the passenger opened. Never TAXIO platform number.
   const normalizedCompanyPhone = normalizeContactPhone(phone)
@@ -1122,9 +1142,28 @@ Estimate price: ${estimatePrice}${refLine}`
     completeErrEl?.classList.add('hidden')
   }
 
+  function passengerSafeError(err, fallback) {
+    const msgs = tBooking(getLocale())
+    const fb =
+      fallback ||
+      msgs.errBookingGeneric ||
+      'Something went wrong. Please try again.'
+    const m = String(err?.message || err || '').trim()
+    if (!m) return fb
+    if (/Too many attempts/i.test(m)) return m
+    if (/Please wait a moment|agree to the Terms|enter a valid mobile|Pick-up|drop-off|Security verification/i.test(m)) {
+      return m
+    }
+    if (/violates check|constraint|duplicate key|PGRST|supabase|column|relation|JWT|Internal server/i.test(m)) {
+      return fb
+    }
+    if (m.length > 140) return fb
+    return m
+  }
+
   function showCompleteError(message) {
     if (!completeErrEl) return
-    completeErrEl.textContent = message
+    completeErrEl.textContent = passengerSafeError(message)
     completeErrEl.classList.remove('hidden')
   }
 
@@ -1596,11 +1635,8 @@ Estimate price: ${estimatePrice}${refLine}`
         permState = null
       }
 
-      if (permState === 'denied') {
-        setPickupLocateMessage(msgs.locateDenied)
-        return
-      }
-
+      // Do not hard-block on Permissions API "denied" — some browsers/WebViews misreport it.
+      // Only treat denial from getCurrentPosition (code 1) as definitive.
       if (permState === 'prompt') {
         const hint = String(msgs.locatePromptHint || '').trim()
         if (hint) setPickupLocateMessage(hint)
@@ -1609,7 +1645,7 @@ Estimate price: ${estimatePrice}${refLine}`
       const geoOptions =
         permState === 'granted'
           ? { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
-          : { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
+          : { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
 
       locating = true
       locatePickupBtn.setAttribute('aria-busy', 'true')
@@ -1759,6 +1795,7 @@ Estimate price: ${estimatePrice}${refLine}`
       const d = raw ? new Date(raw) : null
       rideDateIso = d && !Number.isNaN(d.getTime()) ? d.toISOString() : 'schedule'
     }
+    // Do not include estimate price — updates would spawn duplicate drafts.
     return [
       company.id,
       hourlyActive ? 'hourly' : 'standard',
@@ -1767,7 +1804,6 @@ Estimate price: ${estimatePrice}${refLine}`
       String(selectedCar || ''),
       hourlyActive ? String(hourlyHoursEl?.value || '') : '',
       rideDateIso,
-      latestEstimate?.estimatedPrice != null ? String(latestEstimate.estimatedPrice) : '',
     ].join('|')
   }
 
@@ -1826,12 +1862,19 @@ Estimate price: ${estimatePrice}${refLine}`
 
   function startDraftPrepare() {
     const fp = tripDraftFingerprint()
+    // Single-flight: reuse in-flight or completed draft for the same trip.
+    if (draftPrep?.fp === fp && draftPrep.data?.id && draftPrep.data?.booking_reference) {
+      return Promise.resolve(draftPrep.data)
+    }
     if (draftPrep?.fp === fp && draftPrep.promise) return draftPrep.promise
     if (activatedBookingId && draftPrep?.fp === fp && draftPrep.data) {
       return Promise.resolve(draftPrep.data)
     }
-    activatedBookingId = null
-    frozenBookingReference = ''
+    // Trip changed — allow a new draft (server also reuses matching drafts).
+    if (draftPrep?.fp !== fp) {
+      activatedBookingId = null
+      frozenBookingReference = ''
+    }
     const promise = (async () => {
       try {
         const { error, data } = await createDraftBookingLog(buildDraftPayload())
@@ -1876,8 +1919,10 @@ Estimate price: ${estimatePrice}${refLine}`
     // Opening completion must NOT start the 25s timer — draft prepare runs in background.
     if (!bookingContactGate(true)) return
     showCompleteStep()
+    setChannelButtonsLocked(false)
     void startDraftPrepare().catch((err) => {
       console.warn('[createDraftBookingLog]', err?.message || err)
+      showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
     })
   })
 
@@ -1975,25 +2020,36 @@ Estimate price: ${estimatePrice}${refLine}`
       return
     }
 
+    // Single-flight: lock all channels immediately (prevents multi-insert / multi-activate).
     channelBusy = true
-    const channelBtn = root.querySelector(`#bk-channel-${channel}`)
-    channelBtn?.setAttribute('aria-busy', 'true')
+    setChannelButtonsLocked(true)
 
     try {
-      // Re-open after activate: same booking, open channel immediately (no second create).
+      // Already activated — reopen same TX/booking only (no second create/activate).
       if (activatedBookingId && frozenBookingReference) {
         const launched = launchCompanyChannel(channel, frozenBookingReference)
         if (!launched.ok) {
           showCompleteError(msgs[launched.errorKey] || msgs.errSecurityRetry)
+          setChannelButtonsLocked(false)
         }
         return
       }
 
-      // Delay cause was awaiting full insert here. Draft is prepared on BOOK; only wait if still in-flight.
+      // If activate already in flight from a prior tap, wait for it then reopen same booking.
+      if (activateInflight) {
+        await activateInflight
+        if (activatedBookingId && frozenBookingReference) {
+          launchCompanyChannel(channel, frozenBookingReference)
+          return
+        }
+      }
+
+      // Draft is started on BOOK; only wait if still in-flight while passenger typed phone.
       const draft = await ensureDraftReady()
       const bookingReference = String(draft.booking_reference || frozenBookingReference || '').trim()
       if (!draft.id || !bookingReference) {
         showCompleteError(msgs.errSecurityRetry || 'Could not create booking.')
+        setChannelButtonsLocked(false)
         return
       }
       frozenBookingReference = bookingReference
@@ -2015,41 +2071,52 @@ Estimate price: ${estimatePrice}${refLine}`
         ? `${channelLabel} by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
         : `${channelLabel} quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
 
-      // Launch native app immediately with known TX — booking already exists as draft.
+      // Start activate immediately (keepalive) then launch native app — same draft/TX only.
+      activateInflight = (async () => {
+        const run = () =>
+          activateDraftBookingLog({
+            booking_id: draft.id,
+            company_id: company.id,
+            customer_phone: passengerDigits,
+            notes: logNotes,
+          })
+        let { error: actErr, data: actData } = await run()
+        if (actErr) ({ error: actErr, data: actData } = await run())
+        if (actErr) throw actErr
+        activatedBookingId = String(actData?.id || draft.id)
+        if (actData?.booking_reference) {
+          frozenBookingReference = String(actData.booking_reference)
+        }
+        return actData
+      })()
+
       const launched = launchCompanyChannel(channel, bookingReference)
       if (!launched.ok) {
         showCompleteError(msgs[launched.errorKey] || msgs.errSecurityRetry)
+        setChannelButtonsLocked(false)
+        activateInflight = null
         return
       }
 
-      // Activate in background: status=new, store phone, start Company A 25s deadline + NEW TRIP.
-      const activateOnce = () =>
-        activateDraftBookingLog({
-          booking_id: draft.id,
-          company_id: company.id,
-          customer_phone: passengerDigits,
-          notes: logNotes,
-        })
-
-      let { error: actErr, data: actData } = await activateOnce()
-      if (actErr) {
-        ;({ error: actErr, data: actData } = await activateOnce())
-      }
-      if (actErr) {
-        console.warn('[activateDraftBookingLog]', actErr.message || actErr)
-        showCompleteError(actErr.message || msgs.errSecurityRetry || 'Could not create booking.')
+      try {
+        await activateInflight
+      } catch (actErr) {
+        console.warn('[activateDraftBookingLog]', actErr?.message || actErr)
+        showCompleteError(passengerSafeError(actErr, msgs.errBookingGeneric))
+        // Controlled retry of the SAME draft booking.
+        setChannelButtonsLocked(false)
+        activateInflight = null
         return
       }
-      activatedBookingId = String(actData?.id || draft.id)
-      if (actData?.booking_reference) {
-        frozenBookingReference = String(actData.booking_reference)
-      }
+      activateInflight = null
+      // Keep channels locked after successful activate (re-tap only reopens same booking).
     } catch (err) {
       console.warn('[finalizeBookingAndOpenChannel]', err?.message || err)
-      showCompleteError(err?.message || msgs.errSecurityRetry || 'Could not create booking.')
+      showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
+      setChannelButtonsLocked(false)
+      activateInflight = null
     } finally {
       channelBusy = false
-      channelBtn?.removeAttribute('aria-busy')
     }
   }
 

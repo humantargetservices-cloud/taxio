@@ -181,12 +181,14 @@ export async function fetchApprovedCompanyBySlug(slug) {
   return data
 }
 
-export async function createBookingRequest(row) {
+export async function createBookingRequest(row, fetchOpts = {}) {
   try {
     const response = await fetch(apiUrl('/api/public-booking'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(row),
+      // Keep activation alive when the browser switches to WhatsApp/SMS/tel.
+      keepalive: fetchOpts.keepalive === true,
     })
     const body = await response.json().catch(() => ({}))
     if (!response.ok) {
@@ -235,10 +237,13 @@ export async function createDraftBookingLog(row) {
 
 /** Activate draft when passenger picks WhatsApp/SMS/Email/Call — starts 25s deadline. */
 export async function activateDraftBookingLog(row) {
-  return createBookingRequest({
-    ...row,
-    booking_phase: 'activate',
-  })
+  return createBookingRequest(
+    {
+      ...row,
+      booking_phase: 'activate',
+    },
+    { keepalive: true }
+  )
 }
 
 export async function listBookingRequestsForCompany(companyId) {

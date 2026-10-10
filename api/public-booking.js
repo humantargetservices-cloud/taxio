@@ -101,12 +101,14 @@ async function logBlockedBooking(supabase, { ipAddress, companyId, contactKey, r
   }
 }
 
-async function activateDraftBooking(res, body) {
+async function activateDraftBooking(req, res, body) {
   const bookingId = String(body.booking_id || '').trim()
   const companyId = String(body.company_id || '').trim()
   const riderPhoneDigits = normalizePhoneDigits(body.customer_phone)
   const notesRaw = String(body.notes || '')
   const notes = notesRaw.slice(0, MAX_NOTES_LEN)
+  const ipAddress = getClientIp(req)
+  const userAgent = getUserAgent(req)
 
   if (!bookingId || !companyId) {
     return json(res, 400, { error: 'Missing booking fields.' })
@@ -176,7 +178,7 @@ async function activateDraftBooking(res, body) {
 
   if (updErr) {
     console.error('[public-booking:activate]', updErr)
-    return json(res, 500, { error: `Could not activate booking: ${updErr.message}` })
+    return json(res, 500, { error: 'Something went wrong. Please try again.' })
   }
   if (!updated) {
     // Race: another activate won — reload
@@ -199,6 +201,19 @@ async function activateDraftBooking(res, body) {
     return json(res, 409, { error: 'Could not activate booking draft.' })
   }
 
+  // Count the real passenger submit once — at activate, not on draft prep.
+  try {
+    await logAbuseEvent(supabase, {
+      action: 'rider_booking_submit',
+      ip_address: ipAddress,
+      company_id: companyId,
+      contact_key: `activate:${bookingId}`,
+      metadata: { phase: 'activate', ua: userAgent ? 'present' : 'missing' },
+    })
+  } catch (rateLogErr) {
+    console.error('[public-booking:activate-abuse-log]', rateLogErr)
+  }
+
   return json(res, 200, {
     data: {
       ok: true,
@@ -219,7 +234,7 @@ export default async function handler(req, res) {
       typeof req.body === 'string' && req.body ? JSON.parse(req.body) : req.body || {}
     const bookingPhase = String(body.booking_phase || 'create').trim().toLowerCase()
     if (bookingPhase === 'activate') {
-      return await activateDraftBooking(res, body)
+      return await activateDraftBooking(req, res, body)
     }
 
     const companyId = String(body.company_id || '').trim()
@@ -393,117 +408,157 @@ export default async function handler(req, res) {
       })
     }
 
-    if (ipAddress !== 'unknown') {
-      let count = 0
-      try {
-        count = await countAbuseEvents(supabase, {
-          action: 'rider_booking_submit',
-          sinceIso: oneHourAgo,
-          ipAddress,
+    // Draft prep must not burn rider_booking_submit quota (failed draft retries caused 429).
+    // Reuse an existing matching draft instead of inserting another row.
+    if (status === 'draft') {
+      const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString()
+      let reuseQuery = supabase
+        .from('booking_requests')
+        .select('id, booking_reference, status, decision_deadline_at')
+        .eq('company_id', companyId)
+        .eq('status', 'draft')
+        .eq('pickup_address', pickup)
+        .eq('dropoff_address', dropoffFinal)
+        .gte('created_at', thirtyMinutesAgo)
+        .order('created_at', { ascending: false })
+        .limit(1)
+      reuseQuery = carType ? reuseQuery.eq('car_type', carType) : reuseQuery.is('car_type', null)
+      const { data: reusableDraft, error: reuseErr } = await reuseQuery.maybeSingle()
+      if (reuseErr) console.error('[public-booking:draft-reuse]', reuseErr)
+      if (reusableDraft?.id && reusableDraft?.booking_reference) {
+        // Keep frozen price if client sends one and draft has null.
+        if (estimatedPriceEur != null) {
+          await supabase
+            .from('booking_requests')
+            .update({
+              estimated_price_eur: estimatedPriceEur,
+              price_currency: priceCurrency,
+            })
+            .eq('id', reusableDraft.id)
+            .eq('status', 'draft')
+            .is('estimated_price_eur', null)
+        }
+        return json(res, 200, {
+          data: {
+            ok: true,
+            id: reusableDraft.id,
+            booking_reference: reusableDraft.booking_reference,
+            reused: true,
+          },
         })
-      } catch (error) {
-        console.error('[public-booking:rate:ip]', error)
       }
-      if (count >= 10) {
+    } else {
+      // Live create path (legacy) — rate-limit + dedupe apply here only.
+      if (ipAddress !== 'unknown') {
+        let count = 0
+        try {
+          count = await countAbuseEvents(supabase, {
+            action: 'rider_booking_submit',
+            sinceIso: oneHourAgo,
+            ipAddress,
+          })
+        } catch (error) {
+          console.error('[public-booking:rate:ip]', error)
+        }
+        if (count >= 10) {
+          await logBlockedBooking(supabase, {
+            ipAddress,
+            companyId,
+            contactKey,
+            reason: 'rate_limit_ip_10_per_hour',
+          })
+          return json(res, 429, {
+            error: 'Too many attempts. Please try again later.',
+          })
+        }
+      }
+
+      {
+        let count = 0
+        try {
+          count = await countAbuseEvents(supabase, {
+            action: 'rider_booking_submit',
+            sinceIso: oneHourAgo,
+            companyId,
+          })
+        } catch (error) {
+          console.error('[public-booking:rate:company]', error)
+        }
+        if (count >= 30) {
+          await logBlockedBooking(supabase, {
+            ipAddress,
+            companyId,
+            contactKey,
+            reason: 'rate_limit_company_30_per_hour',
+          })
+          return json(res, 429, {
+            error: 'Too many attempts. Please try again later.',
+          })
+        }
+      }
+
+      if (contactKey) {
+        let count = 0
+        try {
+          count = await countAbuseEvents(supabase, {
+            action: 'rider_booking_submit',
+            sinceIso: oneHourAgo,
+            contactKey,
+          })
+        } catch (error) {
+          console.error('[public-booking:rate:contact]', error)
+        }
+        if (count >= 5) {
+          await logBlockedBooking(supabase, {
+            ipAddress,
+            companyId,
+            contactKey,
+            reason: 'rate_limit_contact_5_per_hour',
+          })
+          return json(res, 429, {
+            error: 'Too many attempts. Please try again later.',
+          })
+        }
+      }
+      try {
+        await logAbuseEvent(supabase, {
+          action: 'rider_booking_submit',
+          ip_address: ipAddress,
+          company_id: companyId,
+          contact_key: contactKey,
+          metadata: {
+            ua: userAgent ? 'present' : 'missing',
+            turnstile_enabled: turnstile.enabled === true,
+          },
+        })
+      } catch (rateLogErr) {
+        console.error('[public-booking:abuse-log]', rateLogErr)
+      }
+
+      let duplicateQuery = supabase
+        .from('booking_requests')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('pickup_address', pickup)
+        .eq('dropoff_address', dropoffFinal)
+        .neq('status', 'draft')
+        .gte('created_at', fifteenMinutesAgo)
+        .limit(1)
+      duplicateQuery = carType ? duplicateQuery.eq('car_type', carType) : duplicateQuery.is('car_type', null)
+      const { data: duplicateRecent, error: dupErr } = await duplicateQuery.maybeSingle()
+      if (dupErr) console.error('[public-booking:duplicate-check]', dupErr)
+      if (duplicateRecent) {
         await logBlockedBooking(supabase, {
           ipAddress,
           companyId,
           contactKey,
-          reason: 'rate_limit_ip_10_per_hour',
+          reason: 'duplicate_identical_within_15m',
         })
         return json(res, 429, {
-          error: 'Too many attempts. Please try again later.',
+          error:
+            'This identical booking was already submitted recently. Please wait a few minutes before retrying.',
         })
       }
-    }
-
-    {
-      let count = 0
-      try {
-        count = await countAbuseEvents(supabase, {
-          action: 'rider_booking_submit',
-          sinceIso: oneHourAgo,
-          companyId,
-        })
-      } catch (error) {
-        console.error('[public-booking:rate:company]', error)
-      }
-      if (count >= 30) {
-        await logBlockedBooking(supabase, {
-          ipAddress,
-          companyId,
-          contactKey,
-          reason: 'rate_limit_company_30_per_hour',
-        })
-        return json(res, 429, {
-          error: 'Too many attempts. Please try again later.',
-        })
-      }
-    }
-
-    if (contactKey) {
-      let count = 0
-      try {
-        count = await countAbuseEvents(supabase, {
-          action: 'rider_booking_submit',
-          sinceIso: oneHourAgo,
-          contactKey,
-        })
-      } catch (error) {
-        console.error('[public-booking:rate:contact]', error)
-      }
-      if (count >= 5) {
-        await logBlockedBooking(supabase, {
-          ipAddress,
-          companyId,
-          contactKey,
-          reason: 'rate_limit_contact_5_per_hour',
-        })
-        return json(res, 429, {
-          error: 'Too many attempts. Please try again later.',
-        })
-      }
-    }
-    try {
-      await logAbuseEvent(supabase, {
-        action: 'rider_booking_submit',
-        ip_address: ipAddress,
-        company_id: companyId,
-        contact_key: contactKey,
-        metadata: {
-          ua: userAgent ? 'present' : 'missing',
-          turnstile_enabled: turnstile.enabled === true,
-        },
-      })
-    } catch (rateLogErr) {
-      console.error('[public-booking:abuse-log]', rateLogErr)
-    }
-
-    // Drafts are unfinished passenger prep — ignore them for duplicate blocking.
-    // Live bookings (status new / accepted / …) still block identical re-submits.
-    let duplicateQuery = supabase
-      .from('booking_requests')
-      .select('id')
-      .eq('company_id', companyId)
-      .eq('pickup_address', pickup)
-      .eq('dropoff_address', dropoffFinal)
-      .neq('status', 'draft')
-      .gte('created_at', fifteenMinutesAgo)
-      .limit(1)
-    duplicateQuery = carType ? duplicateQuery.eq('car_type', carType) : duplicateQuery.is('car_type', null)
-    const { data: duplicateRecent, error: dupErr } = await duplicateQuery.maybeSingle()
-    if (dupErr) console.error('[public-booking:duplicate-check]', dupErr)
-    if (duplicateRecent) {
-      await logBlockedBooking(supabase, {
-        ipAddress,
-        companyId,
-        contactKey,
-        reason: 'duplicate_identical_within_15m',
-      })
-      return json(res, 429, {
-        error:
-          'This identical booking was already submitted recently. Please wait a few minutes before retrying.',
-      })
     }
 
     const bookingReference = generateBookingReference()
@@ -533,6 +588,8 @@ export default async function handler(req, res) {
       user_agent: userAgent,
       turnstile_passed: turnstile.enabled ? !!turnstile.passed : null,
       turnstile_error: turnstile.enabled && !turnstile.passed ? String(turnstile.reason || '') : null,
+      // Draft must never start Company A 25s timer (INSERT trigger only sets deadline for status=new).
+      ...(status === 'draft' ? { decision_deadline_at: null } : {}),
     }
 
     async function insertReturning(row) {
@@ -625,7 +682,7 @@ export default async function handler(req, res) {
     }
     if (insertErr) {
       console.error('[public-booking:insert]', insertErr)
-      return json(res, 500, { error: `Could not save booking request: ${insertErr.message}` })
+      return json(res, 500, { error: 'Something went wrong. Please try again.' })
     }
     return json(res, 200, {
       data: {
@@ -636,6 +693,6 @@ export default async function handler(req, res) {
     })
   } catch (err) {
     console.error('[public-booking]', err)
-    return json(res, 500, { error: err?.message || 'Internal server error.' })
+    return json(res, 500, { error: 'Something went wrong. Please try again.' })
   }
 }
