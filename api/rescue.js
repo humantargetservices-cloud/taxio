@@ -183,6 +183,9 @@ export default async function handler(req, res) {
           result.passenger_whatsapp = {
             code: notify.code,
             ok: notify.ok === true,
+            messageId: notify.messageId || null,
+            error: notify.error || null,
+            metaError: notify.metaError || null,
           }
         } catch (notifyErr) {
           console.error('[rescue:accept:notify]', notifyErr?.message || notifyErr)

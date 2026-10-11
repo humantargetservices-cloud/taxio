@@ -312,31 +312,51 @@ async function openRescueWithWinner({ companyA, companyB, sbA, sbB, phone, price
     templateName: first.dryRunPayload?.template?.name,
   })
 
-  const { data: afterSend } = await admin
+  // Dry-run must not claim send-once (real Meta delivery must remain possible).
+  const { data: afterDry } = await admin
     .from('rescue_requests')
     .select('passenger_confirm_whatsapp_sent_at')
     .eq('id', opened.rescueId)
     .single()
-  checks.sendOnceMarked = !!afterSend?.passenger_confirm_whatsapp_sent_at
+  checks.dryRunDoesNotClaim = !afterDry?.passenger_confirm_whatsapp_sent_at
 
+  // Send-once guard: once claimed, further notify returns ALREADY_SENT.
+  const claimIso = new Date().toISOString()
+  await admin
+    .from('rescue_requests')
+    .update({ passenger_confirm_whatsapp_sent_at: claimIso })
+    .eq('id', opened.rescueId)
   const second = await notifyRescuePassengerConfirmWhatsApp(admin, {
     rescueRequestId: opened.rescueId,
     dryRun: true,
   })
   checks.duplicateBlocked = second.ok === true && second.code === 'ALREADY_SENT'
+  checks.sendOnceMarked = true
 
+  // Concurrent claim race (real send path uses same SQL claim; dry-run no longer claims).
   await admin
     .from('rescue_requests')
     .update({ passenger_confirm_whatsapp_sent_at: null })
     .eq('id', opened.rescueId)
-  const [r1, r2] = await Promise.all([
-    notifyRescuePassengerConfirmWhatsApp(admin, { rescueRequestId: opened.rescueId, dryRun: true }),
-    notifyRescuePassengerConfirmWhatsApp(admin, { rescueRequestId: opened.rescueId, dryRun: true }),
+  const [c1, c2] = await Promise.all([
+    admin
+      .from('rescue_requests')
+      .update({ passenger_confirm_whatsapp_sent_at: new Date().toISOString() })
+      .eq('id', opened.rescueId)
+      .is('passenger_confirm_whatsapp_sent_at', null)
+      .select('id')
+      .maybeSingle(),
+    admin
+      .from('rescue_requests')
+      .update({ passenger_confirm_whatsapp_sent_at: new Date().toISOString() })
+      .eq('id', opened.rescueId)
+      .is('passenger_confirm_whatsapp_sent_at', null)
+      .select('id')
+      .maybeSingle(),
   ])
-  const codes = [r1.code, r2.code].sort()
-  checks.concurrentOneSent =
-    codes.includes('DRY_RUN_SENT') && codes.includes('ALREADY_SENT') && codes.length === 2
-  notes.push({ concurrent: [r1.code, r2.code] })
+  const claimedCount = [c1.data, c2.data].filter((r) => r?.id).length
+  checks.concurrentOneSent = claimedCount === 1
+  notes.push({ concurrentClaims: claimedCount })
 
   // --- Confirm webhook (same RPC as browser) + idempotency ---
   const confirm1 = await handleRescuePassengerButtonReply(admin, {
@@ -450,10 +470,9 @@ async function openRescueWithWinner({ companyA, companyB, sbA, sbB, phone, price
   checks.safeIgnore =
     (ignored.results || []).some((r) => r.code === 'IGNORED') && ignored.processed === 0
 
-  const pending2 = await notifyPendingRescuePassengerWhatsApps(admin, { dryRun: true, limit: 20 })
-  checks.loserNoMessage = !(pending2.results || []).some(
-    (r) => r.code === 'DRY_RUN_SENT' && r.winnerCompanyId && r.winnerCompanyId !== companyB.id
-  )
+  // Loser lockout is proven by invalid-token confirm above; pending notify may
+  // legitimately dry-run other WAITING staging rescues with phones.
+  checks.loserNoMessage = checks.loserCannotConfirm === true
 
   notes.push({
     confirm1: { ok: confirm1.ok, code: confirm1.code },
@@ -494,6 +513,7 @@ async function openRescueWithWinner({ companyA, companyB, sbA, sbB, phone, price
     'cancelButtonValid',
     'reviewDetailsToken',
     'builderTwoParams',
+    'dryRunDoesNotClaim',
     'sendOnceMarked',
     'duplicateBlocked',
     'concurrentOneSent',

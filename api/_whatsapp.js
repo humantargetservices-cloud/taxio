@@ -162,6 +162,13 @@ export async function sendRescuePassengerConfirmTemplate({
   const accessToken = String(process.env.WHATSAPP_CLOUD_TOKEN || '').trim()
 
   try {
+    console.info('[whatsapp] template send attempt', {
+      phone_number_id: phoneNumberId,
+      template: templateName,
+      language: lang,
+      to_len: String(to).length,
+      body_param_count: built.bodyParameters.length,
+    })
     const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: {
@@ -171,16 +178,48 @@ export async function sendRescuePassengerConfirmTemplate({
       body: JSON.stringify(payload),
     })
     const json = await res.json().catch(() => ({}))
+    const metaErr = json?.error || null
+    const messageId = json?.messages?.[0]?.id || null
     if (!res.ok) {
-      console.error('[whatsapp] template send failed', res.status, json?.error || json)
+      console.error('[whatsapp] template send failed', {
+        http: res.status,
+        code: metaErr?.code ?? null,
+        error_subcode: metaErr?.error_subcode ?? null,
+        type: metaErr?.type ?? null,
+        message: metaErr?.message || `HTTP_${res.status}`,
+        fbtrace_id: metaErr?.fbtrace_id ?? null,
+        error_data: metaErr?.error_data ?? null,
+      })
       return {
         ok: false,
         status: res.status,
-        error: json?.error?.message || `HTTP_${res.status}`,
+        error: metaErr?.message || `HTTP_${res.status}`,
+        metaError: metaErr
+          ? {
+              code: metaErr.code ?? null,
+              error_subcode: metaErr.error_subcode ?? null,
+              type: metaErr.type ?? null,
+              message: metaErr.message ?? null,
+              fbtrace_id: metaErr.fbtrace_id ?? null,
+              error_data: metaErr.error_data ?? null,
+            }
+          : null,
         response: json,
       }
     }
-    return { ok: true, status: res.status, response: json }
+    console.info('[whatsapp] template send ok', {
+      http: res.status,
+      message_id: messageId,
+      phone_number_id: phoneNumberId,
+      template: templateName,
+      language: lang,
+    })
+    return {
+      ok: true,
+      status: res.status,
+      messageId,
+      response: json,
+    }
   } catch (e) {
     console.error('[whatsapp] template send error', e?.message || e)
     return { ok: false, error: e?.message || 'FETCH_FAILED' }

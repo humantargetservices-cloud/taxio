@@ -183,10 +183,10 @@ export async function handleRescuePassengerButtonReply(admin, { phoneNumberId, p
 
 /**
  * Walk Meta Cloud API webhook payload.
- * Order: Confirm/Cancel buttons first, then TX text capture, else ignore.
+ * Order: status callbacks (log), Confirm/Cancel buttons, TX text capture, else ignore.
  */
 export async function processWhatsappWebhookPayload(admin, body) {
-  const summary = { processed: 0, results: [] }
+  const summary = { processed: 0, statuses: 0, results: [] }
   try {
     const entries = Array.isArray(body?.entry) ? body.entry : []
     for (const entry of entries) {
@@ -195,6 +195,21 @@ export async function processWhatsappWebhookPayload(admin, body) {
         const value = change?.value
         if (!value) continue
         const phoneNumberId = value?.metadata?.phone_number_id
+
+        const statuses = Array.isArray(value?.statuses) ? value.statuses : []
+        for (const st of statuses) {
+          summary.statuses += 1
+          const err = st?.errors?.[0]
+          summary.results.push({
+            ok: true,
+            code: 'STATUS',
+            status: st?.status || null,
+            messageId: st?.id || null,
+            error_code: err?.code || null,
+            error_title: err?.title || null,
+          })
+        }
+
         const messages = Array.isArray(value?.messages) ? value.messages : []
         for (const msg of messages) {
           const type = String(msg?.type || '')

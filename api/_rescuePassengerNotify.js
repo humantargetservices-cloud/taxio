@@ -113,6 +113,36 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
       : null)
   const confirmUrl = rescuePassengerConfirmUrl(token)
 
+  // Dry-run must NEVER claim send-once — otherwise real Meta delivery is blocked.
+  if (dryRun) {
+    const sendResult = await sendRescuePassengerConfirmTemplate({
+      toPhone: passengerPhone,
+      originalCompanyName,
+      winnerCompanyName,
+      confirmToken: token,
+      dryRun: true,
+    })
+    return {
+      ok: sendResult.ok === true,
+      code: sendResult.ok ? 'DRY_RUN_SENT' : 'DRY_RUN_FAILED',
+      error: sendResult.error,
+      confirmUrl,
+      originalCompanyName,
+      winnerCompanyName,
+      companyName: winnerCompanyName,
+      frozenPriceLabel,
+      bodyParamCount: 2,
+      confirmPayload: buildRescueConfirmButtonPayload(token),
+      cancelPayload: buildRescueCancelButtonPayload(token),
+      urlToken: token,
+      dryRunPayload: sendResult.dryRunPayload || null,
+      passengerPhoneDigits: whatsappCloudRecipient(passengerPhone),
+      winnerCompanyId: rescue.accepted_by_company_id,
+      originalCompanyId: rescue.original_company_id,
+      dryRun: true,
+    }
+  }
+
   const claimIso = new Date().toISOString()
   const { data: claimed, error: claimErr } = await admin
     .from('rescue_requests')
@@ -137,29 +167,37 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
     originalCompanyName,
     winnerCompanyName,
     confirmToken: token,
-    dryRun,
+    dryRun: false,
   })
 
   if (!sendResult.ok) {
+    // Failed real send → clear claim so tick/accept can retry (no duplicate on success path).
     await admin
       .from('rescue_requests')
       .update({ passenger_confirm_whatsapp_sent_at: null })
       .eq('id', rescueRequestId)
       .eq('passenger_confirm_whatsapp_sent_at', claimIso)
-    console.error('[rescue-notify:send-failed]', sendResult.error || sendResult)
+    console.error('[rescue-notify:send-failed]', {
+      error: sendResult.error,
+      status: sendResult.status,
+      metaError: sendResult.metaError || null,
+    })
     return {
       ok: false,
       code: sendResult.skipped ? sendResult.error || 'SEND_SKIPPED' : 'SEND_FAILED',
       error: sendResult.error,
+      metaError: sendResult.metaError || null,
+      status: sendResult.status,
       confirmUrl,
-      dryRun,
+      dryRun: false,
     }
   }
 
   return {
     ok: true,
-    code: dryRun ? 'DRY_RUN_SENT' : 'SENT',
+    code: 'SENT',
     sent_at: claimIso,
+    messageId: sendResult.messageId || null,
     confirmUrl,
     originalCompanyName,
     winnerCompanyName,
@@ -169,11 +207,10 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
     confirmPayload: buildRescueConfirmButtonPayload(token),
     cancelPayload: buildRescueCancelButtonPayload(token),
     urlToken: token,
-    dryRunPayload: sendResult.dryRunPayload || null,
     passengerPhoneDigits: whatsappCloudRecipient(passengerPhone),
     winnerCompanyId: rescue.accepted_by_company_id,
     originalCompanyId: rescue.original_company_id,
-    dryRun,
+    dryRun: false,
   }
 }
 
