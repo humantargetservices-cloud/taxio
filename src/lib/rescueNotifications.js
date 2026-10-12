@@ -286,10 +286,21 @@ async function refreshNotifications() {
       else if (pcs === 'CANCELLED_BY_PASSENGER') winnerPhase = 'cancelled'
     }
 
+    // Drop stale PII cache when status leaves WAITING (confirm/cancel via WhatsApp).
+    if (wonId && pcs && pcs !== 'WAITING_PASSENGER_CONFIRMATION') {
+      const cached = winnerDetailsCache.get(wonId)
+      if (cached && cached.passenger_confirm_status && cached.passenger_confirm_status !== pcs) {
+        winnerDetailsCache.delete(wonId)
+      }
+      if (pcs === 'CONFIRMED' && cached && cached.ok === false) {
+        winnerDetailsCache.delete(wonId)
+      }
+    }
+
     let winnerDetails = null
     if (winnerPhase === 'confirmed' && wonId) {
       winnerDetails = winnerDetailsCache.get(wonId) || null
-      if (!winnerDetails) {
+      if (!winnerDetails || winnerDetails.ok === false) {
         const det = await fetchRescueWinnerDetails({ rescueRequestId: wonId, accessToken })
         if (det.ok) {
           winnerDetails = det.body
