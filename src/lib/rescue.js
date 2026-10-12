@@ -5,10 +5,108 @@ import { apiUrl } from './api.js'
 export const ORIGINAL_COMPANY_DECISION_SECONDS = 25
 export const RESCUE_OPPORTUNITY_SECONDS = 30
 
+/** Refresh when access token expires within this window. */
+const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000
+
+const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Please sign in again.'
+
 /** @type {import('@supabase/supabase-js').RealtimeChannel | null} */
 let rescueChannel = null
 /** @type {ReturnType<typeof setInterval> | null} */
 let rescueRefreshTimer = null
+
+/** @param {{ access_token?: string, expires_at?: number } | null | undefined} session */
+export function rescueAccessTokenNeedsRefresh(session, nowMs = Date.now(), skewMs = ACCESS_TOKEN_REFRESH_SKEW_MS) {
+  if (!session?.access_token) return true
+  const exp = Number(session.expires_at)
+  if (!Number.isFinite(exp) || exp <= 0) return false
+  return exp * 1000 <= nowMs + skewMs
+}
+
+/**
+ * Current Supabase access token for Rescue dashboard API calls.
+ * Refreshes when expired / near expiry. Never uses a stale dashboard-captured JWT.
+ */
+export async function getFreshRescueAccessToken() {
+  try {
+    const { data, error } = await supabase.auth.getSession()
+    if (error || !data?.session?.access_token) {
+      return { ok: false, code: 'SESSION_EXPIRED', error: SESSION_EXPIRED_MESSAGE }
+    }
+    let session = data.session
+    if (rescueAccessTokenNeedsRefresh(session)) {
+      const { data: refreshed, error: refErr } = await supabase.auth.refreshSession()
+      if (refErr || !refreshed?.session?.access_token) {
+        return { ok: false, code: 'SESSION_EXPIRED', error: SESSION_EXPIRED_MESSAGE }
+      }
+      session = refreshed.session
+    }
+    return { ok: true, accessToken: session.access_token, expiresAt: session.expires_at }
+  } catch (e) {
+    console.warn('[rescue] getFreshRescueAccessToken', e?.message || e)
+    return { ok: false, code: 'SESSION_EXPIRED', error: SESSION_EXPIRED_MESSAGE }
+  }
+}
+
+function isRescueAuthFailure(res, body) {
+  if (res?.status === 401) return true
+  const code = String(body?.code || '')
+  if (code === 'NOT_AUTHENTICATED' || code === 'SESSION_EXPIRED') return true
+  return /invalid auth token|missing bearer token/i.test(String(body?.error || ''))
+}
+
+/**
+ * Authenticated POST /api/rescue with fresh token + one refresh retry on 401.
+ * Same payload on retry — never duplicates Accept (DB atomic claim remains authoritative).
+ */
+async function rescueAuthedPost(payload) {
+  const fresh = await getFreshRescueAccessToken()
+  if (!fresh.ok) {
+    return {
+      ok: false,
+      status: 401,
+      body: { ok: false, code: 'SESSION_EXPIRED', error: SESSION_EXPIRED_MESSAGE },
+      authRetries: 0,
+    }
+  }
+
+  const doFetch = async (accessToken) => {
+    const res = await fetch(apiUrl('/api/rescue'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const body = await res.json().catch(() => ({}))
+    return { res, body }
+  }
+
+  let { res, body } = await doFetch(fresh.accessToken)
+  let authRetries = 0
+
+  if (isRescueAuthFailure(res, body)) {
+    const { data: refreshed, error: refErr } = await supabase.auth.refreshSession()
+    if (refErr || !refreshed?.session?.access_token) {
+      return {
+        ok: false,
+        status: 401,
+        body: { ok: false, code: 'SESSION_EXPIRED', error: SESSION_EXPIRED_MESSAGE },
+        authRetries: 0,
+      }
+    }
+    authRetries = 1
+    ;({ res, body } = await doFetch(refreshed.session.access_token))
+  }
+
+  return {
+    ok: res.ok && body?.ok === true,
+    status: res.status,
+    body,
+    authRetries,
+  }
+}
 
 export async function fetchRescueGloballyEnabled() {
   try {
@@ -84,46 +182,19 @@ export async function listRescueOpportunitiesForCompany(companyId) {
 }
 
 /** Decline / activate Rescue for Company A (ONE activation path). */
-export async function activateRescueRequest({ bookingRequestId, companyId, accessToken }) {
-  const res = await fetch(apiUrl('/api/rescue'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ action: 'decline', bookingRequestId, companyId }),
-  })
-  const body = await res.json().catch(() => ({}))
-  return { ok: res.ok && body?.ok === true, status: res.status, body }
+export async function activateRescueRequest({ bookingRequestId, companyId }) {
+  return rescueAuthedPost({ action: 'decline', bookingRequestId, companyId })
 }
 
-/** Atomic Rescue accept for Company B/C/D/E. */
-export async function acceptRescueRequest({ rescueRequestId, companyId, accessToken }) {
-  const res = await fetch(apiUrl('/api/rescue'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({ action: 'accept', rescueRequestId, companyId }),
-  })
-  const body = await res.json().catch(() => ({}))
-  return { ok: res.ok && body?.ok === true, status: res.status, body }
+/** Atomic Rescue accept for Company B/C/D/E. Uses current session token (+ one 401 retry). */
+export async function acceptRescueRequest({ rescueRequestId, companyId }) {
+  return rescueAuthedPost({ action: 'accept', rescueRequestId, companyId })
 }
 
 /** Winner PII unlock details (only after passenger CONFIRMED). Soft-fails. */
-export async function fetchRescueWinnerDetails({ rescueRequestId, accessToken }) {
+export async function fetchRescueWinnerDetails({ rescueRequestId }) {
   try {
-    const res = await fetch(apiUrl('/api/rescue'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ action: 'winner_details', rescueRequestId }),
-    })
-    const body = await res.json().catch(() => ({}))
-    return { ok: res.ok && body?.ok === true, status: res.status, body }
+    return await rescueAuthedPost({ action: 'winner_details', rescueRequestId })
   } catch (e) {
     return { ok: false, status: 0, body: { code: 'NETWORK', error: e?.message || 'failed' } }
   }

@@ -162,7 +162,6 @@ function bindHandlers(ctx) {
           const result = await activateRescueRequest({
             bookingRequestId: bookingId,
             companyId,
-            accessToken,
           })
           if (!result.ok && result.body?.code !== 'RESCUE_ALREADY_EXISTS') {
             if (
@@ -184,7 +183,10 @@ function bindHandlers(ctx) {
             }
             btn.disabled = false
             if (msg) {
-              msg.textContent = result.body?.error || copy.rescueActivateError
+              msg.textContent =
+                result.body?.code === 'SESSION_EXPIRED'
+                  ? result.body?.error || 'Your session has expired. Please sign in again.'
+                  : result.body?.error || copy.rescueActivateError
               msg.classList.remove('hidden')
             }
             return
@@ -225,7 +227,6 @@ function bindHandlers(ctx) {
         const result = await acceptRescueRequest({
           rescueRequestId: rescueId,
           companyId,
-          accessToken,
         })
         if (
           result.body?.code === 'ALREADY_TAKEN' ||
@@ -239,7 +240,14 @@ function bindHandlers(ctx) {
         if (!result.ok) {
           btn.disabled = false
           if (msg) {
-            msg.textContent = result.body?.error || copy.rescueAcceptError
+            msg.textContent =
+              result.body?.code === 'SESSION_EXPIRED'
+                ? result.body?.error || 'Your session has expired. Please sign in again.'
+                : result.body?.error || copy.rescueAcceptError
+            // Never surface raw "Invalid auth token." to companies.
+            if (/invalid auth token/i.test(msg.textContent || '')) {
+              msg.textContent = 'Your session has expired. Please sign in again.'
+            }
             msg.classList.remove('hidden')
           }
           return
@@ -301,7 +309,7 @@ async function refreshNotifications() {
     if (winnerPhase === 'confirmed' && wonId) {
       winnerDetails = winnerDetailsCache.get(wonId) || null
       if (!winnerDetails || winnerDetails.ok === false) {
-        const det = await fetchRescueWinnerDetails({ rescueRequestId: wonId, accessToken })
+        const det = await fetchRescueWinnerDetails({ rescueRequestId: wonId })
         if (det.ok) {
           winnerDetails = det.body
           winnerDetailsCache.set(wonId, det.body)
