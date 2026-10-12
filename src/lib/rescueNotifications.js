@@ -48,9 +48,21 @@ let session = null
 let refreshInflight = false
 /** @type {Map<string, object>} */
 const winnerDetailsCache = new Map()
+/** Rescue id we just accepted — keeps winner panel alive if opportunity list lags. */
+let trackedWinnerRescueId = ''
+/** If a refresh was requested while one is in flight, run again after. */
+let refreshQueued = false
 
 function td() {
   return tDashboard(getLocale())
+}
+
+function queueRefresh() {
+  if (refreshInflight) {
+    refreshQueued = true
+    return
+  }
+  void refreshNotifications()
 }
 
 function ensurePortal() {
@@ -75,7 +87,7 @@ function showFlash(message, ms = 2800) {
   if (flashTimer) clearTimeout(flashTimer)
   flashTimer = setTimeout(() => {
     if (flashMessage === message) flashMessage = null
-    void refreshNotifications()
+    queueRefresh()
   }, ms)
 }
 
@@ -117,8 +129,10 @@ function bindHandlers(ctx) {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-mvp-dismiss-winner')
       if (id && !dismissedWinnerIds.includes(id)) dismissedWinnerIds = [...dismissedWinnerIds, id]
+      if (id && trackedWinnerRescueId === id) trackedWinnerRescueId = ''
+      if (id) winnerDetailsCache.delete(id)
       lastSig = ''
-      void refreshNotifications()
+      queueRefresh()
     })
   })
 
@@ -252,8 +266,16 @@ function bindHandlers(ctx) {
           }
           return
         }
+        const acceptedId = String(
+          result.body?.rescue_request_id || rescueId || ''
+        ).trim()
+        if (acceptedId) {
+          trackedWinnerRescueId = acceptedId
+          winnerDetailsCache.delete(acceptedId)
+        }
         showFlash(copy.rescueReservedBadge || 'Trip reserved for you')
-        void refreshNotifications()
+        lastSig = ''
+        queueRefresh()
       } catch {
         btn.disabled = false
         if (msg) {
@@ -265,9 +287,70 @@ function bindHandlers(ctx) {
   })
 }
 
+/**
+ * Authoritative confirm status for the winner panel.
+ * Prefer get_rescue_booking_details (same field taxio_rescue_passenger_confirm writes)
+ * over the opportunity embed, so WhatsApp/browser confirm both update the UI.
+ */
+async function resolveWinnerConfirmState(wonId, embedPcs) {
+  let pcs = embedPcs || ''
+  let winnerDetails = null
+  if (!wonId) return { pcs, winnerDetails, winnerPhase: null }
+
+  const cached = winnerDetailsCache.get(wonId) || null
+  const cachedOk = !!(cached && cached.ok && cached.booking)
+  // While waiting (or unknown), always ask winner_details — that RPC reads the same
+  // passenger_confirm_status column written by taxio_rescue_passenger_confirm.
+  const mustProbe =
+    pcs === 'WAITING_PASSENGER_CONFIRMATION' ||
+    !pcs ||
+    (pcs === 'CONFIRMED' && !cachedOk)
+
+  if (mustProbe) {
+    const det = await fetchRescueWinnerDetails({ rescueRequestId: wonId })
+    const body = det.body || {}
+    const rpcPcs = String(body.passenger_confirm_status || '').trim()
+
+    if (det.ok && body.ok) {
+      winnerDetails = body
+      winnerDetailsCache.set(wonId, body)
+      if (rpcPcs) pcs = rpcPcs
+    } else if (rpcPcs) {
+      // PII_LOCKED_UNTIL_PASSENGER_CONFIRM still returns passenger_confirm_status
+      pcs = rpcPcs
+      if (rpcPcs !== 'CONFIRMED' && cached) {
+        winnerDetailsCache.delete(wonId)
+      }
+      if (rpcPcs === 'CONFIRMED') {
+        // Status flipped CONFIRMED — clear stale lock cache and fetch PII once
+        winnerDetailsCache.delete(wonId)
+        const retry = await fetchRescueWinnerDetails({ rescueRequestId: wonId })
+        if (retry.ok && retry.body?.ok) {
+          winnerDetails = retry.body
+          winnerDetailsCache.set(wonId, retry.body)
+          pcs = String(retry.body.passenger_confirm_status || pcs).trim() || pcs
+        }
+      }
+    }
+  } else if (cachedOk) {
+    winnerDetails = cached
+    if (cached.passenger_confirm_status) pcs = cached.passenger_confirm_status
+  }
+
+  let winnerPhase = null
+  if (pcs === 'WAITING_PASSENGER_CONFIRMATION') winnerPhase = 'waiting'
+  else if (pcs === 'CONFIRMED') winnerPhase = 'confirmed'
+  else if (pcs === 'CANCELLED_BY_PASSENGER') winnerPhase = 'cancelled'
+
+  return { pcs, winnerDetails, winnerPhase }
+}
+
 async function refreshNotifications() {
   if (!session) return
-  if (refreshInflight) return
+  if (refreshInflight) {
+    refreshQueued = true
+    return
+  }
   refreshInflight = true
   const { companyId, accessToken, companyName, portal } = session
   try {
@@ -282,19 +365,48 @@ async function refreshNotifications() {
 
     const pendingDecision = pickPendingDecisionBooking(bookings, dismissedIds)
     const openOpp = pickOpenOpportunity(opportunities)
-    const won = pickWonRescue(opportunities, companyId)
-    const pcs = won?.rescue?.passenger_confirm_status || ''
-    const wonId = won?.rescue_request_id || won?.rescue?.id || ''
+    let won = pickWonRescue(opportunities, companyId)
+
+    // Keep tracking the rescue we just accepted even if opportunity list briefly lags.
+    if (!won && trackedWinnerRescueId) {
+      const tracked = (opportunities || []).find(
+        (o) =>
+          (o.rescue_request_id === trackedWinnerRescueId || o.rescue?.id === trackedWinnerRescueId) &&
+          o.rescue?.accepted_by_company_id === companyId
+      )
+      if (tracked) won = tracked
+      else {
+        won = {
+          rescue_request_id: trackedWinnerRescueId,
+          status: 'ACCEPTED',
+          company_id: companyId,
+          rescue: {
+            id: trackedWinnerRescueId,
+            status: 'ACCEPTED',
+            accepted_by_company_id: companyId,
+            passenger_confirm_status: 'WAITING_PASSENGER_CONFIRMATION',
+          },
+        }
+      }
+    }
+
+    let pcs = won?.rescue?.passenger_confirm_status || ''
+    const wonId = won?.rescue_request_id || won?.rescue?.id || trackedWinnerRescueId || ''
+    if (wonId) trackedWinnerRescueId = wonId
     const winnerDismissed = wonId && dismissedWinnerIds.includes(wonId)
 
     let winnerPhase = null
-    if (won && !winnerDismissed) {
-      if (pcs === 'WAITING_PASSENGER_CONFIRMATION') winnerPhase = 'waiting'
-      else if (pcs === 'CONFIRMED') winnerPhase = 'confirmed'
-      else if (pcs === 'CANCELLED_BY_PASSENGER') winnerPhase = 'cancelled'
+    let winnerDetails = null
+    if (won && !winnerDismissed && wonId) {
+      const resolved = await resolveWinnerConfirmState(wonId, pcs)
+      pcs = resolved.pcs
+      winnerDetails = resolved.winnerDetails
+      winnerPhase = resolved.winnerPhase
+      // Keep opportunity embed in sync for panel preview labels
+      if (won.rescue && pcs) won.rescue.passenger_confirm_status = pcs
     }
 
-    // Drop stale PII cache when status leaves WAITING (confirm/cancel via WhatsApp).
+    // Drop stale PII cache when status leaves WAITING (confirm/cancel via WhatsApp/browser).
     if (wonId && pcs && pcs !== 'WAITING_PASSENGER_CONFIRMATION') {
       const cached = winnerDetailsCache.get(wonId)
       if (cached && cached.passenger_confirm_status && cached.passenger_confirm_status !== pcs) {
@@ -305,15 +417,12 @@ async function refreshNotifications() {
       }
     }
 
-    let winnerDetails = null
-    if (winnerPhase === 'confirmed' && wonId) {
-      winnerDetails = winnerDetailsCache.get(wonId) || null
-      if (!winnerDetails || winnerDetails.ok === false) {
-        const det = await fetchRescueWinnerDetails({ rescueRequestId: wonId })
-        if (det.ok) {
-          winnerDetails = det.body
-          winnerDetailsCache.set(wonId, det.body)
-        }
+    if (winnerPhase === 'confirmed' && wonId && (!winnerDetails || winnerDetails.ok === false)) {
+      winnerDetailsCache.delete(wonId)
+      const det = await fetchRescueWinnerDetails({ rescueRequestId: wonId })
+      if (det.ok && det.body?.ok) {
+        winnerDetails = det.body
+        winnerDetailsCache.set(wonId, det.body)
       }
     }
 
@@ -323,7 +432,7 @@ async function refreshNotifications() {
       g: flags.enabled,
       d: pendingDecision ? [pendingDecision.id, pendingDecision.decision_deadline_at] : null,
       o: openOpp ? [openOpp.id, openOpp.status, openOpp.expires_at] : null,
-      w: wonId ? [wonId, pcs, winnerPhase, !!winnerDetails] : null,
+      w: wonId ? [wonId, pcs, winnerPhase, !!winnerDetails?.booking?.customer_phone] : null,
       x: dismissedIds,
       dw: dismissedWinnerIds,
       f: flashMessage,
@@ -372,7 +481,7 @@ async function refreshNotifications() {
       startCountdown(openOpp.expires_at, flags.opportunitySeconds || RESCUE_OPPORTUNITY_SECONDS, () => {
         // Display-only expiry — close quietly; server cron owns opportunity withdraw
         lastSig = ''
-        void refreshNotifications()
+        queueRefresh()
       })
     } else if (pendingDecision) {
       startCountdown(
@@ -386,7 +495,7 @@ async function refreshNotifications() {
           // Close locally — do NOT activate Rescue from the browser
           showFlash(copy.rescueActiveLooking || copy.rescueActivateSuccess)
           lastSig = ''
-          void refreshNotifications()
+          queueRefresh()
         }
       )
     }
@@ -394,6 +503,10 @@ async function refreshNotifications() {
     console.warn('[rescue-notify] refresh failed soft', e?.message || e)
   } finally {
     refreshInflight = false
+    if (refreshQueued) {
+      refreshQueued = false
+      queueRefresh()
+    }
   }
 }
 
@@ -414,11 +527,16 @@ export function startRescueNotifications({ companyId, accessToken, companyName }
   const portal = ensurePortal()
   session = { companyId, accessToken, companyName: companyName || '', portal }
   lastSig = ''
-  void refreshNotifications()
-  startRescueLiveUpdates(companyId, () => {
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-    void refreshNotifications()
-  })
+  queueRefresh()
+  // 4s poll is authoritative fallback — realtime may not deliver passenger_confirm updates
+  startRescueLiveUpdates(
+    companyId,
+    () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      queueRefresh()
+    },
+    { intervalMs: 4000 }
+  )
 }
 
 export function stopRescueNotifications() {
@@ -431,6 +549,8 @@ export function stopRescueNotifications() {
   flashMessage = null
   lastSig = ''
   session = null
+  trackedWinnerRescueId = ''
+  refreshQueued = false
   winnerDetailsCache.clear()
   const portal = document.getElementById('rescue-notification-root')
   if (portal) portal.innerHTML = ''

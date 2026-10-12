@@ -142,6 +142,7 @@ export async function fetchRescueGloballyEnabled() {
 export async function listRescueOpportunitiesForCompany(companyId) {
   const embed = `
       id,
+      company_id,
       status,
       created_at,
       responded_at,
@@ -161,6 +162,7 @@ export async function listRescueOpportunitiesForCompany(companyId) {
         preview_service_type,
         preview_estimated_price,
         passenger_confirm_status,
+        passenger_confirmed_at,
         booking_request_id
       )
     `
@@ -235,9 +237,14 @@ export function secondsRemaining(deadlineIso) {
 /**
  * UI-only live subscription for Rescue notifications.
  * Does NOT call process_timeouts / tick — pg_cron owns deadlines.
+ * Realtime is optional; interval poll is the reliable fallback.
+ * @param {string} companyId
+ * @param {() => void} onChange
+ * @param {{ intervalMs?: number }} [opts]
  */
-export function startRescueLiveUpdates(companyId, onChange) {
+export function startRescueLiveUpdates(companyId, onChange, opts = {}) {
   stopRescueLiveUpdates()
+  const intervalMs = Math.max(2000, Number(opts.intervalMs) || 4000)
   let scheduled = null
   const fire = () => {
     if (scheduled) return
@@ -262,8 +269,8 @@ export function startRescueLiveUpdates(companyId, onChange) {
     console.warn('[rescue] realtime', e)
   }
 
-  // Lightweight UI refresh only — no timeout activation
-  rescueRefreshTimer = setInterval(fire, 8000)
+  // Reliable UI refresh — realtime may miss passenger_confirm_status updates
+  rescueRefreshTimer = setInterval(fire, intervalMs)
 }
 
 export function stopRescueLiveUpdates() {

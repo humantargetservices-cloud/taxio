@@ -104,15 +104,18 @@ export function overlayRemaining(deadlineIso, fallbackSec) {
 
 /**
  * Most recent Rescue this company won (ACCEPTED opportunity + ACCEPTED request).
+ * company_id on the opportunity row is preferred but optional — list queries are
+ * already scoped with .eq('company_id', companyId); accepted_by is authoritative.
  */
 export function pickWonRescue(opportunities, companyId) {
-  const mine = (opportunities || []).filter(
-    (o) =>
-      o.company_id === companyId &&
-      o.status === 'ACCEPTED' &&
-      o.rescue?.status === 'ACCEPTED' &&
-      o.rescue?.accepted_by_company_id === companyId
-  )
+  const mine = (opportunities || []).filter((o) => {
+    if (o.status !== 'ACCEPTED') return false
+    if (o.rescue?.status !== 'ACCEPTED') return false
+    if (o.rescue?.accepted_by_company_id !== companyId) return false
+    // If company_id was selected, require it; if omitted (older clients), trust scope + accepted_by.
+    if (o.company_id != null && o.company_id !== companyId) return false
+    return true
+  })
   mine.sort((a, b) => {
     const ta = a.rescue?.accepted_at ? new Date(a.rescue.accepted_at).getTime() : 0
     const tb = b.rescue?.accepted_at ? new Date(b.rescue.accepted_at).getTime() : 0
