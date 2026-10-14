@@ -10,3 +10,14 @@ body {
   margin: 0;
   font-family: var(--font-sans);
 }
+
+/* Booking review popup — intl-tel-input */
+.bk-iti.iti {
+  width: 100%;
+  display: block;
+}
+.bk-iti .iti__tel-input {
+  width: 100%;
+  height: 3rem;
+  border-radius: 1rem;
+}

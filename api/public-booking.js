@@ -20,6 +20,15 @@ function normalizePhoneDigits(phone) {
   return String(phone || '').replace(/\D/g, '')
 }
 
+/** Prefer E.164 (+…). Accept legacy digit-only by prefixing +. */
+function normalizePassengerPhoneE164(phone) {
+  const raw = String(phone || '').trim()
+  if (/^\+[1-9]\d{7,14}$/.test(raw)) return raw
+  const digits = normalizePhoneDigits(raw)
+  if (digits.length >= 8 && digits.length <= 15 && /^[1-9]/.test(digits)) return `+${digits}`
+  return ''
+}
+
 function normalizeAddress(a) {
   return String(a || '')
     .trim()
@@ -105,7 +114,11 @@ async function logBlockedBooking(supabase, { ipAddress, companyId, contactKey, r
 async function activateDraftBooking(req, res, body) {
   const bookingId = String(body.booking_id || '').trim()
   const companyId = String(body.company_id || '').trim()
-  const riderPhoneDigits = normalizePhoneDigits(body.customer_phone)
+  const riderPhoneE164 = normalizePassengerPhoneE164(body.customer_phone)
+  const riderName = String(body.customer_name || body.passenger_name || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 80)
   const notesRaw = String(body.notes || '')
   const notes = notesRaw.slice(0, MAX_NOTES_LEN)
   const ipAddress = getClientIp(req)
@@ -114,8 +127,11 @@ async function activateDraftBooking(req, res, body) {
   if (!bookingId || !companyId) {
     return json(res, 400, { error: 'Missing booking fields.' })
   }
-  if (!riderPhoneDigits || riderPhoneDigits.length < 8 || riderPhoneDigits.length > 15) {
-    return json(res, 400, { error: 'Invalid WhatsApp / mobile number.' })
+  if (!riderPhoneE164) {
+    return json(res, 400, { error: 'Invalid mobile number.' })
+  }
+  if (!riderName || riderName.length < 2) {
+    return json(res, 400, { error: 'Please enter a name for pickup.' })
   }
 
   const supabase = makeSupabaseServiceClient()
@@ -214,7 +230,8 @@ async function activateDraftBooking(req, res, body) {
   const deadlineIso = new Date(Date.now() + decisionSeconds * 1000).toISOString()
   const patch = {
     status: 'new',
-    customer_phone: riderPhoneDigits,
+    customer_phone: riderPhoneE164,
+    customer_name: riderName,
     decision_deadline_at: deadlineIso,
     passenger_trip_token: tripToken,
   }

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
+    "intl-tel-input": "^29.5.4",
     "resend": "^6.10.0"
   },
   "devDependencies": {

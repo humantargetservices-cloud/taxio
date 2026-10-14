@@ -26,6 +26,9 @@ import {
   parseBookingAnalyticsSource,
   trackCompanyAnalyticsEvent,
 } from '../lib/companyAnalytics.js'
+import intlTelInput from 'intl-tel-input/intlTelInputWithUtils'
+import 'intl-tel-input/styles'
+
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const TURNSTILE_FRONT_ENABLED =
@@ -745,7 +748,7 @@ export async function mountBookCompany(root, slug) {
             <button type="button" id="bk-complete-edit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 transition hover:text-amber-700 dark:text-slate-300 dark:hover:text-amber-200">
               <span aria-hidden="true">←</span> ${escapeHtml(tb.editTrip || 'Edit trip')}
             </button>
-            <h2 id="bk-complete-heading" class="mt-3 text-xl font-bold tracking-tight text-slate-900 dark:text-white">${escapeHtml(tb.completeBookingTitle || 'Complete your booking')}</h2>
+            <h2 id="bk-complete-heading" class="mt-3 text-xl font-bold tracking-tight text-slate-900 dark:text-white">${escapeHtml(tb.reviewBookingTitle || 'Review your booking')}</h2>
 
             <div class="mt-5 rounded-2xl border border-slate-200/90 bg-slate-50/90 px-4 py-3.5 dark:border-slate-700/60 dark:bg-slate-800/50">
               <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.tripSummaryTitle || 'Trip summary')}</p>
@@ -760,16 +763,22 @@ export async function mountBookCompany(root, slug) {
             </div>
 
             <div class="mt-5">
-              <label for="bk-complete-phone" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.mobileNumberLabel || 'Mobile number')}</label>
-              <input id="bk-complete-phone" type="tel" autocomplete="tel" inputmode="tel" value="+32" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              <label for="bk-complete-name" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.pickupNameLabel || 'Name for pickup')}</label>
+              <input id="bk-complete-name" type="text" autocomplete="name" maxlength="80" placeholder="${escapeHtml(tb.pickupNamePlaceholder || 'Adrien')}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">${escapeHtml(tb.pickupNameHint || 'The driver will use this name to identify the passenger.')}</p>
             </div>
 
-            <button type="button" id="bk-continue-trip" class="mt-6 flex h-12 w-full items-center justify-center rounded-2xl bg-amber-400 px-4 text-sm font-black text-slate-900 shadow-sm transition hover:bg-amber-300">
-              ${escapeHtml(tb.continueToTrip || 'Confirm request')}
+            <div class="mt-5">
+              <label for="bk-complete-phone" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.mobileNumberLabel || 'Mobile number')}</label>
+              <input id="bk-complete-phone" type="tel" autocomplete="tel" inputmode="tel" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">${escapeHtml(tb.mobileNumberHint || 'Used for this booking and taxi updates.')}</p>
+            </div>
+
+            <p class="mt-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">${escapeHtml(tb.contactPrivacyNote || 'Your contact details are shared only with the taxi company handling your trip.')}</p>
+
+            <button type="button" id="bk-continue-trip" class="mt-5 flex h-12 w-full items-center justify-center rounded-2xl bg-amber-400 px-4 text-sm font-black tracking-wide text-slate-900 shadow-sm transition hover:bg-amber-300">
+              ${escapeHtml(tb.confirmBookingCta || 'CONFIRM BOOKING')}
             </button>
-            <p class="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">${escapeHtml(
-              tb.continueToTripHint || 'We’ll keep you updated on this page while we contact the company.'
-            )}</p>
 
             <!-- Legacy channel sheet kept for temporary compatibility (bypassed by live trip flow). -->
             <div id="bk-legacy-channels" class="mt-5 hidden" hidden aria-hidden="true">
@@ -867,7 +876,22 @@ export async function mountBookCompany(root, slug) {
   const tripStepEl = root.querySelector('#bk-trip-step')
   const completeEl = root.querySelector('#bk-complete')
   const completePhoneEl = root.querySelector('#bk-complete-phone')
+  const completeNameEl = root.querySelector('#bk-complete-name')
   const completeErrEl = root.querySelector('#bk-complete-err')
+  /** @type {ReturnType<typeof intlTelInput> | null} */
+  let passengerPhoneIti = null
+  if (completePhoneEl) {
+    passengerPhoneIti = intlTelInput(completePhoneEl, {
+      initialCountry: 'be',
+      preferredCountries: ['be', 'fr', 'nl', 'de', 'gb', 'lu', 'us', 'ke', 'rw'],
+      countryOrder: ['be', 'fr', 'nl', 'de', 'gb', 'us'],
+      nationalMode: true,
+      autoPlaceholder: 'aggressive',
+      formatOnDisplay: true,
+      strictMode: true,
+      containerClass: 'bk-iti w-full',
+    })
+  }
   const errEl = root.querySelector('#bk-err')
   const estWrap = root.querySelector('#bk-estimate')
   const estHint = root.querySelector('#bk-estimate-hint')
@@ -1135,14 +1159,11 @@ Estimate price: ${estimatePrice}${refLine}`
 
   function showCompleteStep() {
     fillTripSummary()
-    if (completePhoneEl && !String(completePhoneEl.value || '').trim()) {
-      completePhoneEl.value = '+32'
-    }
     completeErrEl?.classList.add('hidden')
     tripStepEl?.classList.add('hidden')
     completeEl?.classList.remove('hidden')
     completeEl?.setAttribute('aria-hidden', 'false')
-    completePhoneEl?.focus()
+    ;(completeNameEl || completePhoneEl)?.focus()
   }
 
   function hideCompleteStep() {
@@ -1178,7 +1199,30 @@ Estimate price: ${estimatePrice}${refLine}`
   }
 
   function passengerPhoneDigits() {
-    return whatsappDigitsForWaMe(completePhoneEl?.value || '')
+    const e164 = passengerPhoneE164()
+    return e164 ? whatsappDigitsForWaMe(e164) : whatsappDigitsForWaMe(completePhoneEl?.value || '')
+  }
+
+  /** Valid E.164 from intl-tel-input, or empty. */
+  function passengerPhoneE164() {
+    if (passengerPhoneIti) {
+      try {
+        if (!passengerPhoneIti.isValidNumber()) return ''
+        const num = String(passengerPhoneIti.getNumber() || '').trim()
+        return /^\+[1-9]\d{7,14}$/.test(num) ? num : ''
+      } catch {
+        return ''
+      }
+    }
+    const raw = String(completePhoneEl?.value || '').trim()
+    return /^\+[1-9]\d{7,14}$/.test(raw) ? raw : ''
+  }
+
+  function passengerPickupName() {
+    return String(completeNameEl?.value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 80)
   }
 
   function bookingContactGate(requireTripFields) {
@@ -2124,7 +2168,7 @@ Estimate price: ${estimatePrice}${refLine}`
     }
   }
 
-  /** Primary Batch 1 flow: activate → /trip/:token (no WhatsApp handoff). */
+  /** Review popup → validate contact → activate → /trip/:token. */
   async function finalizeBookingAndGoToTrip() {
     const msgs = tBooking(getLocale())
     if (channelBusy) return
@@ -2135,9 +2179,17 @@ Estimate price: ${estimatePrice}${refLine}`
       return
     }
 
-    const passengerDigits = passengerPhoneDigits()
-    if (!passengerDigits) {
+    const pickupName = passengerPickupName()
+    if (!pickupName || pickupName.length < 2) {
+      showCompleteError(msgs.errPickupName || 'Please enter a name for pickup.')
+      completeNameEl?.focus()
+      return
+    }
+
+    const phoneE164 = passengerPhoneE164()
+    if (!phoneE164) {
       showCompleteError(msgs.errMobileNumber || 'Please enter a valid mobile number.')
+      completePhoneEl?.focus()
       return
     }
 
@@ -2180,7 +2232,8 @@ Estimate price: ${estimatePrice}${refLine}`
           activateDraftBookingLog({
             booking_id: draft.id,
             company_id: company.id,
-            customer_phone: passengerDigits,
+            customer_phone: phoneE164,
+            customer_name: pickupName,
             notes: logNotes,
           })
         let { error: actErr, data: actData } = await run()
