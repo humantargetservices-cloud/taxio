@@ -2,6 +2,7 @@ import { escapeHtml } from './html.js'
 import { formatDateTime } from './format.js'
 import { cleanTripPriceDisplay, tripPriceLabelFromBooking } from './rescuePrice.js'
 import { secondsRemaining } from './rescue.js'
+import { preferRouteLabel } from './activeTrips.js'
 
 export { cleanTripPriceDisplay, tripPriceLabelFromBooking } from './rescuePrice.js'
 
@@ -48,7 +49,7 @@ export function renderRescueOpportunityOverlay(td, opportunity, remainingSec, to
   return `<div id="rescue-b-overlay" class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/55 p-4 backdrop-blur-[2px] sm:items-center" role="dialog" aria-modal="true" aria-labelledby="rescue-b-title">
     <div class="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-5 shadow-2xl dark:border-amber-500/30 dark:bg-slate-900 sm:p-6">
       <p class="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">${escapeHtml(td.rescueOppBadge || 'NEW TAXIO TRIP')}</p>
-      <h3 id="rescue-b-title" class="mt-2 text-lg font-bold text-gray-900 dark:text-slate-50">${escapeHtml(r.preview_pickup_label || '—')} → ${escapeHtml(r.preview_dropoff_label || '—')}</h3>
+      <h3 id="rescue-b-title" class="mt-2 text-lg font-bold text-gray-900 dark:text-slate-50">${escapeHtml(preferRouteLabel(r.preview_pickup_label))} → ${escapeHtml(preferRouteLabel(r.preview_dropoff_label))}</h3>
       <p class="mt-2 text-sm font-semibold text-amber-700 dark:text-amber-300">${escapeHtml(td.rescueTripPrice || 'Trip price')}: ${escapeHtml(price)}</p>
       <p class="mt-1 text-sm text-gray-500 dark:text-slate-400">${escapeHtml(td.rescueWhen || 'When')}: ${escapeHtml(when)}</p>
       <div class="mt-4 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800" aria-hidden="true">
@@ -151,8 +152,8 @@ export function findWonRescueById(opportunities, companyId, rescueRequestId) {
 /** Non-blocking winner panel: waiting / confirmed / cancelled. */
 export function renderWinnerStatusPanel(td, { phase, opportunity, details, companyName }) {
   const r = opportunity?.rescue || {}
-  const pickup = r.preview_pickup_label || details?.booking?.pickup_address || '—'
-  const dropoff = r.preview_dropoff_label || details?.booking?.dropoff_address || '—'
+  const pickup = preferRouteLabel(details?.booking?.pickup_address, r.preview_pickup_label)
+  const dropoff = preferRouteLabel(details?.booking?.dropoff_address, r.preview_dropoff_label)
   const price =
     cleanTripPriceDisplay(r.preview_estimated_price) ||
     (details?.booking?.estimated_price_eur != null

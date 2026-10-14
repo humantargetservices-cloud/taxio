@@ -27,7 +27,6 @@ import {
   pickWonRescue,
   renderNewTripDecisionOverlay,
   renderRescueOpportunityOverlay,
-  renderWinnerStatusPanel,
 } from './rescueMvpUi.js'
 
 /** @type {string[]} */
@@ -49,15 +48,30 @@ let session = null
 let refreshInflight = false
 /** @type {Map<string, object>} */
 const winnerDetailsCache = new Map()
-/** Rescue id we just accepted — keeps winner panel alive if opportunity list lags. */
+/** Rescue id we just accepted — keeps winner tracking alive if opportunity list lags. */
 let trackedWinnerRescueId = ''
 /**
  * Session-scoped: rescue we observed while WAITING this session.
- * Terminal CONFIRMED/CANCELLED overlays only follow this id (never historical reopen).
+ * Used to refresh Active Trips on confirm/cancel — never for historical reopen popups.
  */
 let liveWinnerRescueId = ''
 /** If a refresh was requested while one is in flight, run again after. */
 let refreshQueued = false
+/** Soft remount Active Trips when Rescue accept / confirm / cancel (presentation only). */
+let activeTripsRefreshHandler = null
+
+/** Dashboard registers a soft remount so Active Trips updates without winner overlays. */
+export function setActiveTripsRefreshHandler(fn) {
+  activeTripsRefreshHandler = typeof fn === 'function' ? fn : null
+}
+
+function requestActiveTripsRefresh() {
+  try {
+    activeTripsRefreshHandler?.()
+  } catch (e) {
+    console.warn('[rescue-notify] active trips refresh soft-fail', e?.message || e)
+  }
+}
 
 function td() {
   return tDashboard(getLocale())
@@ -321,9 +335,11 @@ function bindHandlers(ctx) {
           liveWinnerRescueId = acceptedId
           winnerDetailsCache.delete(acceptedId)
         }
-        showFlash(copy.rescueReservedBadge || 'Trip reserved for you')
+        // Close opportunity popup; trip lives in Active Trips (Awaiting passenger) — no winner overlay
+        showFlash(copy.activeTripsAwaiting || 'Awaiting passenger')
         lastSig = ''
         queueRefresh()
+        requestActiveTripsRefresh()
       } catch {
         btn.disabled = false
         if (msg) {
@@ -454,16 +470,19 @@ async function refreshNotifications() {
       if (pcs === 'WAITING_PASSENGER_CONFIRMATION') {
         liveWinnerRescueId = wonId
         trackedWinnerRescueId = wonId
-        winnerPhase = 'waiting'
+        // Waiting is Active Trips only — never a blocking overlay
+        winnerPhase = null
       } else if (
         (pcs === 'CONFIRMED' || pcs === 'CANCELLED_BY_PASSENGER') &&
         liveWinnerRescueId === wonId
       ) {
-        // Terminal overlay only for rescues observed live this session — not PWA reopen history.
-        winnerPhase = pcs === 'CONFIRMED' ? 'confirmed' : 'cancelled'
+        // Terminal: Active Trips owns presentation; refresh dashboard card, no popup
+        winnerPhase = null
         trackedWinnerRescueId = ''
+        requestActiveTripsRefresh()
+        liveWinnerRescueId = ''
       } else {
-        // Historical terminal (e.g. Oct 12 CONFIRMED) — do not surface as operational alert.
+        // Historical terminal / expired — never restore winner popup on reopen
         winnerPhase = null
         winnerDetails = null
         if (trackedWinnerRescueId === wonId) trackedWinnerRescueId = ''
@@ -483,7 +502,8 @@ async function refreshNotifications() {
       }
     }
 
-    if (winnerPhase === 'confirmed' && wonId && (!winnerDetails || winnerDetails.ok === false)) {
+    // Keep winner_details probe for CONFIRMED so Active Trips remount can unlock PII
+    if (pcs === 'CONFIRMED' && wonId && (!winnerDetails || winnerDetails.ok === false)) {
       winnerDetailsCache.delete(wonId)
       const det = await fetchRescueWinnerDetails({ rescueRequestId: wonId })
       if (det.ok && det.body?.ok) {
@@ -498,7 +518,7 @@ async function refreshNotifications() {
       g: flags.enabled,
       d: pendingDecision ? [pendingDecision.id, pendingDecision.decision_deadline_at] : null,
       o: openOpp ? [openOpp.id, openOpp.status, openOpp.expires_at] : null,
-      w: wonId ? [wonId, pcs, winnerPhase, !!winnerDetails?.booking?.customer_phone] : null,
+      w: wonId ? [wonId, pcs] : null,
       x: dismissedIds,
       dw: dismissedWinnerIds,
       f: flashMessage,
@@ -513,7 +533,7 @@ async function refreshNotifications() {
     stopCountdown()
 
     let overlayHtml = ''
-    // Decision / opportunity overlays take priority over winner panel
+    // Popups ONLY for immediate decisions — never winner waiting/confirmed/cancelled overlays
     if (openOpp) {
       overlayHtml = renderRescueOpportunityOverlay(
         copy,
@@ -531,13 +551,6 @@ async function refreshNotifications() {
         ),
         flags.decisionSeconds || ORIGINAL_COMPANY_DECISION_SECONDS
       )
-    } else if (winnerPhase) {
-      overlayHtml = renderWinnerStatusPanel(copy, {
-        phase: winnerPhase,
-        opportunity: won,
-        details: winnerDetails,
-        companyName: companyName || '',
-      })
     }
 
     portal.innerHTML = `${renderFlashHtml()}${overlayHtml}`
@@ -624,6 +637,7 @@ export function stopRescueNotifications() {
   liveWinnerRescueId = ''
   dismissedIds = []
   dismissedWinnerIds = []
+  activeTripsRefreshHandler = null
   if (previousCompanyId) clearDismissedWinnerIds(previousCompanyId)
   refreshQueued = false
   winnerDetailsCache.clear()

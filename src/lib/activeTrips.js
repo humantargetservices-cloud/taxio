@@ -13,6 +13,43 @@ import { fetchRescueWinnerDetails } from './rescue.js'
 const CANCELLED_VISIBLE_MS = 2 * 60 * 60 * 1000
 const STARTED_GRACE_MS = 6 * 60 * 60 * 1000
 
+/** Country-only trailing segments that should not become the whole route label. */
+const COUNTRY_ONLY_LABEL =
+  /^(belgium|belgique|belgi[eë]|belgie|france|netherlands|nederland|luxembourg|luxemburg|germany|deutschland|duitsland)$/i
+
+/**
+ * Prefer a useful place label: skip trailing country when a better segment exists.
+ * Does not invent addresses — only reshapes an existing label/address string.
+ */
+export function improveRouteLabel(raw) {
+  const s = String(raw || '').trim()
+  if (!s) return ''
+  const parts = s.split(/\s*,\s*/).map((p) => p.trim()).filter(Boolean)
+  if (parts.length >= 2) {
+    let i = parts.length - 1
+    while (i > 0 && COUNTRY_ONLY_LABEL.test(parts[i])) i -= 1
+    return parts[i].slice(0, 120)
+  }
+  return s.slice(0, 120)
+}
+
+/**
+ * Pick the best available pickup/dropoff label without collapsing to a bare country.
+ * Prefer full booking addresses when present over preview country stubs.
+ */
+export function preferRouteLabel(...candidates) {
+  const list = candidates.map((c) => String(c || '').trim()).filter(Boolean)
+  for (const c of list) {
+    const improved = improveRouteLabel(c)
+    if (improved && !COUNTRY_ONLY_LABEL.test(improved)) return improved
+  }
+  for (const c of list) {
+    const improved = improveRouteLabel(c)
+    if (improved) return improved
+  }
+  return '—'
+}
+
 function startOfLocalDayMs(d = new Date()) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 }
@@ -92,8 +129,8 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
       kind: 'company_a_confirmed',
       phase: 'confirmed',
       bookingId: b.id,
-      pickup: b.pickup_address || '—',
-      dropoff: b.dropoff_address || '—',
+      pickup: preferRouteLabel(b.pickup_address),
+      dropoff: preferRouteLabel(b.dropoff_address),
       whenIso: b.ride_datetime || null,
       priceLabel: tripPriceLabelFromBooking(b) || null,
       passengerName: String(b.customer_name || '').trim() || null,
@@ -118,8 +155,8 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
     const base = {
       id: `rescue:${rid}`,
       rescueRequestId: rid,
-      pickup: r.preview_pickup_label || '—',
-      dropoff: r.preview_dropoff_label || '—',
+      pickup: preferRouteLabel(r.preview_pickup_label),
+      dropoff: preferRouteLabel(r.preview_dropoff_label),
       whenIso: r.preview_ride_datetime || null,
       priceLabel: cleanTripPriceDisplay(r.preview_estimated_price) || null,
       sortAt: new Date(r.accepted_at || o.created_at || 0).getTime() || 0,
@@ -181,8 +218,8 @@ export async function enrichActiveTripsWithWinnerDetails(trips) {
         const body = det?.body
         if (!det?.ok || !body?.ok) return
         const b = body.booking || {}
-        if (b.pickup_address) t.pickup = b.pickup_address
-        if (b.dropoff_address) t.dropoff = b.dropoff_address
+        if (b.pickup_address) t.pickup = preferRouteLabel(b.pickup_address, t.pickup)
+        if (b.dropoff_address) t.dropoff = preferRouteLabel(b.dropoff_address, t.dropoff)
         if (b.ride_datetime) t.whenIso = b.ride_datetime
         if (b.customer_name) t.passengerName = String(b.customer_name).trim() || null
         if (b.customer_phone) t.passengerPhone = String(b.customer_phone).trim() || null

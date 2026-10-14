@@ -15,7 +15,11 @@ import {
   DEFAULT_PRICING,
 } from '../lib/api.js'
 import { tripPriceLabelFromBooking } from '../lib/rescuePrice.js'
-import { startRescueNotifications, stopRescueNotifications } from '../lib/rescueNotifications.js'
+import {
+  setActiveTripsRefreshHandler,
+  startRescueNotifications,
+  stopRescueNotifications,
+} from '../lib/rescueNotifications.js'
 import { listRescueOpportunitiesForCompany } from '../lib/rescue.js'
 import {
   deriveActiveTrips,
@@ -1243,6 +1247,11 @@ export async function mountDashboardCompany(root, opts = {}) {
       companyId: company.id,
       accessToken: session.access_token,
       companyName: company.name,
+    })
+    // Soft remount Active Trips after Rescue accept / confirm / cancel (no winner overlay)
+    setActiveTripsRefreshHandler(() => {
+      if (gen !== dashMountGen) return
+      mountDashboardCompany(root)
     })
   } catch (e) {
     console.warn('[dashboard] rescue notifications failed soft', e?.message || e)
