@@ -1206,15 +1206,16 @@ export async function mountDashboardCompany(root, opts = {}) {
       msg.textContent = ''
       msg.innerHTML = ''
     }
-    const showPushFailure = (technicalReason) => {
+    const showPushFailure = (userMessage, technicalReason) => {
       if (!msg) return
-      const generic = td.pushError || 'Could not enable notifications. Try again.'
+      const generic =
+        userMessage || td.pushError || 'Could not enable notifications. Try again.'
       if (isTaxioStagingClient() && technicalReason) {
         const safe = String(technicalReason)
           .replace(/&/g, '&amp;')
           .replace(/</g, '&lt;')
           .replace(/>/g, '&gt;')
-          .slice(0, 240)
+          .slice(0, 280)
         msg.innerHTML = `${escapeHtml(generic)}<br/><span class="mt-1 block text-xs font-normal opacity-90">Technical reason:<br/>${safe}</span>`
       } else {
         msg.textContent = generic
@@ -1233,7 +1234,7 @@ export async function mountDashboardCompany(root, opts = {}) {
         mountDashboardCompany(root)
         return
       }
-      showPushFailure(result.technicalReason || null)
+      showPushFailure(result.userMessage || null, result.technicalReason || null)
       if (btn) {
         btn.disabled = false
         btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
@@ -1241,12 +1242,18 @@ export async function mountDashboardCompany(root, opts = {}) {
     } catch (e) {
       const name = String(e?.name || 'Error')
       const message = String(e?.message || e || 'enable_failed')
+      const stage = e?.stage || 'AUTH_GET'
       console.error('[TAXIO PUSH SUBSCRIBE]', {
-        phase: 'enable_outer',
+        phase: stage,
         errorName: name,
         errorMessage: message,
       })
-      showPushFailure(`${name}: ${message}`)
+      const sessionExpired =
+        /session has expired|NOT_AUTHENTICATED|SessionExpired/i.test(`${name} ${message}`)
+      showPushFailure(
+        sessionExpired ? 'Your session has expired. Please sign in again.' : null,
+        `${stage} — ${name}: ${message}`
+      )
       if (btn) {
         btn.disabled = false
         btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
