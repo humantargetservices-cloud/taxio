@@ -1260,13 +1260,17 @@ export async function mountDashboardCompany(root, opts = {}) {
   // Associate company External ID on authenticated dashboard load (no JWT to OneSignal)
   void associateOneSignalCompany(company.id)
 
-  // Soft re-sync: permission granted but OneSignal may still need explicit opt-in
+  // Soft re-sync: permission granted but OneSignal may still need explicit opt-in.
+  // Remount at most once per page load so sync cannot create a dashboard refresh loop.
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     const syncGen = gen
     void softSyncOneSignalTripNotifications(company.id)
       .then((result) => {
         if (!result.ok || syncGen !== dashMountGen) return
-        if (pushMode !== 'on') mountDashboardCompany(root)
+        if (pushMode === 'on') return
+        if (window.__taxioOneSignalUiRemounted) return
+        window.__taxioOneSignalUiRemounted = true
+        mountDashboardCompany(root)
       })
       .catch(() => {})
   }

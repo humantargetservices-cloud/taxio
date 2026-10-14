@@ -16,6 +16,9 @@ const OPT_IN_POLL_MS = 250
 
 let sdkLoadPromise = null
 let initPromise = null
+let stagingCleanupPromise = null
+
+const STAGING_ONESIGNAL_SCOPE_CLEANUP_KEY = 'taxio_os_onesignal_scope_cleaned'
 
 export function getOneSignalAppId() {
   try {
@@ -97,7 +100,7 @@ async function withOneSignal(fn) {
 
 /**
  * Staging-only: unregister the old OneSignal-only worker (scope …/onesignal/).
- * Never unregisters the root TAXIO /sw.js registration.
+ * Runs at most once per tab session; never unregisters root TAXIO /sw.js.
  */
 export async function unregisterStagingScopedOneSignalWorker() {
   if (!isTaxioStagingClient()) {
@@ -107,36 +110,58 @@ export async function unregisterStagingScopedOneSignalWorker() {
     return { ok: false, code: 'NO_SW', unregistered: 0 }
   }
 
-  let unregistered = 0
   try {
-    const regs = await navigator.serviceWorker.getRegistrations()
-    for (const reg of regs) {
-      let pathname = ''
-      try {
-        pathname = new URL(reg.scope).pathname
-      } catch {
-        pathname = String(reg.scope || '')
-      }
-      if (!pathname.endsWith('/onesignal/') && pathname !== '/onesignal/') continue
-      const scriptURL = String(reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || '')
-      // Only drop the dedicated onesignal worker — never root /sw.js
-      if (scriptURL && /\/sw\.js(\?|$)/i.test(scriptURL) && !/onesignal/i.test(scriptURL)) {
-        continue
-      }
-      const did = await reg.unregister()
-      if (did) unregistered += 1
-      console.info('[TAXIO ONESIGNAL]', {
-        phase: 'STAGING_SW_CLEANUP',
-        scope: reg.scope,
-        scriptURL: scriptURL || null,
-        unregistered: did,
-      })
+    if (sessionStorage.getItem(STAGING_ONESIGNAL_SCOPE_CLEANUP_KEY) === '1') {
+      return { ok: true, code: 'ALREADY_CLEANED', unregistered: 0 }
     }
-  } catch (err) {
-    console.warn('[TAXIO ONESIGNAL] staging SW cleanup failed', err?.message || err)
-    return { ok: false, code: 'CLEANUP_FAILED', unregistered }
+  } catch {
+    /* private mode */
   }
-  return { ok: true, code: 'CLEANED', unregistered }
+
+  if (stagingCleanupPromise) return stagingCleanupPromise
+
+  stagingCleanupPromise = (async () => {
+    let unregistered = 0
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations()
+      for (const reg of regs) {
+        let pathname = ''
+        try {
+          pathname = new URL(reg.scope).pathname
+        } catch {
+          pathname = String(reg.scope || '')
+        }
+        if (!pathname.endsWith('/onesignal/') && pathname !== '/onesignal/') continue
+        const scriptURL = String(
+          reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || ''
+        )
+        // Only drop the dedicated onesignal worker — never root /sw.js
+        if (scriptURL && /\/sw\.js(\?|$)/i.test(scriptURL) && !/onesignal/i.test(scriptURL)) {
+          continue
+        }
+        const did = await reg.unregister()
+        if (did) unregistered += 1
+        console.info('[TAXIO ONESIGNAL]', {
+          phase: 'STAGING_SW_CLEANUP',
+          scope: reg.scope,
+          scriptURL: scriptURL || null,
+          unregistered: did,
+        })
+      }
+      try {
+        sessionStorage.setItem(STAGING_ONESIGNAL_SCOPE_CLEANUP_KEY, '1')
+      } catch {
+        /* ignore */
+      }
+      return { ok: true, code: unregistered > 0 ? 'CLEANED' : 'NOOP', unregistered }
+    } catch (err) {
+      console.warn('[TAXIO ONESIGNAL] staging SW cleanup failed', err?.message || err)
+      stagingCleanupPromise = null
+      return { ok: false, code: 'CLEANUP_FAILED', unregistered }
+    }
+  })()
+
+  return stagingCleanupPromise
 }
 
 /**

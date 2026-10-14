@@ -77,14 +77,43 @@ export function waitForServiceWorkerReady() {
   return Promise.resolve()
 }
 
-/** One-shot reload when a new SW takes control — avoids stuck old bundles after deploy. */
+const SW_CONTROLLER_RELOAD_SESSION_KEY = 'taxio_sw_controller_reloaded'
+
+function hasSessionControllerReload() {
+  try {
+    return sessionStorage.getItem(SW_CONTROLLER_RELOAD_SESSION_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function markSessionControllerReload() {
+  try {
+    sessionStorage.setItem(SW_CONTROLLER_RELOAD_SESSION_KEY, '1')
+  } catch {
+    /* private mode — in-memory flags still apply for this page */
+  }
+}
+
+/**
+ * At most ONE automatic reload per tab session when a new SW takes control.
+ * In-memory flags alone reset on reload and caused infinite loops with OneSignal
+ * reclaiming the unified /sw.js registration.
+ */
 function bindControllerChangeReloadOnce() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
   if (window.__taxioSwControllerReloadBound) return
   window.__taxioSwControllerReloadBound = true
+
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (window.__taxioSwRefreshing) return
+    if (hasSessionControllerReload()) {
+      pwaLog('controllerchange ignored (session already reloaded once)')
+      return
+    }
     window.__taxioSwRefreshing = true
+    markSessionControllerReload()
+    pwaLog('controllerchange → one session reload')
     window.location.reload()
   })
 }
@@ -103,22 +132,12 @@ export function initServiceWorkerRegistration() {
     .register('/sw.js')
     .then((reg) => {
       setServiceWorkerReady(true)
-      // Check for updated SW on register and whenever the installed PWA is reopened.
+      // Check for updated SW once on register. Do NOT update on every visibilitychange —
+      // that + skipWaiting/clients.claim + controllerchange reload caused PWA loops.
       try {
         void reg.update()
       } catch {
         /* ignore */
-      }
-      if (typeof document !== 'undefined') {
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'visible') {
-            try {
-              void reg.update()
-            } catch {
-              /* ignore */
-            }
-          }
-        })
       }
       return reg
     })
