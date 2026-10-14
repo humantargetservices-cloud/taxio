@@ -130,6 +130,172 @@ export function getCompanyPushWebhookSecret() {
   return String(process.env.COMPANY_PUSH_WEBHOOK_SECRET || '').trim()
 }
 
+/** Staging/public App ID — same as client VITE_ONESIGNAL_APP_ID (not a secret). */
+export function getOneSignalAppIdServer() {
+  return String(process.env.VITE_ONESIGNAL_APP_ID || process.env.ONESIGNAL_APP_ID || '').trim()
+}
+
+/** Server-only OneSignal REST API key — never send to the browser. */
+export function getOneSignalRestApiKey() {
+  return String(process.env.ONESIGNAL_REST_API_KEY || '').trim()
+}
+
+export function validateOneSignalServerEnv() {
+  if (!getOneSignalAppIdServer()) {
+    return 'VITE_ONESIGNAL_APP_ID is not configured.'
+  }
+  if (!getOneSignalRestApiKey()) {
+    return 'ONESIGNAL_REST_API_KEY is not configured.'
+  }
+  return null
+}
+
+/** Matches client OneSignal.login("company:<company_id>"). */
+export function companyOneSignalExternalId(companyId) {
+  return `company:${String(companyId || '').trim()}`
+}
+
+export function pushTtlSecondsForEvent(eventType) {
+  if (
+    eventType === PUSH_EVENT_TYPES.COMPANY_BOOKING_NEW ||
+    eventType === PUSH_EVENT_TYPES.RESCUE_OPPORTUNITY_NEW
+  ) {
+    return 30
+  }
+  return 60
+}
+
+export function publicAppOrigin() {
+  const raw = String(process.env.PUBLIC_APP_ORIGIN || '').trim().replace(/\/$/, '')
+  return raw || 'https://staging.taxio.be'
+}
+
+/** Absolute dashboard launch URL for OneSignal web push. */
+export function absoluteDashboardLaunchUrl(urlQuery = '') {
+  const origin = publicAppOrigin()
+  const q = String(urlQuery || '').replace(/^\?/, '')
+  return q ? `${origin}/dashboard/company?${q}` : `${origin}/dashboard/company`
+}
+
+function scrubOneSignalErrorText(text) {
+  return String(text || '')
+    .replace(/Key\s+[^\s"']+/gi, 'Key [redacted]')
+    .replace(/ONESIGNAL_REST_API_KEY[^\s]*/gi, 'ONESIGNAL_REST_API_KEY=[redacted]')
+    .slice(0, 240)
+}
+
+/**
+ * Send push via OneSignal REST Create Notification API.
+ * Targets External ID company:<company_id> — not company_push_subscriptions.
+ *
+ * @returns {Promise<{ ok: true, notificationId: string|null, recipients: number|null, externalId: string }>}
+ */
+export async function sendOneSignalPushToCompany({ companyId, eventType, content }) {
+  const appId = getOneSignalAppIdServer()
+  const apiKey = getOneSignalRestApiKey()
+  if (!appId || !apiKey) {
+    throw Object.assign(new Error('OneSignal server env missing'), { code: 'ONESIGNAL_ENV' })
+  }
+
+  const externalId = companyOneSignalExternalId(companyId)
+  if (!companyId || externalId === 'company:') {
+    throw Object.assign(new Error('missing_company_id'), { code: 'NO_COMPANY' })
+  }
+
+  const launchUrl = absoluteDashboardLaunchUrl(content?.data?.urlQuery || content?.urlQuery || '')
+  // Prefer path from content.data.url when relative; else absolute dashboard
+  let url = launchUrl
+  const dataUrl = content?.data?.url
+  if (typeof dataUrl === 'string' && dataUrl.startsWith('/')) {
+    url = `${publicAppOrigin()}${dataUrl}`
+  } else if (typeof dataUrl === 'string' && /^https?:\/\//i.test(dataUrl)) {
+    url = dataUrl
+  }
+
+  const ttl = pushTtlSecondsForEvent(eventType)
+  const payload = {
+    app_id: appId,
+    target_channel: 'push',
+    include_aliases: {
+      external_id: [externalId],
+    },
+    headings: { en: String(content?.title || 'TAXIO').slice(0, 80) },
+    contents: { en: String(content?.body || 'Open TAXIO for trip updates.').slice(0, 160) },
+    url,
+    ttl,
+    priority: 10,
+    chrome_web_icon: `${publicAppOrigin()}/taxio-logo.png`,
+    firefox_icon: `${publicAppOrigin()}/taxio-logo.png`,
+  }
+  if (content?.tag) {
+    payload.collapse_id = String(content.tag).slice(0, 64)
+  }
+
+  // Hard guard: never ship passenger PII
+  const data = content?.data && typeof content.data === 'object' ? { ...content.data } : {}
+  delete data.customer_phone
+  delete data.customer_name
+  delete data.passenger_phone
+  delete data.passenger_name
+  if (Object.keys(data).length) payload.data = data
+
+  const res = await fetch('https://api.onesignal.com/notifications', {
+    method: 'POST',
+    headers: {
+      Authorization: `Key ${apiKey}`,
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const rawText = await res.text().catch(() => '')
+  let parsed = {}
+  try {
+    parsed = rawText ? JSON.parse(rawText) : {}
+  } catch {
+    parsed = {}
+  }
+
+  const notificationId = parsed?.id ? String(parsed.id) : null
+  const recipients =
+    parsed?.recipients != null && Number.isFinite(Number(parsed.recipients))
+      ? Number(parsed.recipients)
+      : null
+
+  if (!res.ok) {
+    const detail =
+      (Array.isArray(parsed?.errors) && parsed.errors[0]) ||
+      parsed?.error ||
+      `onesignal_http_${res.status}`
+    const err = new Error(scrubOneSignalErrorText(detail))
+    err.statusCode = res.status
+    err.code = 'ONESIGNAL_HTTP'
+    throw err
+  }
+
+  // 200 without id = audience empty / not subscribed — do not mark SENT
+  if (!notificationId) {
+    const detail =
+      (Array.isArray(parsed?.errors) && parsed.errors[0]) ||
+      'onesignal_no_notification_id'
+    const err = new Error(scrubOneSignalErrorText(detail))
+    err.statusCode = 200
+    err.code = 'ONESIGNAL_NO_RECIPIENTS'
+    throw err
+  }
+
+  console.info('[company-push] OneSignal accepted', {
+    notificationId,
+    recipients,
+    externalId,
+    eventType,
+    ttl,
+    httpStatus: res.status,
+  })
+
+  return { ok: true, notificationId, recipients, externalId }
+}
+
 export function validateVapidEnv() {
   const resolved = resolveNormalizedVapidKeys()
   if (!resolved.ok) {
@@ -372,7 +538,7 @@ export function buildPushNotificationContent(eventType, ctx = {}) {
     case PUSH_EVENT_TYPES.PASSENGER_CONFIRMED:
       return {
         title: 'Passenger confirmed',
-        body: 'Your TAXIO trip is confirmed.',
+        body: 'Your trip has been confirmed.',
         tag: `rescue-confirmed-${ctx.rescueRequestId || 'x'}`,
         data: {
           url,

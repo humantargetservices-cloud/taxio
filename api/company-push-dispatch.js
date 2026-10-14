@@ -13,19 +13,20 @@
  * - Supabase Database Webhook INSERT envelope with record.id / record.dedupe_key
  *
  * Always reloads the authoritative outbox row from DB (does not trust webhook event fields).
+ *
+ * ACTIVE delivery: OneSignal REST API → External ID company:<company_id>
+ * Legacy raw web-push / company_push_subscriptions are NOT used on this path.
  */
 import { json, makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'
 import {
   buildPushNotificationContent,
-  configureWebPush,
   extractPushWebhookSecret,
   getCompanyPushWebhookSecret,
-  isGonePushError,
   loadSafePushContext,
   resolveOutboxLookupFromBody,
   secretsEqual,
-  sendWebPushToSubscription,
-  validateVapidEnv,
+  sendOneSignalPushToCompany,
+  validateOneSignalServerEnv,
 } from './_companyPush.js'
 
 /** Reclaim a stuck PROCESSING row after this age (ms). */
@@ -61,6 +62,13 @@ function isStaleProcessing(row) {
   return Date.now() - t > STALE_PROCESSING_MS
 }
 
+function safeLastError(err) {
+  return String(err?.message || err || 'send_failed')
+    .replace(/Key\s+[^\s"']+/gi, 'Key [redacted]')
+    .replace(/ONESIGNAL_REST_API_KEY[^\s]*/gi, 'ONESIGNAL_REST_API_KEY=[redacted]')
+    .slice(0, 240)
+}
+
 export default async function handler(req, res) {
   cors(req, res)
   if (req.method === 'OPTIONS') {
@@ -92,8 +100,10 @@ export default async function handler(req, res) {
 
   const envErr = validateSupabaseServiceEnv()
   if (envErr) return json(res, 503, { error: envErr, code: 'ENV' })
-  const vapidErr = validateVapidEnv()
-  if (vapidErr) return json(res, 503, { error: vapidErr, code: 'VAPID' })
+  const onesignalErr = validateOneSignalServerEnv()
+  if (onesignalErr) {
+    return json(res, 503, { error: onesignalErr, code: 'ONESIGNAL_ENV' })
+  }
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}
@@ -193,114 +203,30 @@ export default async function handler(req, res) {
     outbox = claimed
     const companyId = outbox.company_id
 
-    const { data: subs, error: subErr } = await admin
-      .from('company_push_subscriptions')
-      .select('id, endpoint, p256dh, auth, enabled')
-      .eq('company_id', companyId)
-      .eq('enabled', true)
-
-    if (subErr) {
-      console.error('[company-push-dispatch:subs]', subErr.message)
-      await admin
-        .from('company_push_outbox')
-        .update({
-          status: 'FAILED',
-          last_error: 'subscription_query_failed',
-        })
-        .eq('id', outbox.id)
-      return json(res, 500, { error: 'Could not load subscriptions.', code: 'DB_ERROR' })
-    }
-
-    if (!subs?.length) {
-      await admin
-        .from('company_push_outbox')
-        .update({
-          status: 'FAILED',
-          last_error: 'no_enabled_subscriptions',
-        })
-        .eq('id', outbox.id)
-      return json(res, 200, {
-        ok: false,
-        code: 'NO_SUBSCRIPTIONS',
-        outbox_id: outbox.id,
-        delivered: 0,
-        subscription_found: false,
-      })
-    }
-
     const safeCtx = await loadSafePushContext(admin, outbox)
     const content = buildPushNotificationContent(outbox.event_type, safeCtx)
-    const payload = {
-      title: content.title,
-      body: content.body,
-      tag: content.tag,
-      data: content.data,
-      event_type: outbox.event_type,
+
+    // Hard guard: never ship passenger PII fields into OneSignal data
+    if (content.data) {
+      delete content.data.customer_phone
+      delete content.data.customer_name
+      delete content.data.passenger_phone
+      delete content.data.passenger_name
     }
 
-    // Hard guard: never ship passenger PII fields
-    delete payload.customer_phone
-    delete payload.customer_name
-    delete payload.passenger_phone
-    delete payload.passenger_name
-    if (payload.data) {
-      delete payload.data.customer_phone
-      delete payload.data.customer_name
-      delete payload.data.passenger_phone
-      delete payload.data.passenger_name
-    }
+    try {
+      const result = await sendOneSignalPushToCompany({
+        companyId,
+        eventType: outbox.event_type,
+        content,
+      })
 
-    const webpushApi = configureWebPush()
-    let delivered = 0
-    let disabled = 0
-    const errors = []
-
-    for (const sub of subs) {
-      try {
-        await sendWebPushToSubscription(webpushApi, sub, payload, {
-          eventType: outbox.event_type,
-        })
-        delivered += 1
-        await admin
-          .from('company_push_subscriptions')
-          .update({
-            last_success_at: new Date().toISOString(),
-            last_error: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', sub.id)
-      } catch (err) {
-        const msg = String(err?.message || err || 'send_failed').slice(0, 240)
-        if (isGonePushError(err)) {
-          disabled += 1
-          await admin
-            .from('company_push_subscriptions')
-            .update({
-              enabled: false,
-              last_error: `gone:${err.statusCode || 410}`,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', sub.id)
-        } else {
-          errors.push(msg)
-          await admin
-            .from('company_push_subscriptions')
-            .update({
-              last_error: msg,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', sub.id)
-        }
-      }
-    }
-
-    if (delivered > 0) {
       await admin
         .from('company_push_outbox')
         .update({
           status: 'SENT',
           sent_at: new Date().toISOString(),
-          last_error: errors.length ? errors[0] : null,
+          last_error: null,
         })
         .eq('id', outbox.id)
 
@@ -310,31 +236,31 @@ export default async function handler(req, res) {
         outbox_id: outbox.id,
         event_type: outbox.event_type,
         company_id: companyId,
-        delivered,
-        disabled,
-        subscription_count: subs.length,
-        subscription_found: true,
+        external_id: result.externalId,
+        onesignal_notification_id: result.notificationId,
+        recipients: result.recipients,
+        provider: 'onesignal',
+      })
+    } catch (err) {
+      const failMsg = safeLastError(err)
+      console.error('[company-push-dispatch:onesignal]', failMsg)
+      await admin
+        .from('company_push_outbox')
+        .update({
+          status: 'FAILED',
+          last_error: failMsg,
+        })
+        .eq('id', outbox.id)
+
+      return json(res, 200, {
+        ok: false,
+        code: err?.code || 'FAILED',
+        outbox_id: outbox.id,
+        company_id: companyId,
+        provider: 'onesignal',
+        error: failMsg,
       })
     }
-
-    const failMsg = errors[0] || (disabled ? 'all_subscriptions_gone' : 'send_failed')
-    await admin
-      .from('company_push_outbox')
-      .update({
-        status: 'FAILED',
-        last_error: String(failMsg).slice(0, 240),
-      })
-      .eq('id', outbox.id)
-
-    return json(res, 200, {
-      ok: false,
-      code: 'FAILED',
-      outbox_id: outbox.id,
-      delivered: 0,
-      disabled,
-      subscription_found: true,
-      error: failMsg,
-    })
   } catch (err) {
     console.error('[company-push-dispatch]', err?.message || err)
     return json(res, 500, {
