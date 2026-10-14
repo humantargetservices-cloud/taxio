@@ -15,6 +15,7 @@ import { mountAdminDashboard } from './pages/adminDashboard.js'
 import { mountTerms, mountPrivacy, mountCompanyTerms, mountContact } from './pages/legal.js'
 import { mountTaxiDirectory } from './pages/taxiDirectory.js'
 import { mountRescuePassengerConfirm } from './pages/rescuePassengerConfirm.js'
+import { mountTripLive } from './pages/tripLive.js'
 import { resolveBookSlugForRouter } from './lib/tenant.js'
 import { ensureGenericSiteManifest, primeBookingPwaManifest } from './lib/companyPwa.js'
 import { getLocale, syncDocumentLang } from './lib/locale.js'
@@ -67,13 +68,37 @@ function route() {
     mountNotFound(root)
     return
   }
-  if (path.startsWith('/rescue/confirm/')) {
-    const token = decodeURIComponent(path.slice('/rescue/confirm/'.length).split('/')[0] || '').trim()
-    if (token) {
-      mountRescuePassengerConfirm(root, token).catch((err) => {
+  if (path.startsWith('/trip/')) {
+    const tripToken = decodeURIComponent(path.slice('/trip/'.length).split('/')[0] || '').trim()
+    if (tripToken) {
+      mountTripLive(root, tripToken).catch((err) => {
         console.error(err)
         mountNotFound(root)
       })
+      return
+    }
+    mountNotFound(root)
+    return
+  }
+  if (path.startsWith('/rescue/confirm/')) {
+    const token = decodeURIComponent(path.slice('/rescue/confirm/'.length).split('/')[0] || '').trim()
+    if (token) {
+      // Prefer live trip page when passenger_trip_token exists; else legacy confirm UI.
+      fetch(`/api/trip-status?confirm_token=${encodeURIComponent(token)}`)
+        .then((r) => r.json().catch(() => ({})))
+        .then((body) => {
+          const tripTok = String(body?.trip_token || '').trim()
+          if (tripTok.length >= 20) {
+            window.history.replaceState({}, '', `/trip/${encodeURIComponent(tripTok)}`)
+            return mountTripLive(root, tripTok)
+          }
+          return mountRescuePassengerConfirm(root, token)
+        })
+        .catch(() => mountRescuePassengerConfirm(root, token))
+        .catch((err) => {
+          console.error(err)
+          mountNotFound(root)
+        })
       return
     }
     mountNotFound(root)

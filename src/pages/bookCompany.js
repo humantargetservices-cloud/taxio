@@ -764,6 +764,15 @@ export async function mountBookCompany(root, slug) {
               <input id="bk-complete-phone" type="tel" autocomplete="tel" inputmode="tel" value="+32" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
             </div>
 
+            <button type="button" id="bk-continue-trip" class="mt-6 flex h-12 w-full items-center justify-center rounded-2xl bg-amber-400 px-4 text-sm font-black text-slate-900 shadow-sm transition hover:bg-amber-300">
+              ${escapeHtml(tb.continueToTrip || 'Confirm request')}
+            </button>
+            <p class="mt-2 text-center text-xs text-slate-500 dark:text-slate-400">${escapeHtml(
+              tb.continueToTripHint || 'We’ll keep you updated on this page while we contact the company.'
+            )}</p>
+
+            <!-- Legacy channel sheet kept for temporary compatibility (bypassed by live trip flow). -->
+            <div id="bk-legacy-channels" class="mt-5 hidden" hidden aria-hidden="true">
             <p class="mt-5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.sendBookingVia || 'Send booking via')}</p>
             <div class="mt-3 flex gap-2">
               <button type="button" id="bk-channel-whatsapp" class="${whatsappDigitsForWaMe(company.phone || '') ? '' : 'hidden '}flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl bg-[#25D366] px-2 py-3 text-white shadow-[0_8px_22px_rgba(37,211,102,0.28)] ring-1 ring-[#1fb855]/40 transition hover:bg-[#1ebe5d]">
@@ -783,6 +792,7 @@ export async function mountBookCompany(root, slug) {
               <span aria-hidden="true">📞</span>
               ${escapeHtml(tb.callUs || 'Call us')}
             </button>
+            </div>
             <p id="bk-complete-err" class="mt-3 hidden rounded-xl bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800 ring-1 ring-red-200 dark:bg-red-950/60 dark:text-red-200 dark:ring-red-500/30"></p>
           </div>
         </div>
@@ -890,7 +900,7 @@ export async function mountBookCompany(root, slug) {
   ]
 
   function setChannelButtonsLocked(locked) {
-    for (const id of CHANNEL_IDS) {
+    for (const id of [...CHANNEL_IDS, 'bk-continue-trip']) {
       const el = root.querySelector(`#${id}`)
       if (!el) continue
       el.disabled = !!locked
@@ -1991,6 +2001,7 @@ Estimate price: ${estimatePrice}${refLine}`
     return { ok: false, errorKey: 'errSecurityRetry' }
   }
 
+  /** Legacy channel launcher kept (unused by primary trip flow). */
   async function finalizeBookingAndOpenChannel(channel) {
     const msgs = tBooking(getLocale())
     if (channelBusy) return
@@ -2020,12 +2031,10 @@ Estimate price: ${estimatePrice}${refLine}`
       return
     }
 
-    // Single-flight: lock all channels immediately (prevents multi-insert / multi-activate).
     channelBusy = true
     setChannelButtonsLocked(true)
 
     try {
-      // Already activated — reopen same TX/booking only (no second create/activate).
       if (activatedBookingId && frozenBookingReference) {
         const launched = launchCompanyChannel(channel, frozenBookingReference)
         if (!launched.ok) {
@@ -2035,7 +2044,6 @@ Estimate price: ${estimatePrice}${refLine}`
         return
       }
 
-      // If activate already in flight from a prior tap, wait for it then reopen same booking.
       if (activateInflight) {
         await activateInflight
         if (activatedBookingId && frozenBookingReference) {
@@ -2044,7 +2052,6 @@ Estimate price: ${estimatePrice}${refLine}`
         }
       }
 
-      // Draft is started on BOOK; only wait if still in-flight while passenger typed phone.
       const draft = await ensureDraftReady()
       const bookingReference = String(draft.booking_reference || frozenBookingReference || '').trim()
       if (!draft.id || !bookingReference) {
@@ -2071,7 +2078,6 @@ Estimate price: ${estimatePrice}${refLine}`
         ? `${channelLabel} by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
         : `${channelLabel} quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
 
-      // Start activate immediately (keepalive) then launch native app — same draft/TX only.
       activateInflight = (async () => {
         const run = () =>
           activateDraftBookingLog({
@@ -2103,13 +2109,11 @@ Estimate price: ${estimatePrice}${refLine}`
       } catch (actErr) {
         console.warn('[activateDraftBookingLog]', actErr?.message || actErr)
         showCompleteError(passengerSafeError(actErr, msgs.errBookingGeneric))
-        // Controlled retry of the SAME draft booking.
         setChannelButtonsLocked(false)
         activateInflight = null
         return
       }
       activateInflight = null
-      // Keep channels locked after successful activate (re-tap only reopens same booking).
     } catch (err) {
       console.warn('[finalizeBookingAndOpenChannel]', err?.message || err)
       showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
@@ -2120,6 +2124,106 @@ Estimate price: ${estimatePrice}${refLine}`
     }
   }
 
+  /** Primary Batch 1 flow: activate → /trip/:token (no WhatsApp handoff). */
+  async function finalizeBookingAndGoToTrip() {
+    const msgs = tBooking(getLocale())
+    if (channelBusy) return
+    completeErrEl?.classList.add('hidden')
+
+    if (!bookingContactGate(true)) {
+      hideCompleteStep()
+      return
+    }
+
+    const passengerDigits = passengerPhoneDigits()
+    if (!passengerDigits) {
+      showCompleteError(msgs.errMobileNumber || 'Please enter a valid mobile number.')
+      return
+    }
+
+    channelBusy = true
+    setChannelButtonsLocked(true)
+    const continueBtn = root.querySelector('#bk-continue-trip')
+    if (continueBtn) continueBtn.disabled = true
+
+    try {
+      if (activateInflight) {
+        const prior = await activateInflight
+        const tok = String(prior?.trip_token || prior?.passenger_trip_token || '').trim()
+        if (tok) {
+          window.location.assign(`/trip/${encodeURIComponent(tok)}`)
+          return
+        }
+      }
+
+      const draft = await ensureDraftReady()
+      const bookingReference = String(draft.booking_reference || frozenBookingReference || '').trim()
+      if (!draft.id) {
+        showCompleteError(msgs.errSecurityRetry || 'Could not create booking.')
+        setChannelButtonsLocked(false)
+        if (continueBtn) continueBtn.disabled = false
+        return
+      }
+      if (bookingReference) frozenBookingReference = bookingReference
+
+      const hourlyActive = isHourlyMode()
+      const estimateLineForNotes = latestEstimate
+        ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+        : ''
+      const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
+      const logNotes = hourlyActive
+        ? `Live trip by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+        : `Live trip quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
+
+      activateInflight = (async () => {
+        const run = () =>
+          activateDraftBookingLog({
+            booking_id: draft.id,
+            company_id: company.id,
+            customer_phone: passengerDigits,
+            notes: logNotes,
+          })
+        let { error: actErr, data: actData } = await run()
+        if (actErr) ({ error: actErr, data: actData } = await run())
+        if (actErr) throw actErr
+        activatedBookingId = String(actData?.id || draft.id)
+        if (actData?.booking_reference) {
+          frozenBookingReference = String(actData.booking_reference)
+        }
+        return actData
+      })()
+
+      const actData = await activateInflight
+      activateInflight = null
+      const tripToken = String(actData?.trip_token || actData?.passenger_trip_token || '').trim()
+      const tripUrl = String(actData?.trip_url || '').trim()
+      if (tripUrl && tripUrl.includes('/trip/')) {
+        window.location.assign(tripUrl)
+        return
+      }
+      if (tripToken) {
+        window.location.assign(`/trip/${encodeURIComponent(tripToken)}`)
+        return
+      }
+      showCompleteError(msgs.errBookingGeneric || 'Could not open your trip page.')
+      setChannelButtonsLocked(false)
+      if (continueBtn) continueBtn.disabled = false
+    } catch (err) {
+      console.warn('[finalizeBookingAndGoToTrip]', err?.message || err)
+      showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
+      setChannelButtonsLocked(false)
+      activateInflight = null
+      if (continueBtn) continueBtn.disabled = false
+    } finally {
+      channelBusy = false
+    }
+  }
+
+  root.querySelector('#bk-continue-trip')?.addEventListener('click', () => {
+    void finalizeBookingAndGoToTrip()
+  })
+
+  // Legacy channel handlers retained (sheet hidden); do not use as primary path.
   root.querySelector('#bk-channel-whatsapp')?.addEventListener('click', () => {
     void finalizeBookingAndOpenChannel('whatsapp')
   })

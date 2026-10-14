@@ -235,15 +235,29 @@ export async function createDraftBookingLog(row) {
   })
 }
 
-/** Activate draft when passenger picks WhatsApp/SMS/Email/Call — starts 25s deadline. */
-export async function activateDraftBookingLog(row) {
+/** Activate draft — starts 25s Company A deadline; returns passenger trip_token + trip_url. */
+export async function activateDraftBookingLog(row, fetchOpts = {}) {
   return createBookingRequest(
     {
       ...row,
       booking_phase: 'activate',
     },
-    { keepalive: true }
+    { keepalive: fetchOpts.keepalive !== false }
   )
+}
+
+/** Passenger live trip status (opaque trip token). */
+export async function fetchPassengerTripStatus(tripToken) {
+  try {
+    const response = await fetch(
+      apiUrl(`/api/trip-status?token=${encodeURIComponent(String(tripToken || '').trim())}`),
+      { method: 'GET', headers: { Accept: 'application/json' } }
+    )
+    const body = await response.json().catch(() => ({}))
+    return { ok: response.ok && body?.ok !== false, status: response.status, body }
+  } catch (err) {
+    return { ok: false, status: 0, body: { state: 'INVALID', error: err?.message || 'failed' } }
+  }
 }
 
 export async function listBookingRequestsForCompany(companyId) {

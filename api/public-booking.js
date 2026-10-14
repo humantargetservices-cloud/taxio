@@ -7,6 +7,7 @@ import {
   validateSupabaseServiceEnv,
 } from './_utils.js'
 import { generateBookingReference } from './_bookingReference.js'
+import { mintPassengerTripToken, tripUrlForToken } from './_passengerTrip.js'
 
 const MAX_NOTES_LEN = 500
 const VEHICLE_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
@@ -120,12 +121,33 @@ async function activateDraftBooking(req, res, body) {
   const supabase = makeSupabaseServiceClient()
   const { data: existing, error: loadErr } = await supabase
     .from('booking_requests')
-    .select('id, company_id, status, booking_reference, decision_deadline_at')
+    .select('id, company_id, status, booking_reference, decision_deadline_at, passenger_trip_token')
     .eq('id', bookingId)
     .eq('company_id', companyId)
     .maybeSingle()
 
   if (loadErr) {
+    // Column may be missing before RUN_ON_STAGING_PASSENGER_TRIP_TOKEN.sql
+    if (/passenger_trip_token|schema cache|column/i.test(loadErr.message || '')) {
+      const { data: existingFallback, error: load2 } = await supabase
+        .from('booking_requests')
+        .select('id, company_id, status, booking_reference, decision_deadline_at')
+        .eq('id', bookingId)
+        .eq('company_id', companyId)
+        .maybeSingle()
+      if (load2) {
+        console.error('[public-booking:activate-load]', load2)
+        return json(res, 500, { error: 'Could not activate booking.' })
+      }
+      if (!existingFallback) return json(res, 404, { error: 'Booking draft not found.' })
+      console.error(
+        '[public-booking:activate] passenger_trip_token column missing — apply supabase/RUN_ON_STAGING_PASSENGER_TRIP_TOKEN.sql'
+      )
+      return json(res, 503, {
+        error: 'Trip page is not ready on this environment. Please try again shortly.',
+        code: 'TRIP_TOKEN_COLUMN_MISSING',
+      })
+    }
     console.error('[public-booking:activate-load]', loadErr)
     return json(res, 500, { error: 'Could not activate booking.' })
   }
@@ -133,17 +155,46 @@ async function activateDraftBooking(req, res, body) {
     return json(res, 404, { error: 'Booking draft not found.' })
   }
 
+  const respondActivated = (row, already) => {
+    let tripToken = String(row.passenger_trip_token || '').trim()
+    return (async () => {
+      if (!tripToken) {
+        tripToken = mintPassengerTripToken()
+        const { error: tokErr } = await supabase
+          .from('booking_requests')
+          .update({ passenger_trip_token: tripToken })
+          .eq('id', row.id)
+          .is('passenger_trip_token', null)
+        if (tokErr) {
+          const { data: again } = await supabase
+            .from('booking_requests')
+            .select('passenger_trip_token')
+            .eq('id', row.id)
+            .maybeSingle()
+          tripToken = String(again?.passenger_trip_token || '').trim()
+        }
+      }
+      if (!tripToken) {
+        return json(res, 500, { error: 'Could not create trip link.' })
+      }
+      return json(res, 200, {
+        data: {
+          ok: true,
+          id: row.id,
+          booking_reference: row.booking_reference || null,
+          activated: true,
+          already: !!already,
+          passenger_trip_token: tripToken,
+          trip_token: tripToken,
+          trip_url: tripUrlForToken(req, tripToken),
+        },
+      })
+    })()
+  }
+
   // Already activated — idempotent success (prevents duplicate bookings on re-tap).
   if (String(existing.status || '') === 'new') {
-    return json(res, 200, {
-      data: {
-        ok: true,
-        id: existing.id,
-        booking_reference: existing.booking_reference || null,
-        activated: true,
-        already: true,
-      },
-    })
+    return respondActivated(existing, true)
   }
 
   if (String(existing.status || '') !== 'draft') {
@@ -159,11 +210,13 @@ async function activateDraftBooking(req, res, body) {
     /* keep default 25s */
   }
 
+  const tripToken = mintPassengerTripToken()
   const deadlineIso = new Date(Date.now() + decisionSeconds * 1000).toISOString()
   const patch = {
     status: 'new',
     customer_phone: riderPhoneDigits,
     decision_deadline_at: deadlineIso,
+    passenger_trip_token: tripToken,
   }
   if (notes) patch.notes = notes
 
@@ -173,10 +226,19 @@ async function activateDraftBooking(req, res, body) {
     .eq('id', bookingId)
     .eq('company_id', companyId)
     .eq('status', 'draft')
-    .select('id, booking_reference')
+    .select('id, booking_reference, passenger_trip_token')
     .maybeSingle()
 
   if (updErr) {
+    if (/passenger_trip_token|schema cache|column/i.test(updErr.message || '')) {
+      console.error(
+        '[public-booking:activate] passenger_trip_token column missing — apply supabase/RUN_ON_STAGING_PASSENGER_TRIP_TOKEN.sql'
+      )
+      return json(res, 503, {
+        error: 'Trip page is not ready on this environment. Please try again shortly.',
+        code: 'TRIP_TOKEN_COLUMN_MISSING',
+      })
+    }
     console.error('[public-booking:activate]', updErr)
     return json(res, 500, { error: 'Something went wrong. Please try again.' })
   }
@@ -184,19 +246,11 @@ async function activateDraftBooking(req, res, body) {
     // Race: another activate won — reload
     const { data: again } = await supabase
       .from('booking_requests')
-      .select('id, booking_reference, status')
+      .select('id, booking_reference, status, passenger_trip_token')
       .eq('id', bookingId)
       .maybeSingle()
     if (again && String(again.status) === 'new') {
-      return json(res, 200, {
-        data: {
-          ok: true,
-          id: again.id,
-          booking_reference: again.booking_reference || null,
-          activated: true,
-          already: true,
-        },
-      })
+      return respondActivated(again, true)
     }
     return json(res, 409, { error: 'Could not activate booking draft.' })
   }
@@ -214,12 +268,16 @@ async function activateDraftBooking(req, res, body) {
     console.error('[public-booking:activate-abuse-log]', rateLogErr)
   }
 
+  const tokenOut = String(updated.passenger_trip_token || tripToken)
   return json(res, 200, {
     data: {
       ok: true,
       id: updated.id,
       booking_reference: updated.booking_reference || existing.booking_reference || null,
       activated: true,
+      passenger_trip_token: tokenOut,
+      trip_token: tokenOut,
+      trip_url: tripUrlForToken(req, tokenOut),
     },
   })
 }

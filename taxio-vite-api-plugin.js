@@ -73,6 +73,8 @@ export function taxioApiPlugin() {
         const routes = {
           '/api/register-company': 'api/register-company.js',
           '/api/public-booking': 'api/public-booking.js',
+          '/api/trip-status': 'api/trip-status.js',
+          '/api/rescue': 'api/rescue.js',
           '/api/admin-approve-company': 'api/admin-approve-company.js',
           '/api/admin-delete-company': 'api/admin-delete-company.js',
           '/api/admin-dev-cleanup-test-companies': 'api/admin-dev-cleanup-test-companies.js',
@@ -84,10 +86,12 @@ export function taxioApiPlugin() {
         const file = routes[pathname]
         const isEstimateRoute = pathname === '/api/estimate-route'
         const isAdminAnalytics = pathname === '/api/admin-company-analytics'
+        const isTripStatus = pathname === '/api/trip-status'
         const methodOk =
           req.method === 'POST' ||
           (isEstimateRoute && req.method === 'OPTIONS') ||
-          (isAdminAnalytics && req.method === 'GET')
+          (isAdminAnalytics && req.method === 'GET') ||
+          (isTripStatus && req.method === 'GET')
         if (!file || !methodOk) {
           return next()
         }
