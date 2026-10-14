@@ -14,12 +14,112 @@ export const PUSH_EVENT_TYPES = Object.freeze({
   PASSENGER_CANCELLED: 'PASSENGER_CANCELLED',
 })
 
-export function getVapidPublicKey() {
-  return String(process.env.VAPID_PUBLIC_KEY || '').trim()
+/**
+ * Normalize VAPID key material to URL-safe Base64 without "=" padding.
+ * Does not change key bytes — only encoding form for web-push.
+ */
+export function normalizeVapidKeyBase64(raw) {
+  let s = String(raw ?? '').trim()
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim()
+  }
+  // Strip whitespace/newlines that env UIs sometimes inject
+  s = s.replace(/\s+/g, '')
+  s = s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+  return s
 }
 
+function decodeVapidKeyBytes(urlSafeNoPad) {
+  const s = String(urlSafeNoPad || '')
+  const padLen = (4 - (s.length % 4)) % 4
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(padLen)
+  return Buffer.from(b64, 'base64')
+}
+
+const VAPID_URL_SAFE_RE = /^[A-Za-z0-9_-]+$/
+
+/**
+ * Inspect + normalize env VAPID keys. Never logs key values.
+ * @returns {{
+ *   ok: boolean,
+ *   error?: string,
+ *   publicRawLength: number,
+ *   publicNormalizedLength: number,
+ *   publicDecodedBytes: number,
+ *   privateRawLength: number,
+ *   privateNormalizedLength: number,
+ *   privateDecodedBytes: number,
+ *   publicNormalized: string,
+ *   privateNormalized: string,
+ * }}
+ */
+export function resolveNormalizedVapidKeys() {
+  const publicRaw = String(process.env.VAPID_PUBLIC_KEY || '')
+  const privateRaw = String(process.env.VAPID_PRIVATE_KEY || '')
+  const publicNormalized = normalizeVapidKeyBase64(publicRaw)
+  const privateNormalized = normalizeVapidKeyBase64(privateRaw)
+
+  let publicDecodedBytes = 0
+  let privateDecodedBytes = 0
+  try {
+    if (publicNormalized) publicDecodedBytes = decodeVapidKeyBytes(publicNormalized).length
+  } catch {
+    publicDecodedBytes = -1
+  }
+  try {
+    if (privateNormalized) privateDecodedBytes = decodeVapidKeyBytes(privateNormalized).length
+  } catch {
+    privateDecodedBytes = -1
+  }
+
+  const report = {
+    ok: false,
+    publicRawLength: publicRaw.trim().length,
+    publicNormalizedLength: publicNormalized.length,
+    publicDecodedBytes,
+    privateRawLength: privateRaw.trim().length,
+    privateNormalizedLength: privateNormalized.length,
+    privateDecodedBytes,
+    publicNormalized,
+    privateNormalized,
+  }
+
+  if (!publicNormalized || !privateNormalized) {
+    report.error = 'VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY missing after normalize.'
+    return report
+  }
+  if (!VAPID_URL_SAFE_RE.test(publicNormalized) || publicNormalized.includes('=')) {
+    report.error = 'Normalized VAPID public key is not URL-safe Base64 without padding.'
+    return report
+  }
+  if (!VAPID_URL_SAFE_RE.test(privateNormalized) || privateNormalized.includes('=')) {
+    report.error = 'Normalized VAPID private key is not URL-safe Base64 without padding.'
+    return report
+  }
+  if (publicDecodedBytes !== 65) {
+    report.error = `Normalized VAPID public key must decode to 65 bytes (got ${publicDecodedBytes}).`
+    return report
+  }
+  if (privateDecodedBytes !== 32) {
+    report.error = `Normalized VAPID private key must decode to 32 bytes (got ${privateDecodedBytes}).`
+    return report
+  }
+
+  report.ok = true
+  return report
+}
+
+/** Normalized public key for browser subscribe + web-push. */
+export function getVapidPublicKey() {
+  return normalizeVapidKeyBase64(process.env.VAPID_PUBLIC_KEY)
+}
+
+/** Normalized private key for web-push only. */
 export function getVapidPrivateKey() {
-  return String(process.env.VAPID_PRIVATE_KEY || '').trim()
+  return normalizeVapidKeyBase64(process.env.VAPID_PRIVATE_KEY)
 }
 
 export function getVapidSubject() {
@@ -31,19 +131,49 @@ export function getCompanyPushWebhookSecret() {
 }
 
 export function validateVapidEnv() {
-  const missing = []
-  if (!getVapidPublicKey()) missing.push('VAPID_PUBLIC_KEY')
-  if (!getVapidPrivateKey()) missing.push('VAPID_PRIVATE_KEY')
-  if (missing.length) {
-    return `Server misconfiguration: missing ${missing.join(', ')}.`
+  const resolved = resolveNormalizedVapidKeys()
+  if (!resolved.ok) {
+    console.error('[company-push] VAPID validation failed', {
+      publicRawLength: resolved.publicRawLength,
+      publicNormalizedLength: resolved.publicNormalizedLength,
+      publicDecodedBytes: resolved.publicDecodedBytes,
+      privateRawLength: resolved.privateRawLength,
+      privateNormalizedLength: resolved.privateNormalizedLength,
+      privateDecodedBytes: resolved.privateDecodedBytes,
+      error: resolved.error,
+    })
+    return resolved.error || 'Invalid VAPID configuration.'
   }
   return null
 }
 
 export function configureWebPush() {
-  const err = validateVapidEnv()
-  if (err) throw new Error(err)
-  webpush.setVapidDetails(getVapidSubject(), getVapidPublicKey(), getVapidPrivateKey())
+  const resolved = resolveNormalizedVapidKeys()
+  if (!resolved.ok) {
+    console.error('[company-push] VAPID validation failed', {
+      publicRawLength: resolved.publicRawLength,
+      publicNormalizedLength: resolved.publicNormalizedLength,
+      publicDecodedBytes: resolved.publicDecodedBytes,
+      privateRawLength: resolved.privateRawLength,
+      privateNormalizedLength: resolved.privateNormalizedLength,
+      privateDecodedBytes: resolved.privateDecodedBytes,
+      error: resolved.error,
+    })
+    throw new Error(resolved.error || 'Invalid VAPID configuration.')
+  }
+  console.info('[company-push] VAPID normalized OK', {
+    publicRawLength: resolved.publicRawLength,
+    publicNormalizedLength: resolved.publicNormalizedLength,
+    publicDecodedBytes: resolved.publicDecodedBytes,
+    privateRawLength: resolved.privateRawLength,
+    privateNormalizedLength: resolved.privateNormalizedLength,
+    privateDecodedBytes: resolved.privateDecodedBytes,
+  })
+  webpush.setVapidDetails(
+    getVapidSubject(),
+    resolved.publicNormalized,
+    resolved.privateNormalized
+  )
   return webpush
 }
 
@@ -339,7 +469,13 @@ export async function loadSafePushContext(admin, outbox) {
   return ctx
 }
 
-export async function sendWebPushToSubscription(webpushApi, subscriptionRow, payloadObj) {
+/**
+ * @param {import('web-push')} webpushApi
+ * @param {object} subscriptionRow
+ * @param {object} payloadObj
+ * @param {{ eventType?: string }} [opts]
+ */
+export async function sendWebPushToSubscription(webpushApi, subscriptionRow, payloadObj, opts = {}) {
   const pushSubscription = {
     endpoint: subscriptionRow.endpoint,
     keys: {
@@ -348,8 +484,13 @@ export async function sendWebPushToSubscription(webpushApi, subscriptionRow, pay
     },
   }
   const body = JSON.stringify(payloadObj)
+  const eventType = String(opts.eventType || payloadObj?.event_type || '')
+  // Opportunity windows are 25s/30s — do not keep stale trip alerts useful after expiry.
+  const isTimedOpportunity =
+    eventType === PUSH_EVENT_TYPES.COMPANY_BOOKING_NEW ||
+    eventType === PUSH_EVENT_TYPES.RESCUE_OPPORTUNITY_NEW
   await webpushApi.sendNotification(pushSubscription, body, {
-    TTL: 60,
+    TTL: isTimedOpportunity ? 30 : 60,
     urgency: 'high',
   })
 }

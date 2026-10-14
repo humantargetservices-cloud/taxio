@@ -257,7 +257,9 @@ export default async function handler(req, res) {
 
     for (const sub of subs) {
       try {
-        await sendWebPushToSubscription(webpushApi, sub, payload)
+        await sendWebPushToSubscription(webpushApi, sub, payload, {
+          eventType: outbox.event_type,
+        })
         delivered += 1
         await admin
           .from('company_push_subscriptions')
