@@ -47,15 +47,11 @@ import {
   isOperatorShortcutComplete,
 } from '../lib/pwaInstallPrompt.js'
 import { applyCompanyPwaIdentity, buildPwaPromptStrings, prefetchCompanyManifest } from '../lib/companyPwa.js'
-import {
-  isTaxioStagingClient,
-  readLocalPushStatus,
-  resolvePushUiMode,
-  writeLocalPushStatus,
-} from '../lib/companyPush.js'
+import { isTaxioStagingClient } from '../lib/companyPush.js'
 import {
   associateOneSignalCompany,
   enableOneSignalTripNotifications,
+  resolveOneSignalPushUiMode,
   softSyncOneSignalTripNotifications,
 } from '../lib/oneSignalPush.js'
 
@@ -596,7 +592,9 @@ export async function mountDashboardCompany(root, opts = {}) {
   const tpwa = buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name)
   const pwaShortcutDone = isOperatorShortcutComplete(company.id)
   const showPwaCard = shouldShowOperatorDashboardPwaCard(company.id)
-  const pushMode = resolvePushUiMode(company.id)
+  // OneSignal is the only active notification-status authority (not legacy localStorage/DB)
+  const pushMode = await resolveOneSignalPushUiMode(company.id)
+  if (gen !== dashMountGen) return
   logDashboardPwaDebug(showPwaCard ? 'inline-card:visible' : 'inline-card:hidden', {
     tab: dashState.tab,
     companySlug: company.slug,
@@ -1227,15 +1225,13 @@ export async function mountDashboardCompany(root, opts = {}) {
       msg.classList.remove('hidden')
     }
     try {
-      // OneSignal path (custom PushManager/VAPID subscribe bypassed from active UX)
+      // OneSignal path (legacy PushManager / company_push_subscriptions not UI authority)
       const result = await enableOneSignalTripNotifications(company.id)
       if (result.ok) {
-        writeLocalPushStatus(company.id, 'on')
         mountDashboardCompany(root)
         return
       }
       if (result.code === 'DENIED' || result.permission === 'denied') {
-        writeLocalPushStatus(company.id, 'blocked')
         mountDashboardCompany(root)
         return
       }
@@ -1264,15 +1260,13 @@ export async function mountDashboardCompany(root, opts = {}) {
   // Associate company External ID on authenticated dashboard load (no JWT to OneSignal)
   void associateOneSignalCompany(company.id)
 
-  // Soft re-sync: if OS permission already granted, refresh OneSignal subscription without nagging
+  // Soft re-sync: permission granted but OneSignal may still need explicit opt-in
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     const syncGen = gen
     void softSyncOneSignalTripNotifications(company.id)
       .then((result) => {
         if (!result.ok || syncGen !== dashMountGen) return
-        const was = readLocalPushStatus(company.id)
-        writeLocalPushStatus(company.id, 'on')
-        if (was !== 'on' && pushMode !== 'on') mountDashboardCompany(root)
+        if (pushMode !== 'on') mountDashboardCompany(root)
       })
       .catch(() => {})
   }

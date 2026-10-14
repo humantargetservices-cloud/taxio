@@ -2,11 +2,15 @@
  * OneSignal Web Push client (subscription + delivery layer).
  * TAXIO /sw.js remains the PWA/cache worker; OneSignal uses a separate scope.
  *
+ * Staging active UX: OneSignal subscription state is the only notification-status authority.
  * Does not send Supabase JWTs to OneSignal. External ID is company:<company_id>.
  */
 export const ONESIGNAL_SW_PATH = 'onesignal/OneSignalSDKWorker.js'
 export const ONESIGNAL_SW_SCOPE = '/onesignal/'
 export const ONESIGNAL_SDK_URL = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js'
+
+const OPT_IN_WAIT_MS = 15_000
+const OPT_IN_POLL_MS = 250
 
 let sdkLoadPromise = null
 let initPromise = null
@@ -31,6 +35,11 @@ export function isOneSignalPushSupported() {
     typeof Notification !== 'undefined' &&
     ('PushManager' in window || 'safari' in window)
   )
+}
+
+function nativePermission() {
+  if (typeof Notification === 'undefined') return 'unsupported'
+  return Notification.permission
 }
 
 function loadOneSignalSdk() {
@@ -66,7 +75,6 @@ function loadOneSignalSdk() {
 }
 
 /**
- * Run against the OneSignal SDK instance (via OneSignalDeferred queue).
  * @template T
  * @param {(OneSignal: any) => Promise<T> | T} fn
  * @returns {Promise<T>}
@@ -102,7 +110,6 @@ export async function initOneSignalOnce() {
   if (initPromise) return initPromise
 
   initPromise = withOneSignal(async (OneSignal) => {
-    // Re-entrant: SDK may already be initialized (HMR / remount).
     try {
       await OneSignal.init({
         appId,
@@ -114,7 +121,6 @@ export async function initOneSignalOnce() {
       })
     } catch (err) {
       const msg = String(err?.message || err || '')
-      // Already initialized is OK for SPA remounts.
       if (!/already been initialized|can only be initialized once/i.test(msg)) {
         throw Object.assign(err instanceof Error ? err : new Error(msg), {
           stage: 'INIT',
@@ -132,33 +138,148 @@ export async function initOneSignalOnce() {
 }
 
 /**
+ * Snapshot of browser + OneSignal push state (no secrets; token length only).
+ * @param {any} OneSignal
+ */
+export function readOneSignalPushSnapshot(OneSignal) {
+  const sub = OneSignal?.User?.PushSubscription
+  const token = sub?.token ? String(sub.token) : ''
+  return {
+    browserPermission: nativePermission(),
+    onesignalPermissionNative: OneSignal?.Notifications?.permissionNative || null,
+    onesignalPermission: !!OneSignal?.Notifications?.permission,
+    optedIn: !!sub?.optedIn,
+    subscriptionIdPresent: !!sub?.id,
+    subscriptionId: sub?.id ? String(sub.id) : null,
+    tokenPresent: token.length > 0,
+    tokenLength: token.length,
+    externalId: OneSignal?.User?.externalId ? String(OneSignal.User.externalId) : null,
+  }
+}
+
+function isActivelySubscribed(snap) {
+  return !!(snap?.optedIn && (snap.subscriptionIdPresent || snap.tokenPresent))
+}
+
+/**
+ * Wait briefly for User.externalId to reflect login().
+ * @param {any} OneSignal
+ * @param {string} expectedExternalId
+ * @param {{ timeoutMs?: number }} [opts]
+ */
+async function waitUntilExternalId(OneSignal, expectedExternalId, opts = {}) {
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 8_000
+  const matches = () => readOneSignalPushSnapshot(OneSignal).externalId === expectedExternalId
+  if (matches()) return readOneSignalPushSnapshot(OneSignal)
+
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      try {
+        OneSignal.User.removeEventListener('change', onChange)
+      } catch {
+        /* ignore */
+      }
+      clearInterval(pollId)
+      clearTimeout(timerId)
+      resolve(readOneSignalPushSnapshot(OneSignal))
+    }
+    const onChange = () => {
+      if (matches()) finish()
+    }
+    try {
+      OneSignal.User.addEventListener('change', onChange)
+    } catch {
+      /* poll only */
+    }
+    const pollId = setInterval(() => {
+      if (matches()) finish()
+    }, OPT_IN_POLL_MS)
+    const timerId = setTimeout(finish, timeoutMs)
+  })
+}
+
+/**
+ * Wait until OneSignal reports an active opt-in (change listener + poll).
+ * @param {any} OneSignal
+ * @param {{ timeoutMs?: number }} [opts]
+ */
+async function waitUntilOneSignalOptedIn(OneSignal, opts = {}) {
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : OPT_IN_WAIT_MS
+  const immediate = readOneSignalPushSnapshot(OneSignal)
+  if (isActivelySubscribed(immediate)) return immediate
+
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      try {
+        OneSignal.User.PushSubscription.removeEventListener('change', onChange)
+      } catch {
+        /* ignore */
+      }
+      clearInterval(pollId)
+      clearTimeout(timerId)
+      resolve(readOneSignalPushSnapshot(OneSignal))
+    }
+
+    const onChange = (event) => {
+      const current = event?.current
+      if (current?.optedIn && (current?.id || current?.token)) {
+        finish()
+        return
+      }
+      if (isActivelySubscribed(readOneSignalPushSnapshot(OneSignal))) finish()
+    }
+
+    try {
+      OneSignal.User.PushSubscription.addEventListener('change', onChange)
+    } catch {
+      /* poll only */
+    }
+
+    const pollId = setInterval(() => {
+      if (isActivelySubscribed(readOneSignalPushSnapshot(OneSignal))) finish()
+    }, OPT_IN_POLL_MS)
+
+    const timerId = setTimeout(finish, timeoutMs)
+  })
+}
+
+/**
  * Associate device/user with company External ID (no JWT).
- * Safe to call on every authenticated dashboard load.
  */
 export async function associateOneSignalCompany(companyId) {
   if (!companyId) {
-    return { ok: false, code: 'NO_COMPANY' }
+    return { ok: false, code: 'NO_COMPANY', loginOk: false }
   }
   const externalId = companyOneSignalExternalId(companyId)
   try {
     const OneSignal = await initOneSignalOnce()
     await OneSignal.login(externalId)
+    const snap = await waitUntilExternalId(OneSignal, externalId)
+    const loginOk = snap.externalId === externalId
     console.info('[TAXIO ONESIGNAL]', {
       phase: 'LOGIN',
-      externalId,
-      subscriptionId: OneSignal.User?.PushSubscription?.id || null,
-      optedIn: !!OneSignal.User?.PushSubscription?.optedIn,
+      expectedExternalId: externalId,
+      loginOk,
+      ...snap,
     })
     return {
-      ok: true,
+      ok: loginOk,
+      loginOk,
       externalId,
-      subscriptionId: OneSignal.User?.PushSubscription?.id || null,
-      optedIn: !!OneSignal.User?.PushSubscription?.optedIn,
+      code: loginOk ? 'LOGIN_OK' : 'LOGIN_MISMATCH',
+      ...snap,
     }
   } catch (err) {
     console.warn('[TAXIO ONESIGNAL] associate failed', err?.message || err)
     return {
       ok: false,
+      loginOk: false,
       code: err?.code || 'ASSOCIATE_FAILED',
       stage: err?.stage || 'LOGIN',
       technicalReason: `${err?.stage || 'LOGIN'} — ${err?.name || 'Error'}: ${err?.message || err}`,
@@ -166,14 +287,38 @@ export async function associateOneSignalCompany(companyId) {
   }
 }
 
-function nativePermission() {
-  if (typeof Notification === 'undefined') return 'unsupported'
-  return Notification.permission
+/**
+ * UI mode from OneSignal only (never legacy localStorage / company_push_subscriptions).
+ * @returns {Promise<'unsupported'|'prompt'|'on'|'blocked'>}
+ */
+export async function resolveOneSignalPushUiMode(companyId) {
+  if (!isOneSignalPushSupported()) return 'unsupported'
+  if (nativePermission() === 'denied') return 'blocked'
+  if (!getOneSignalAppId()) return 'prompt'
+
+  try {
+    const OneSignal = await initOneSignalOnce()
+    if (companyId) {
+      const externalId = companyOneSignalExternalId(companyId)
+      try {
+        await OneSignal.login(externalId)
+      } catch (err) {
+        console.warn('[TAXIO ONESIGNAL] UI login soft-fail', err?.message || err)
+      }
+    }
+    const snap = readOneSignalPushSnapshot(OneSignal)
+    console.info('[TAXIO ONESIGNAL]', { phase: 'UI_MODE', ...snap })
+    if (isActivelySubscribed(snap)) return 'on'
+    return 'prompt'
+  } catch (err) {
+    console.warn('[TAXIO ONESIGNAL] UI mode soft-fail', err?.message || err)
+    return 'prompt'
+  }
 }
 
 /**
- * Button path: init → permission → subscribe → External ID.
- * @returns {{ ok: boolean, permission: string, code?: string, stage?: string, technicalReason?: string, externalId?: string, subscriptionId?: string }}
+ * Enable button path:
+ * init → login(company:<id>) → permission → optIn → wait until opted in.
  */
 export async function enableOneSignalTripNotifications(companyId) {
   if (!isOneSignalPushSupported()) {
@@ -194,40 +339,99 @@ export async function enableOneSignalTripNotifications(companyId) {
 
   try {
     const OneSignal = await initOneSignalOnce()
-
-    await OneSignal.Notifications.requestPermission()
-    const permission = OneSignal.Notifications?.permissionNative || nativePermission()
-    if (permission === 'denied') {
-      return { ok: false, permission: 'denied', code: 'DENIED', stage: 'PERMISSION' }
-    }
-    if (permission !== 'granted') {
-      return { ok: false, permission, code: 'NOT_GRANTED', stage: 'PERMISSION' }
-    }
-
-    await OneSignal.User.PushSubscription.optIn()
+    const before = readOneSignalPushSnapshot(OneSignal)
+    console.info('[TAXIO ONESIGNAL]', { phase: 'AUDIT_BEFORE', ...before })
 
     const externalId = companyOneSignalExternalId(companyId)
     await OneSignal.login(externalId)
-
-    const optedIn = !!OneSignal.User?.PushSubscription?.optedIn
-    const subscriptionId = OneSignal.User?.PushSubscription?.id || null
-
+    const afterLogin = await waitUntilExternalId(OneSignal, externalId)
+    const loginOk = afterLogin.externalId === externalId
     console.info('[TAXIO ONESIGNAL]', {
-      phase: 'SUBSCRIBE',
-      externalId,
-      subscriptionId,
-      optedIn,
-      permission,
+      phase: 'LOGIN',
+      expectedExternalId: externalId,
+      loginOk,
+      externalId: afterLogin.externalId,
+    })
+    if (!loginOk) {
+      return {
+        ok: false,
+        permission: afterLogin.browserPermission,
+        code: 'LOGIN_FAILED',
+        stage: 'LOGIN',
+        technicalReason: `LOGIN — externalId mismatch (got ${afterLogin.externalId || 'null'})`,
+        externalId,
+        before,
+        after: afterLogin,
+        loginOk: false,
+      }
+    }
+
+    let permission = OneSignal.Notifications?.permissionNative || nativePermission()
+    if (permission !== 'granted') {
+      await OneSignal.Notifications.requestPermission()
+      permission = OneSignal.Notifications?.permissionNative || nativePermission()
+    }
+    if (permission === 'denied') {
+      return {
+        ok: false,
+        permission: 'denied',
+        code: 'DENIED',
+        stage: 'PERMISSION',
+        externalId,
+        before,
+        loginOk: true,
+      }
+    }
+    if (permission !== 'granted') {
+      return {
+        ok: false,
+        permission,
+        code: 'NOT_GRANTED',
+        stage: 'PERMISSION',
+        externalId,
+        before,
+        loginOk: true,
+      }
+    }
+
+    // Always opt-in explicitly (even when browser permission was already granted)
+    await OneSignal.User.PushSubscription.optIn()
+    const after = await waitUntilOneSignalOptedIn(OneSignal)
+    console.info('[TAXIO ONESIGNAL]', {
+      phase: 'AUDIT_AFTER',
+      expectedExternalId: externalId,
+      loginOk: true,
+      beforeOptedIn: before.optedIn,
+      ...after,
     })
 
-    if (!optedIn && !subscriptionId) {
+    if (!after.optedIn) {
       return {
         ok: false,
         permission: 'granted',
-        code: 'SUBSCRIBE_FAILED',
+        code: 'NOT_OPTED_IN',
         stage: 'OPT_IN',
-        technicalReason: 'OPT_IN — not opted in after OneSignal.User.PushSubscription.optIn()',
+        technicalReason:
+          'OPT_IN — OneSignal PushSubscription.optedIn is still false after optIn() wait',
         externalId,
+        subscriptionId: after.subscriptionId,
+        before,
+        after,
+        loginOk: true,
+      }
+    }
+
+    if (!after.subscriptionIdPresent && !after.tokenPresent) {
+      return {
+        ok: false,
+        permission: 'granted',
+        code: 'NO_SUBSCRIPTION',
+        stage: 'OPT_IN',
+        technicalReason: 'OPT_IN — optedIn true but no subscription id/token yet',
+        externalId,
+        before,
+        after,
+        loginOk: true,
       }
     }
 
@@ -236,7 +440,11 @@ export async function enableOneSignalTripNotifications(companyId) {
       permission: 'granted',
       code: 'SUBSCRIBED',
       externalId,
-      subscriptionId,
+      subscriptionId: after.subscriptionId,
+      tokenPresent: after.tokenPresent,
+      before,
+      after,
+      loginOk: true,
     }
   } catch (err) {
     const stage = err?.stage || 'ENABLE'
@@ -254,22 +462,46 @@ export async function enableOneSignalTripNotifications(companyId) {
 }
 
 /**
- * Soft re-sync when OS permission already granted (no nagging prompt expected).
+ * Soft re-sync: permission already granted but may still need OneSignal opt-in.
  */
 export async function softSyncOneSignalTripNotifications(companyId) {
   if (!companyId || !getOneSignalAppId()) return { ok: false, code: 'SKIP' }
   if (nativePermission() !== 'granted') return { ok: false, code: 'NO_PERMISSION' }
   try {
     const OneSignal = await initOneSignalOnce()
-    await OneSignal.User.PushSubscription.optIn()
     const externalId = companyOneSignalExternalId(companyId)
     await OneSignal.login(externalId)
-    const optedIn = !!OneSignal.User?.PushSubscription?.optedIn
+
+    const before = readOneSignalPushSnapshot(OneSignal)
+    if (isActivelySubscribed(before)) {
+      return {
+        ok: true,
+        code: 'SUBSCRIBED',
+        externalId,
+        subscriptionId: before.subscriptionId,
+        tokenPresent: before.tokenPresent,
+        before,
+        after: before,
+      }
+    }
+
+    await OneSignal.User.PushSubscription.optIn()
+    const after = await waitUntilOneSignalOptedIn(OneSignal)
+    const ok = isActivelySubscribed(after)
+    console.info('[TAXIO ONESIGNAL]', {
+      phase: 'SOFT_SYNC',
+      ok,
+      beforeOptedIn: before.optedIn,
+      ...after,
+    })
     return {
-      ok: optedIn || !!OneSignal.User?.PushSubscription?.id,
-      code: optedIn ? 'SUBSCRIBED' : 'PARTIAL',
+      ok,
+      code: ok ? 'SUBSCRIBED' : 'NOT_OPTED_IN',
       externalId,
-      subscriptionId: OneSignal.User?.PushSubscription?.id || null,
+      subscriptionId: after.subscriptionId,
+      tokenPresent: after.tokenPresent,
+      before,
+      after,
     }
   } catch (err) {
     console.warn('[TAXIO ONESIGNAL] soft sync failed', err?.message || err)
