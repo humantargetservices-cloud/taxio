@@ -1,12 +1,14 @@
 /**
  * OneSignal Web Push client (subscription + delivery layer).
- * TAXIO /sw.js remains the PWA/cache worker; OneSignal uses a separate scope.
+ * Uses the unified root TAXIO worker (/sw.js, scope /) which also imports OneSignalSDK.sw.js.
  *
  * Staging active UX: OneSignal subscription state is the only notification-status authority.
  * Does not send Supabase JWTs to OneSignal. External ID is company:<company_id>.
  */
-export const ONESIGNAL_SW_PATH = 'onesignal/OneSignalSDKWorker.js'
-export const ONESIGNAL_SW_SCOPE = '/onesignal/'
+import { isTaxioStagingClient } from './companyPush.js'
+
+export const ONESIGNAL_SW_PATH = 'sw.js'
+export const ONESIGNAL_SW_SCOPE = '/'
 export const ONESIGNAL_SDK_URL = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js'
 
 const OPT_IN_WAIT_MS = 15_000
@@ -94,6 +96,50 @@ async function withOneSignal(fn) {
 }
 
 /**
+ * Staging-only: unregister the old OneSignal-only worker (scope …/onesignal/).
+ * Never unregisters the root TAXIO /sw.js registration.
+ */
+export async function unregisterStagingScopedOneSignalWorker() {
+  if (!isTaxioStagingClient()) {
+    return { ok: false, code: 'NOT_STAGING', unregistered: 0 }
+  }
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+    return { ok: false, code: 'NO_SW', unregistered: 0 }
+  }
+
+  let unregistered = 0
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations()
+    for (const reg of regs) {
+      let pathname = ''
+      try {
+        pathname = new URL(reg.scope).pathname
+      } catch {
+        pathname = String(reg.scope || '')
+      }
+      if (!pathname.endsWith('/onesignal/') && pathname !== '/onesignal/') continue
+      const scriptURL = String(reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || '')
+      // Only drop the dedicated onesignal worker — never root /sw.js
+      if (scriptURL && /\/sw\.js(\?|$)/i.test(scriptURL) && !/onesignal/i.test(scriptURL)) {
+        continue
+      }
+      const did = await reg.unregister()
+      if (did) unregistered += 1
+      console.info('[TAXIO ONESIGNAL]', {
+        phase: 'STAGING_SW_CLEANUP',
+        scope: reg.scope,
+        scriptURL: scriptURL || null,
+        unregistered: did,
+      })
+    }
+  } catch (err) {
+    console.warn('[TAXIO ONESIGNAL] staging SW cleanup failed', err?.message || err)
+    return { ok: false, code: 'CLEANUP_FAILED', unregistered }
+  }
+  return { ok: true, code: 'CLEANED', unregistered }
+}
+
+/**
  * Initialize OneSignal once per page lifetime.
  * @returns {Promise<any>} OneSignal SDK
  */
@@ -111,6 +157,7 @@ export async function initOneSignalOnce() {
 
   initPromise = withOneSignal(async (OneSignal) => {
     try {
+      await unregisterStagingScopedOneSignalWorker()
       await OneSignal.init({
         appId,
         serviceWorkerPath: ONESIGNAL_SW_PATH,

@@ -1,14 +1,16 @@
 /**
- * TAXIO service worker — installability + offline shell fallback + Web Push.
+ * TAXIO root service worker — PWA cache/update + OneSignal Web Push display.
  * Never caches /api/*, Supabase, or booking/Rescue/trip network authority.
  *
- * v3: same network-first / cache rules as v2, plus push + notificationclick.
+ * v4: OneSignal SDK imported here (scope /). Legacy raw push/notificationclick
+ * handlers removed — OneSignal is the only push-display handler.
  * Purges older taxio-shell-v1/v2 and taxio-assets-v1/v2 on activate.
  */
+importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js')
+
 const SHELL_CACHE = 'taxio-shell-v3'
 const ASSET_CACHE = 'taxio-assets-v3'
 const PRECACHE_URLS = ['/taxio-logo.png', '/manifest.webmanifest', '/pwa-fallback-icon.svg']
-const DEFAULT_DASHBOARD_URL = '/dashboard/company'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -171,105 +173,4 @@ self.addEventListener('fetch', (event) => {
       )
     )
   }
-})
-
-async function parsePushPayload(event) {
-  let data = {}
-  try {
-    if (event.data) {
-      const raw = await event.data.text()
-      data = JSON.parse(raw)
-    }
-  } catch {
-    try {
-      data = event.data ? await event.data.json() : {}
-    } catch {
-      data = {}
-    }
-  }
-  return data && typeof data === 'object' ? data : {}
-}
-
-function safeNotificationUrl(data) {
-  const raw = String(data?.url || data?.data?.url || DEFAULT_DASHBOARD_URL).trim()
-  if (!raw) return DEFAULT_DASHBOARD_URL
-  // Same-origin path only — never absolute external or tokenized secrets
-  if (raw.startsWith('/') && !raw.startsWith('//')) return raw
-  try {
-    const u = new URL(raw, self.location.origin)
-    if (u.origin === self.location.origin) return `${u.pathname}${u.search}${u.hash}`
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT_DASHBOARD_URL
-}
-
-self.addEventListener('push', (event) => {
-  event.waitUntil(
-    (async () => {
-      const payload = await parsePushPayload(event)
-      const title = String(payload.title || 'TAXIO').slice(0, 80)
-      const body = String(payload.body || 'Open TAXIO for trip updates.').slice(0, 160)
-      const tag = String(payload.tag || 'taxio-push').slice(0, 80)
-      const data = payload.data && typeof payload.data === 'object' ? payload.data : {}
-      const url = safeNotificationUrl({ ...payload, data })
-
-      const options = {
-        body,
-        tag,
-        renotify: true,
-        icon: '/taxio-logo.png',
-        badge: '/pwa-fallback-icon.svg',
-        data: {
-          ...data,
-          url,
-          event_type: payload.event_type || data.event_type || null,
-        },
-      }
-      // Vibration is best-effort — unsupported platforms ignore it
-      try {
-        options.vibrate = [120, 60, 120]
-      } catch {
-        /* ignore */
-      }
-
-      await self.registration.showNotification(title, options)
-    })()
-  )
-})
-
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close()
-  const targetPath = safeNotificationUrl(event.notification?.data || {})
-  const targetUrl = new URL(targetPath, self.location.origin).href
-
-  event.waitUntil(
-    (async () => {
-      const allClients = await self.clients.matchAll({
-        type: 'window',
-        includeUncontrolled: true,
-      })
-      for (const client of allClients) {
-        try {
-          const clientUrl = new URL(client.url)
-          if (clientUrl.origin === self.location.origin && 'focus' in client) {
-            await client.focus()
-            if ('navigate' in client) {
-              try {
-                await client.navigate(targetUrl)
-              } catch {
-                /* older browsers */
-              }
-            }
-            return
-          }
-        } catch {
-          /* continue */
-        }
-      }
-      if (self.clients.openWindow) {
-        await self.clients.openWindow(targetUrl)
-      }
-    })()
-  )
 })
