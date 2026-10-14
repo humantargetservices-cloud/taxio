@@ -48,12 +48,16 @@ import {
 } from '../lib/pwaInstallPrompt.js'
 import { applyCompanyPwaIdentity, buildPwaPromptStrings, prefetchCompanyManifest } from '../lib/companyPwa.js'
 import {
-  enableCompanyTripNotifications,
   isTaxioStagingClient,
   readLocalPushStatus,
   resolvePushUiMode,
   writeLocalPushStatus,
 } from '../lib/companyPush.js'
+import {
+  associateOneSignalCompany,
+  enableOneSignalTripNotifications,
+  softSyncOneSignalTripNotifications,
+} from '../lib/oneSignalPush.js'
 
 const dashState = {
   tab: 'overview',
@@ -1223,7 +1227,8 @@ export async function mountDashboardCompany(root, opts = {}) {
       msg.classList.remove('hidden')
     }
     try {
-      const result = await enableCompanyTripNotifications()
+      // OneSignal path (custom PushManager/VAPID subscribe bypassed from active UX)
+      const result = await enableOneSignalTripNotifications(company.id)
       if (result.ok) {
         writeLocalPushStatus(company.id, 'on')
         mountDashboardCompany(root)
@@ -1242,18 +1247,13 @@ export async function mountDashboardCompany(root, opts = {}) {
     } catch (e) {
       const name = String(e?.name || 'Error')
       const message = String(e?.message || e || 'enable_failed')
-      const stage = e?.stage || 'AUTH_GET'
-      console.error('[TAXIO PUSH SUBSCRIBE]', {
+      const stage = e?.stage || 'ENABLE'
+      console.error('[TAXIO ONESIGNAL]', {
         phase: stage,
         errorName: name,
         errorMessage: message,
       })
-      const sessionExpired =
-        /session has expired|NOT_AUTHENTICATED|SessionExpired/i.test(`${name} ${message}`)
-      showPushFailure(
-        sessionExpired ? 'Your session has expired. Please sign in again.' : null,
-        `${stage} — ${name}: ${message}`
-      )
+      showPushFailure(null, `${stage} — ${name}: ${message}`)
       if (btn) {
         btn.disabled = false
         btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
@@ -1261,10 +1261,13 @@ export async function mountDashboardCompany(root, opts = {}) {
     }
   })
 
-  // Soft re-sync: if OS permission already granted, refresh subscription without nagging
+  // Associate company External ID on authenticated dashboard load (no JWT to OneSignal)
+  void associateOneSignalCompany(company.id)
+
+  // Soft re-sync: if OS permission already granted, refresh OneSignal subscription without nagging
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     const syncGen = gen
-    void enableCompanyTripNotifications()
+    void softSyncOneSignalTripNotifications(company.id)
       .then((result) => {
         if (!result.ok || syncGen !== dashMountGen) return
         const was = readLocalPushStatus(company.id)
