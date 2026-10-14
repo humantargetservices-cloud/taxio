@@ -19,6 +19,24 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray
 }
 
+/** Staging host / env only — never show technical push errors on production. */
+export function isTaxioStagingClient() {
+  try {
+    if (
+      String(import.meta.env?.VITE_TAXIO_STAGING || '')
+        .trim()
+        .toLowerCase() === 'true'
+    ) {
+      return true
+    }
+  } catch {
+    /* ignore */
+  }
+  if (typeof window === 'undefined') return false
+  const host = String(window.location.hostname || '').toLowerCase()
+  return host === 'staging.taxio.be' || host.startsWith('staging.') || host.includes('stagingtaxio')
+}
+
 export function pushPermissionState() {
   if (typeof Notification === 'undefined') return 'unsupported'
   return Notification.permission
@@ -88,17 +106,99 @@ export async function disablePushSubscription(endpoint) {
   return body
 }
 
+function workerStateLabel(worker) {
+  if (!worker) return null
+  return {
+    state: worker.state || null,
+    scriptURL: worker.scriptURL || null,
+  }
+}
+
+/**
+ * Snapshot SW registration for diagnostics (no secrets).
+ * @param {ServiceWorkerRegistration | null | undefined} reg
+ */
+export function describeServiceWorkerRegistration(reg) {
+  const controller = typeof navigator !== 'undefined' ? navigator.serviceWorker?.controller : null
+  return {
+    registrationExists: !!reg,
+    installing: workerStateLabel(reg?.installing),
+    waiting: workerStateLabel(reg?.waiting),
+    active: workerStateLabel(reg?.active),
+    controllerPresent: !!controller,
+    controllerScriptURL: controller?.scriptURL || null,
+  }
+}
+
+/**
+ * Ensure an ACTIVE service worker before PushManager.subscribe.
+ * Registers if needed, awaits ready, waits until registration.active is set.
+ * @returns {Promise<ServiceWorkerRegistration>}
+ */
+export async function ensureActiveServiceWorkerRegistration() {
+  initServiceWorkerRegistration()
+  await waitForServiceWorkerReady()
+
+  let reg = await navigator.serviceWorker.getRegistration()
+  if (!reg) {
+    initServiceWorkerRegistration()
+    await waitForServiceWorkerReady()
+    reg = await navigator.serviceWorker.getRegistration()
+  }
+
+  // Prefer ready — resolves when there is an active worker for this scope
+  reg = (await navigator.serviceWorker.ready) || reg
+  if (!reg) {
+    throw Object.assign(new Error('Service worker registration missing'), {
+      name: 'ServiceWorkerMissing',
+    })
+  }
+
+  if (!reg.active) {
+    // Wait briefly for installing/waiting → active (max ~8s)
+    const deadline = Date.now() + 8000
+    while (!reg.active && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100))
+      reg = (await navigator.serviceWorker.getRegistration()) || reg
+      if (!reg.active && (reg.installing || reg.waiting)) {
+        try {
+          await navigator.serviceWorker.ready
+        } catch {
+          /* continue polling */
+        }
+        reg = (await navigator.serviceWorker.getRegistration()) || reg
+      }
+    }
+  }
+
+  if (!reg.active) {
+    const snap = describeServiceWorkerRegistration(reg)
+    console.error('[TAXIO PUSH SUBSCRIBE]', {
+      phase: 'no_active_worker',
+      ...snap,
+    })
+    throw Object.assign(new Error('Service worker has no active worker'), {
+      name: 'ServiceWorkerInactive',
+      taxioPushDiag: snap,
+    })
+  }
+
+  console.info('[TAXIO PUSH SUBSCRIBE]', {
+    phase: 'active_worker_ready',
+    ...describeServiceWorkerRegistration(reg),
+  })
+
+  return reg
+}
+
 /**
  * Request permission, subscribe with PushManager, upsert server row.
- * @returns {{ ok: boolean, permission: string, code?: string }}
+ * @returns {{ ok: boolean, permission: string, code?: string, technicalReason?: string }}
  */
 export async function enableCompanyTripNotifications() {
   if (!isPushSupported()) {
     return { ok: false, permission: 'unsupported', code: 'UNSUPPORTED' }
   }
-
-  initServiceWorkerRegistration()
-  await waitForServiceWorkerReady()
 
   const permission = await Notification.requestPermission()
   if (permission !== 'granted') {
@@ -106,13 +206,39 @@ export async function enableCompanyTripNotifications() {
   }
 
   const { vapidPublicKey } = await fetchVapidPublicKey()
-  const reg = await navigator.serviceWorker.ready
+  const reg = await ensureActiveServiceWorkerRegistration()
+
   let sub = await reg.pushManager.getSubscription()
   if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-    })
+    try {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+      })
+    } catch (err) {
+      const snap = describeServiceWorkerRegistration(reg)
+      const name = String(err?.name || 'Error')
+      const message = String(err?.message || err || 'subscribe_failed')
+      console.error('[TAXIO PUSH SUBSCRIBE]', {
+        phase: 'pushManager.subscribe',
+        errorName: name,
+        errorMessage: message,
+        activeState: snap.active?.state || null,
+        controllerPresent: snap.controllerPresent,
+        controllerScriptURL: snap.controllerScriptURL,
+        installing: snap.installing,
+        waiting: snap.waiting,
+      })
+      return {
+        ok: false,
+        permission: 'granted',
+        code: 'SUBSCRIBE_FAILED',
+        technicalReason: `${name}: ${message}`,
+        errorName: name,
+        errorMessage: message,
+        swDiag: snap,
+      }
+    }
   }
 
   await storePushSubscription(sub)

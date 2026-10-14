@@ -49,6 +49,7 @@ import {
 import { applyCompanyPwaIdentity, buildPwaPromptStrings, prefetchCompanyManifest } from '../lib/companyPwa.js'
 import {
   enableCompanyTripNotifications,
+  isTaxioStagingClient,
   readLocalPushStatus,
   resolvePushUiMode,
   writeLocalPushStatus,
@@ -1203,6 +1204,22 @@ export async function mountDashboardCompany(root, opts = {}) {
     if (msg) {
       msg.classList.add('hidden')
       msg.textContent = ''
+      msg.innerHTML = ''
+    }
+    const showPushFailure = (technicalReason) => {
+      if (!msg) return
+      const generic = td.pushError || 'Could not enable notifications. Try again.'
+      if (isTaxioStagingClient() && technicalReason) {
+        const safe = String(technicalReason)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .slice(0, 240)
+        msg.innerHTML = `${escapeHtml(generic)}<br/><span class="mt-1 block text-xs font-normal opacity-90">Technical reason:<br/>${safe}</span>`
+      } else {
+        msg.textContent = generic
+      }
+      msg.classList.remove('hidden')
     }
     try {
       const result = await enableCompanyTripNotifications()
@@ -1216,20 +1233,20 @@ export async function mountDashboardCompany(root, opts = {}) {
         mountDashboardCompany(root)
         return
       }
-      if (msg) {
-        msg.textContent = td.pushError || 'Could not enable notifications. Try again.'
-        msg.classList.remove('hidden')
-      }
+      showPushFailure(result.technicalReason || null)
       if (btn) {
         btn.disabled = false
         btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
       }
     } catch (e) {
-      console.warn('[dashboard] push enable failed', e?.message || e)
-      if (msg) {
-        msg.textContent = td.pushError || 'Could not enable notifications. Try again.'
-        msg.classList.remove('hidden')
-      }
+      const name = String(e?.name || 'Error')
+      const message = String(e?.message || e || 'enable_failed')
+      console.error('[TAXIO PUSH SUBSCRIBE]', {
+        phase: 'enable_outer',
+        errorName: name,
+        errorMessage: message,
+      })
+      showPushFailure(`${name}: ${message}`)
       if (btn) {
         btn.disabled = false
         btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
