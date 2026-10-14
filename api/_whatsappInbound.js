@@ -373,29 +373,24 @@ export async function processWhatsappWebhookPayload(admin, body) {
           const type = String(msg?.type || '')
           const inspected = inspectWhatsappButtonMessage(msg)
 
-          // 1) Confirm / Cancel quick replies (template button OR interactive)
+          // 1) Legacy Confirm/Cancel quick replies — NOT active authority.
+          // New Rescue WhatsApp is View Booking → /trip/:token only.
           const buttonParsed = extractRescueButtonPayloadFromMessage(msg)
           if (buttonParsed) {
-            console.info('[wa-inbound:button]', {
+            console.info('[wa-inbound:button-disabled]', {
               type: inspected.type,
               buttonText: inspected.buttonText,
               interactiveTitle: inspected.interactiveTitle,
-              hasPayload: Boolean(inspected.buttonPayload || inspected.interactiveId),
-              payloadLooksTaxio: /^TAXIO_(CONFIRM|CANCEL):/i.test(
-                String(inspected.buttonPayload || inspected.interactiveId || '')
-              ),
-              labelOnly: buttonParsed.labelOnly === true,
               action: buttonParsed.action,
               tokenMasked: buttonParsed.token ? maskToken(buttonParsed.token) : null,
-              phoneIdMatch: isCentralTaxioPhoneNumberId(phoneNumberId),
-            })
-            const result = await handleRescuePassengerButtonReply(admin, {
-              phoneNumberId,
-              parsed: buttonParsed,
-              senderWaId: msg?.from || '',
+              note: 'Quick-reply Confirm/Cancel ignored; passenger must use /trip page',
             })
             summary.processed += 1
-            summary.results.push(result)
+            summary.results.push({
+              ok: true,
+              code: 'QUICK_REPLY_DISABLED_USE_TRIP_PAGE',
+              action: buttonParsed.action || null,
+            })
             continue
           }
 
