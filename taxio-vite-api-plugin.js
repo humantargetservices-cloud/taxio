@@ -75,6 +75,8 @@ export function taxioApiPlugin() {
           '/api/public-booking': 'api/public-booking.js',
           '/api/trip-status': 'api/trip-status.js',
           '/api/rescue': 'api/rescue.js',
+          '/api/company-push-subscribe': 'api/company-push-subscribe.js',
+          '/api/company-push-dispatch': 'api/company-push-dispatch.js',
           '/api/admin-approve-company': 'api/admin-approve-company.js',
           '/api/admin-delete-company': 'api/admin-delete-company.js',
           '/api/admin-dev-cleanup-test-companies': 'api/admin-dev-cleanup-test-companies.js',
@@ -87,11 +89,16 @@ export function taxioApiPlugin() {
         const isEstimateRoute = pathname === '/api/estimate-route'
         const isAdminAnalytics = pathname === '/api/admin-company-analytics'
         const isTripStatus = pathname === '/api/trip-status'
+        const isCompanyPushSubscribe = pathname === '/api/company-push-subscribe'
+        const isCompanyPushDispatch = pathname === '/api/company-push-dispatch'
         const methodOk =
           req.method === 'POST' ||
           (isEstimateRoute && req.method === 'OPTIONS') ||
           (isAdminAnalytics && req.method === 'GET') ||
-          (isTripStatus && req.method === 'GET')
+          (isTripStatus && req.method === 'GET') ||
+          (isCompanyPushSubscribe &&
+            (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE')) ||
+          (isCompanyPushDispatch && req.method === 'POST')
         if (!file || !methodOk) {
           return next()
         }

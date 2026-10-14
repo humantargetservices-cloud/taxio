@@ -47,6 +47,12 @@ import {
   isOperatorShortcutComplete,
 } from '../lib/pwaInstallPrompt.js'
 import { applyCompanyPwaIdentity, buildPwaPromptStrings, prefetchCompanyManifest } from '../lib/companyPwa.js'
+import {
+  enableCompanyTripNotifications,
+  readLocalPushStatus,
+  resolvePushUiMode,
+  writeLocalPushStatus,
+} from '../lib/companyPush.js'
 
 const dashState = {
   tab: 'overview',
@@ -326,8 +332,28 @@ function renderHeroCard(td, ctx) {
   </section>`
 }
 
+function renderPushNotifyCard(td, pushMode) {
+  if (pushMode === 'unsupported') return ''
+  if (pushMode === 'on') {
+    return `<section id="dash-push-card" class="${DASH_CARD} border-emerald-200/70 p-4 sm:p-5 dark:border-emerald-800/40">
+      <p class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">${escapeHtml(td.pushStatusOn)}</p>
+    </section>`
+  }
+  if (pushMode === 'blocked') {
+    return `<section id="dash-push-card" class="${DASH_CARD} p-4 sm:p-5">
+      <p class="text-sm font-semibold ${DASH_TEXT}">${escapeHtml(td.pushBlocked)}</p>
+    </section>`
+  }
+  return `<section id="dash-push-card" class="${DASH_CARD} p-5 sm:p-6">
+    <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(td.pushEnableTitle)}</h2>
+    <p class="mt-1.5 text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.pushEnableHelper)}</p>
+    <p id="dash-push-msg" class="mt-2 hidden text-sm font-medium text-red-600 dark:text-red-400" role="status"></p>
+    <button type="button" id="dash-push-enable" class="${DASH_BTN_PRIMARY} mt-4 min-h-[48px] w-full sm:w-auto sm:px-6">${escapeHtml(td.pushEnableButton)}</button>
+  </section>`
+}
+
 function renderOverviewBody(td, ctx, tpwa) {
-  const { bookingStats, showPwaCard } = ctx
+  const { bookingStats, pushMode } = ctx
 
   const activityHtml =
     bookingStats.total === 0
@@ -349,6 +375,8 @@ function renderOverviewBody(td, ctx, tpwa) {
 
   return `<div class="mx-auto max-w-3xl space-y-4 sm:space-y-5">
     ${renderHeroCard(td, ctx)}
+
+    ${renderPushNotifyCard(td, pushMode)}
 
     <section class="${DASH_CARD} p-5 sm:p-6">
       <div class="flex items-center justify-between gap-3">
@@ -563,6 +591,7 @@ export async function mountDashboardCompany(root, opts = {}) {
   const tpwa = buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name)
   const pwaShortcutDone = isOperatorShortcutComplete(company.id)
   const showPwaCard = shouldShowOperatorDashboardPwaCard(company.id)
+  const pushMode = resolvePushUiMode(company.id)
   logDashboardPwaDebug(showPwaCard ? 'inline-card:visible' : 'inline-card:hidden', {
     tab: dashState.tab,
     companySlug: company.slug,
@@ -615,6 +644,7 @@ export async function mountDashboardCompany(root, opts = {}) {
   if (t === 'overview') {
     bodyHtml = renderOverviewBody(td, {
       progress: setupProgress,
+      pushMode,
       bookPublicUrl,
       bookingQrSrc,
       avail,
@@ -1162,6 +1192,63 @@ export async function mountDashboardCompany(root, opts = {}) {
     logDashboardPwaDebug('inline-card:dismissed')
     mountDashboardCompany(root)
   })
+
+  root.querySelector('#dash-push-enable')?.addEventListener('click', async () => {
+    const btn = root.querySelector('#dash-push-enable')
+    const msg = root.querySelector('#dash-push-msg')
+    if (btn) {
+      btn.disabled = true
+      btn.textContent = td.pushBusy || 'Turning on…'
+    }
+    if (msg) {
+      msg.classList.add('hidden')
+      msg.textContent = ''
+    }
+    try {
+      const result = await enableCompanyTripNotifications()
+      if (result.ok) {
+        writeLocalPushStatus(company.id, 'on')
+        mountDashboardCompany(root)
+        return
+      }
+      if (result.code === 'DENIED' || result.permission === 'denied') {
+        writeLocalPushStatus(company.id, 'blocked')
+        mountDashboardCompany(root)
+        return
+      }
+      if (msg) {
+        msg.textContent = td.pushError || 'Could not enable notifications. Try again.'
+        msg.classList.remove('hidden')
+      }
+      if (btn) {
+        btn.disabled = false
+        btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
+      }
+    } catch (e) {
+      console.warn('[dashboard] push enable failed', e?.message || e)
+      if (msg) {
+        msg.textContent = td.pushError || 'Could not enable notifications. Try again.'
+        msg.classList.remove('hidden')
+      }
+      if (btn) {
+        btn.disabled = false
+        btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
+      }
+    }
+  })
+
+  // Soft re-sync: if OS permission already granted, refresh subscription without nagging
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    const syncGen = gen
+    void enableCompanyTripNotifications()
+      .then((result) => {
+        if (!result.ok || syncGen !== dashMountGen) return
+        const was = readLocalPushStatus(company.id)
+        writeLocalPushStatus(company.id, 'on')
+        if (was !== 'on' && pushMode !== 'on') mountDashboardCompany(root)
+      })
+      .catch(() => {})
+  }
 
   if (t === 'pricing') {
     const mount = root.querySelector('#pricing-form-mount')

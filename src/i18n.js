@@ -214,6 +214,14 @@ export const translations = {
       dashPwaCardTitle: 'Add TAXIO to your phone',
       dashPwaCardSub:
         'Create a shortcut on your home screen for faster access to your company dashboard.',
+      pushEnableTitle: 'Enable trip notifications',
+      pushEnableHelper: 'Receive new trip requests even when TAXIO is closed.',
+      pushEnableButton: 'ENABLE NOTIFICATIONS',
+      pushStatusOn: 'Trip notifications on',
+      pushBlocked:
+        'Notifications are blocked on this phone. Enable them in your phone or app settings for TAXIO.',
+      pushBusy: 'Turning on…',
+      pushError: 'Could not enable notifications. Try again.',
       vatLine: 'VAT',
       shareTitle: 'Share your booking page',
       shareSubtitle: 'Public link and QR code.',
@@ -1001,6 +1009,14 @@ export const translations = {
       dashPwaCardTitle: 'Ajoutez TAXIO à votre téléphone',
       dashPwaCardSub:
         'Créez un raccourci sur votre écran d’accueil pour accéder plus vite à votre tableau de bord.',
+      pushEnableTitle: 'Activer les notifications de courses',
+      pushEnableHelper: 'Recevez les nouvelles demandes même quand TAXIO est fermé.',
+      pushEnableButton: 'ACTIVER LES NOTIFICATIONS',
+      pushStatusOn: 'Notifications de courses activées',
+      pushBlocked:
+        'Les notifications sont bloquées sur ce téléphone. Activez-les dans les réglages du téléphone ou de l’appli TAXIO.',
+      pushBusy: 'Activation…',
+      pushError: 'Impossible d’activer les notifications. Réessayez.',
       vatLine: 'TVA',
       shareTitle: 'Partager votre page de réservation',
       shareSubtitle: 'Lien public et QR code.',
@@ -1792,6 +1808,14 @@ export const translations = {
       dashPwaCardTitle: 'Voeg TAXIO toe aan je telefoon',
       dashPwaCardSub:
         'Maak een snelkoppeling op je startscherm voor snellere toegang tot je bedrijfsdashboard.',
+      pushEnableTitle: 'Ritmeldingen inschakelen',
+      pushEnableHelper: 'Ontvang nieuwe ritaanvragen zelfs als TAXIO gesloten is.',
+      pushEnableButton: 'MELDINGEN INSCHAKELEN',
+      pushStatusOn: 'Ritmeldingen aan',
+      pushBlocked:
+        'Meldingen zijn geblokkeerd op deze telefoon. Schakel ze in via de telefoon- of TAXIO-appinstellingen.',
+      pushBusy: 'Bezig…',
+      pushError: 'Meldingen inschakelen mislukt. Probeer opnieuw.',
       vatLine: 'BTW',
       shareTitle: 'Deel uw boekingspagina',
       shareSubtitle: 'Publieke link en QR-code.',
