@@ -473,7 +473,7 @@ async function refreshNotifications() {
         // Waiting is Active Trips only — never a blocking overlay
         winnerPhase = null
       } else if (
-        (pcs === 'CONFIRMED' || pcs === 'CANCELLED_BY_PASSENGER') &&
+        (pcs === 'CONFIRMED' || pcs === 'CANCELLED_BY_PASSENGER' || pcs === 'EXPIRED') &&
         liveWinnerRescueId === wonId
       ) {
         // Terminal: Active Trips owns presentation; refresh dashboard card, no popup

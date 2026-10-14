@@ -2,15 +2,14 @@
  * Derive "Active trips" for the company dashboard from authoritative server state.
  * Does not invent a new state machine — maps booking_requests + won rescue_requests.
  *
- * Schema gap: booking_requests has no "trip completed" status. Operational filtering
- * uses ride time (today / upcoming / started within 6h) instead of a completion flag.
+ * Completion: booking_requests.completed_at is authoritative when set.
+ * The 6h ride-time heuristic is ONLY a fallback for legacy rows with no completed_at.
  */
 import { formatDateTime } from './format.js'
 import { escapeHtml } from './html.js'
 import { tripPriceLabelFromBooking, cleanTripPriceDisplay } from './rescuePrice.js'
 import { fetchRescueWinnerDetails } from './rescue.js'
 
-const CANCELLED_VISIBLE_MS = 2 * 60 * 60 * 1000
 const STARTED_GRACE_MS = 6 * 60 * 60 * 1000
 
 /** Country-only trailing segments that should not become the whole route label. */
@@ -105,14 +104,6 @@ export function passengerContactLinks(phoneRaw, { companyName, pickup, dropoff }
   return { phone, waHref, telHref }
 }
 
-function cancelledStillVisible(rescue) {
-  const closedIso = rescue?.closed_at || rescue?.passenger_confirmed_at || rescue?.accepted_at
-  if (!closedIso) return false
-  const t = new Date(closedIso).getTime()
-  if (!Number.isFinite(t)) return false
-  return Date.now() - t <= CANCELLED_VISIBLE_MS
-}
-
 /**
  * @param {{ companyId: string, bookings?: object[], opportunities?: object[] }} args
  * @returns {object[]}
@@ -121,14 +112,35 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
   const trips = []
   if (!companyId) return trips
 
+  // Bookings this company owns that were taken over by a confirmed Rescue winner
+  // must not also appear as Company A active trips.
+  const rescueTakenBookingIds = new Set()
+  for (const o of opportunities || []) {
+    const r = o?.rescue
+    if (
+      o?.status === 'ACCEPTED' &&
+      r?.status === 'ACCEPTED' &&
+      String(r.passenger_confirm_status || '') === 'CONFIRMED' &&
+      r.accepted_by_company_id &&
+      r.accepted_by_company_id !== companyId &&
+      r.booking_request_id
+    ) {
+      rescueTakenBookingIds.add(String(r.booking_request_id))
+    }
+  }
+
   for (const b of bookings || []) {
     if (String(b.status || '') !== 'accepted') continue
+    if (b.completed_at) continue
+    if (rescueTakenBookingIds.has(String(b.id))) continue
+    // Legacy fallback only when completed_at is absent
     if (!isOperationalRideTime(b.ride_datetime)) continue
     trips.push({
       id: `booking:${b.id}`,
       kind: 'company_a_confirmed',
       phase: 'confirmed',
       bookingId: b.id,
+      rescueRequestId: null,
       pickup: preferRouteLabel(b.pickup_address),
       dropoff: preferRouteLabel(b.dropoff_address),
       whenIso: b.ride_datetime || null,
@@ -152,9 +164,13 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
     seenRescue.add(rid)
 
     const pcs = String(r.passenger_confirm_status || '').trim()
+    // Expired / cancelled are not active
+    if (pcs === 'EXPIRED' || pcs === 'CANCELLED_BY_PASSENGER') continue
+
     const base = {
       id: `rescue:${rid}`,
       rescueRequestId: rid,
+      bookingId: r.booking_request_id || null,
       pickup: preferRouteLabel(r.preview_pickup_label),
       dropoff: preferRouteLabel(r.preview_dropoff_label),
       whenIso: r.preview_ride_datetime || null,
@@ -163,6 +179,11 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
     }
 
     if (pcs === 'WAITING_PASSENGER_CONFIRMATION') {
+      // Soft-hide when server deadline already passed (cron may lag a few seconds)
+      const deadlineMs = r.passenger_confirm_deadline_at
+        ? new Date(r.passenger_confirm_deadline_at).getTime()
+        : NaN
+      if (Number.isFinite(deadlineMs) && deadlineMs <= Date.now()) continue
       trips.push({
         ...base,
         kind: 'rescue_waiting',
@@ -175,7 +196,6 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
     }
 
     if (pcs === 'CONFIRMED') {
-      if (!isOperationalRideTime(r.preview_ride_datetime)) continue
       trips.push({
         ...base,
         kind: 'rescue_confirmed',
@@ -183,20 +203,6 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
         passengerName: null,
         passengerPhone: null,
         needsPii: true,
-      })
-      continue
-    }
-
-    if (pcs === 'CANCELLED_BY_PASSENGER') {
-      if (!cancelledStillVisible(r)) continue
-      trips.push({
-        ...base,
-        kind: 'rescue_cancelled',
-        phase: 'cancelled',
-        passengerName: null,
-        passengerPhone: null,
-        needsPii: false,
-        sortAt: new Date(r.closed_at || r.accepted_at || o.created_at || 0).getTime() || 0,
       })
     }
   }
@@ -216,18 +222,37 @@ export async function enrichActiveTripsWithWinnerDetails(trips) {
       try {
         const det = await fetchRescueWinnerDetails({ rescueRequestId: t.rescueRequestId })
         const body = det?.body
-        if (!det?.ok || !body?.ok) return
+        if (!det?.ok || !body?.ok) {
+          // Locked / cancelled / expired — drop from active if no longer confirmed
+          const pcs = String(body?.passenger_confirm_status || '')
+          if (pcs === 'CANCELLED_BY_PASSENGER' || pcs === 'EXPIRED') {
+            t.phase = 'drop'
+          }
+          return
+        }
         const b = body.booking || {}
+        if (b.completed_at) {
+          t.phase = 'drop'
+          t.needsPii = false
+          return
+        }
         if (b.pickup_address) t.pickup = preferRouteLabel(b.pickup_address, t.pickup)
         if (b.dropoff_address) t.dropoff = preferRouteLabel(b.dropoff_address, t.dropoff)
         if (b.ride_datetime) t.whenIso = b.ride_datetime
+        if (b.id) t.bookingId = b.id
         if (b.customer_name) t.passengerName = String(b.customer_name).trim() || null
         if (b.customer_phone) t.passengerPhone = String(b.customer_phone).trim() || null
         if (body.passenger_confirm_status === 'CANCELLED_BY_PASSENGER') {
-          t.phase = 'cancelled'
-          t.kind = 'rescue_cancelled'
+          t.phase = 'drop'
           t.passengerName = null
           t.passengerPhone = null
+        } else if (body.passenger_confirm_status === 'EXPIRED') {
+          t.phase = 'drop'
+          t.passengerName = null
+          t.passengerPhone = null
+        } else if (!isOperationalRideTime(t.whenIso)) {
+          // Legacy heuristic only when not completed
+          t.phase = 'drop'
         }
         t.needsPii = false
       } catch {
@@ -235,7 +260,7 @@ export async function enrichActiveTripsWithWinnerDetails(trips) {
       }
     })
   )
-  return list
+  return list.filter((t) => t.phase !== 'drop')
 }
 
 /**
@@ -272,10 +297,6 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
     foot = `<p class="mt-1.5 text-xs leading-snug text-amber-800/90 dark:text-amber-200/90">${escapeHtml(
       td.activeTripsWaitingHint || 'Waiting for passenger confirmation'
     )}</p>`
-  } else if (phase === 'cancelled') {
-    foot = `<p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">${escapeHtml(
-      td.activeTripsCancelledHint || 'Passenger cancelled — no contact shared'
-    )}</p>`
   } else if (phase === 'confirmed') {
     const name = String(trip.passengerName || '').trim()
     const { phone, waHref, telHref } = passengerContactLinks(trip.passengerPhone, {
@@ -287,9 +308,16 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
       name && name !== 'Booking request'
         ? `<p class="mt-1.5 text-sm font-medium text-gray-800 dark:text-slate-200">${escapeHtml(name)}</p>`
         : ''
-    const actions =
-      waHref || telHref
-        ? `<div class="mt-2 flex flex-wrap gap-2">
+    const bookingAttr = trip.bookingId
+      ? ` data-complete-booking="${escapeHtml(String(trip.bookingId))}"`
+      : ''
+    const rescueAttr = trip.rescueRequestId
+      ? ` data-complete-rescue="${escapeHtml(String(trip.rescueRequestId))}"`
+      : ''
+    const completeBtn = `<button type="button"${bookingAttr}${rescueAttr} data-complete-trip class="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl border border-emerald-600/40 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20 sm:flex-none">${escapeHtml(
+      td.activeTripsComplete || 'Complete trip'
+    )}</button>`
+    const actions = `<div class="mt-2 flex flex-wrap gap-2">
         ${
           waHref
             ? `<a href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500 sm:flex-none">${escapeHtml(
@@ -306,8 +334,8 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
               ? `<span class="text-xs text-gray-500">${escapeHtml(phone)}</span>`
               : ''
         }
+        ${completeBtn}
       </div>`
-        : ''
     foot = `${nameHtml}${actions}`
   }
 

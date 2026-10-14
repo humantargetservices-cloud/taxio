@@ -221,8 +221,38 @@ export default async function handler(req, res) {
       return json(res, http, result)
     }
 
+    if (action === 'complete_trip') {
+      const bookingRequestId = String(body.bookingRequestId || body.booking_request_id || '').trim()
+      const rescueRequestId = String(body.rescueRequestId || body.rescue_request_id || '').trim()
+      if (!companyId || (!bookingRequestId && !rescueRequestId)) {
+        return json(res, 400, {
+          error: 'companyId and bookingRequestId or rescueRequestId are required.',
+          code: 'INVALID_INPUT',
+        })
+      }
+      const { data, error } = await userSb.rpc('taxio_company_complete_trip', {
+        p_company_id: companyId,
+        p_booking_request_id: bookingRequestId || null,
+        p_rescue_request_id: rescueRequestId || null,
+      })
+      if (error) {
+        console.error('[rescue:complete_trip]', error.message)
+        return json(res, 500, { ok: false, code: 'RPC_ERROR', error: error.message })
+      }
+      const result = data && typeof data === 'object' ? data : { ok: false, code: 'EMPTY' }
+      const http = result.ok
+        ? 200
+        : result.code === 'FORBIDDEN' || result.code === 'NOT_AUTHENTICATED'
+          ? 403
+          : result.code === 'NOT_FOUND'
+            ? 404
+            : 409
+      return json(res, http, result)
+    }
+
     return json(res, 400, {
-      error: "action must be 'activate', 'decline', 'accept', 'tick', 'winner_details', or passenger_*",
+      error:
+        "action must be 'activate', 'decline', 'accept', 'tick', 'winner_details', 'complete_trip', or passenger_*",
       code: 'INVALID_INPUT',
     })
   } catch (err) {

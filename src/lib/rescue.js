@@ -162,6 +162,7 @@ export async function listRescueOpportunitiesForCompany(companyId) {
         preview_service_type,
         preview_estimated_price,
         passenger_confirm_status,
+        passenger_confirm_deadline_at,
         passenger_confirmed_at,
         closed_at,
         booking_request_id
@@ -198,6 +199,20 @@ export async function acceptRescueRequest({ rescueRequestId, companyId }) {
 export async function fetchRescueWinnerDetails({ rescueRequestId }) {
   try {
     return await rescueAuthedPost({ action: 'winner_details', rescueRequestId })
+  } catch (e) {
+    return { ok: false, status: 0, body: { code: 'NETWORK', error: e?.message || 'failed' } }
+  }
+}
+
+/** Mark trip completed (responsible company only). Soft-fails. */
+export async function completeCompanyTrip({ companyId, bookingRequestId, rescueRequestId }) {
+  try {
+    return await rescueAuthedPost({
+      action: 'complete_trip',
+      companyId,
+      bookingRequestId: bookingRequestId || undefined,
+      rescueRequestId: rescueRequestId || undefined,
+    })
   } catch (e) {
     return { ok: false, status: 0, body: { code: 'NETWORK', error: e?.message || 'failed' } }
   }

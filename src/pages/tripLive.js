@@ -107,6 +107,15 @@ function renderState(data) {
     `)
   }
 
+  if (state === 'OFFER_EXPIRED') {
+    return card(`
+      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Expired</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">This taxi offer has expired.</h1>
+      <p class="mt-2 text-sm text-gray-600">The confirmation window ended. No further action is needed on this page.</p>
+      ${summary}
+    `)
+  }
+
   if (state === 'REQUESTING_COMPANY_A') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-amber-700">Waiting</p>
@@ -141,7 +150,8 @@ function renderState(data) {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-amber-700">Taxi found</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(company)} can take your trip</h1>
-      <p class="mt-2 text-sm text-gray-600">Same trip. Same estimated price. Please confirm to share your contact details.</p>
+      <p class="mt-2 text-sm text-gray-600">Same trip. Same estimated price.</p>
+      <p class="mt-1 text-sm font-medium text-amber-800">Please confirm within 30 minutes.</p>
       ${summary}
       <div class="mt-5 grid gap-2">
         <button type="button" id="trip-confirm" class="min-h-[48px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500">CONFIRM TRIP</button>
@@ -231,8 +241,15 @@ export async function mountTripLive(root, secureToken) {
       if (!result?.ok) {
         setBusy(false)
         if (msgEl) {
-          msgEl.textContent = 'Could not confirm. Please try again.'
+          msgEl.textContent =
+            result?.code === 'EXPIRED'
+              ? 'This taxi offer has expired.'
+              : 'Could not confirm. Please try again.'
           msgEl.classList.remove('hidden')
+        }
+        if (result?.code === 'EXPIRED') {
+          lastState = ''
+          await refresh()
         }
         return
       }
@@ -262,7 +279,7 @@ export async function mountTripLive(root, secureToken) {
   const paint = (data) => {
     latest = data
     const state = String(data?.state || 'INVALID')
-    const terminal = ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED'].includes(state)
+    const terminal = ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED'].includes(state)
     const acceptedDone = state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED'
     if (terminal || acceptedDone) stopPoll()
 
@@ -292,7 +309,11 @@ export async function mountTripLive(root, secureToken) {
   const startPoll = () => {
     stopPoll()
     const state = String(latest?.state || '')
-    if (['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'COMPANY_A_ACCEPTED', 'CONFIRMED'].includes(state)) {
+    if (
+      ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED', 'COMPANY_A_ACCEPTED', 'CONFIRMED'].includes(
+        state
+      )
+    ) {
       return
     }
     pollTimer = setInterval(() => {

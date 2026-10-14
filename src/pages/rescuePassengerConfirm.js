@@ -78,6 +78,19 @@ export async function mountRescuePassengerConfirm(root, token) {
     return
   }
 
+  if (status === 'EXPIRED') {
+    root.innerHTML = shell(
+      card(`
+        <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Expired</p>
+        <h1 class="mt-2 text-xl font-bold text-gray-900">This taxi offer has expired.</h1>
+        <p class="mt-2 text-sm text-gray-600">The confirmation window ended. No further action is needed.</p>
+        <p class="mt-4 text-sm font-medium text-gray-900">${escapeHtml(pickup)} → ${escapeHtml(dropoff)}</p>
+        <p class="mt-1 text-sm text-amber-700">Trip price: ${escapeHtml(price)}</p>
+      `)
+    )
+    return
+  }
+
   if (status !== 'WAITING_PASSENGER_CONFIRMATION') {
     root.innerHTML = shell(
       card(`<p class="text-center text-sm font-semibold text-gray-700">This confirmation is no longer active.</p>`)
@@ -89,14 +102,15 @@ export async function mountRescuePassengerConfirm(root, token) {
     card(`
       <p class="text-xs font-bold uppercase tracking-wide text-amber-700">TAXIO</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">Please confirm your ride</h1>
-      <p class="mt-2 text-sm leading-relaxed text-gray-600">Your selected taxi company is unavailable. <strong class="font-semibold text-gray-900">${escapeHtml(companyName)}</strong> can serve your trip.</p>
+      <p class="mt-2 text-sm leading-relaxed text-gray-600"><strong class="font-semibold text-gray-900">${escapeHtml(companyName)}</strong> can take your trip. Same trip. Same estimated price.</p>
+      <p class="mt-1 text-sm font-medium text-amber-800">Please confirm within 30 minutes.</p>
       <div class="mt-5 rounded-xl border border-gray-100 bg-slate-50 px-4 py-3">
         <p class="text-sm font-semibold text-gray-900">${escapeHtml(pickup)} → ${escapeHtml(dropoff)}</p>
         <p class="mt-1 text-sm font-semibold text-amber-700">Trip price: ${escapeHtml(price)}</p>
         <p class="mt-1 text-xs text-gray-500">Requested time: ${escapeHtml(when)}</p>
       </div>
       <div class="mt-5 grid gap-2">
-        <button type="button" id="pc-confirm" class="min-h-[48px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500">CONFIRM RIDE</button>
+        <button type="button" id="pc-confirm" class="min-h-[48px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500">CONFIRM TRIP</button>
         <button type="button" id="pc-cancel" class="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800 hover:bg-slate-50">CANCEL</button>
       </div>
       <p id="pc-msg" class="mt-3 hidden text-center text-sm font-medium text-red-600"></p>
@@ -122,10 +136,16 @@ export async function mountRescuePassengerConfirm(root, token) {
             ? 'Already confirmed.'
             : result?.code === 'ALREADY_CANCELLED'
               ? 'Already cancelled.'
-              : 'Could not confirm this ride.'
+              : result?.code === 'EXPIRED'
+                ? 'This taxi offer has expired.'
+                : 'Could not confirm this ride.'
         msgEl.classList.remove('hidden')
       }
-      if (result?.code === 'ALREADY_CONFIRMED' || result?.code === 'ALREADY_CANCELLED') {
+      if (
+        result?.code === 'ALREADY_CONFIRMED' ||
+        result?.code === 'ALREADY_CANCELLED' ||
+        result?.code === 'EXPIRED'
+      ) {
         setTimeout(() => mountRescuePassengerConfirm(root, safeToken), 800)
       }
       return

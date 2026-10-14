@@ -20,7 +20,7 @@ import {
   startRescueNotifications,
   stopRescueNotifications,
 } from '../lib/rescueNotifications.js'
-import { listRescueOpportunitiesForCompany } from '../lib/rescue.js'
+import { completeCompanyTrip, listRescueOpportunitiesForCompany } from '../lib/rescue.js'
 import {
   deriveActiveTrips,
   enrichActiveTripsWithWinnerDetails,
@@ -1270,6 +1270,40 @@ export async function mountDashboardCompany(root, opts = {}) {
   root.querySelector('#dash-active-trips-toggle')?.addEventListener('click', () => {
     dashState.activeTripsExpanded = !dashState.activeTripsExpanded
     mountDashboardCompany(root)
+  })
+
+  root.querySelectorAll('[data-complete-trip]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const confirmMsg = td.activeTripsCompleteConfirm || 'Mark this trip as completed?'
+      if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) return
+      const bookingRequestId = btn.getAttribute('data-complete-booking') || ''
+      const rescueRequestId = btn.getAttribute('data-complete-rescue') || ''
+      btn.disabled = true
+      try {
+        const result = await completeCompanyTrip({
+          companyId: company.id,
+          bookingRequestId: bookingRequestId || undefined,
+          rescueRequestId: rescueRequestId || undefined,
+        })
+        if (!result?.ok) {
+          const msg = root.querySelector('#dash-msg')
+          if (msg) {
+            msg.textContent = td.activeTripsCompleteError || 'Could not complete this trip. Try again.'
+            msg.classList.remove('hidden')
+          }
+          btn.disabled = false
+          return
+        }
+        mountDashboardCompany(root)
+      } catch {
+        btn.disabled = false
+        const msg = root.querySelector('#dash-msg')
+        if (msg) {
+          msg.textContent = td.activeTripsCompleteError || 'Could not complete this trip. Try again.'
+          msg.classList.remove('hidden')
+        }
+      }
+    })
   })
 
   root.querySelector('#dash-push-enable')?.addEventListener('click', async () => {

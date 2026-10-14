@@ -25,6 +25,14 @@ function cleanPrice(amount) {
   return Math.round(n * 100) / 100
 }
 
+/** Soft-read: deadline passed while status still WAITING (cron may lag a few seconds). */
+function isPassengerConfirmPastDeadline(rescue) {
+  const iso = rescue?.passenger_confirm_deadline_at
+  if (!iso) return false
+  const t = new Date(iso).getTime()
+  return Number.isFinite(t) && t <= Date.now()
+}
+
 function publicCompanyContacts(company) {
   if (!company) return null
   const phone = String(company.phone || '').trim() || null
@@ -81,6 +89,19 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     }
   }
 
+  // Passenger confirm window expired (offer still opens; no Confirm/Cancel)
+  if (pcs === 'EXPIRED' || (rescueStatus === 'ACCEPTED' && pcs === 'WAITING_PASSENGER_CONFIRMATION' && isPassengerConfirmPastDeadline(rescue))) {
+    return {
+      ...base,
+      state: 'OFFER_EXPIRED',
+      headline_company: winnerCompany?.name || companyAName,
+      contacts: null,
+      confirm_token: null,
+      actions: { confirm: false, cancel: false },
+      passenger_confirm_deadline_at: rescue?.passenger_confirm_deadline_at || null,
+    }
+  }
+
   // Rescue confirmed
   if (pcs === 'CONFIRMED' && rescueStatus === 'ACCEPTED') {
     return {
@@ -102,6 +123,7 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
       contacts: null,
       confirm_token: rescue.passenger_confirm_token || null,
       actions: { confirm: true, cancel: true },
+      passenger_confirm_deadline_at: rescue.passenger_confirm_deadline_at || null,
     }
   }
 
@@ -217,7 +239,7 @@ export async function loadTripByPassengerToken(supabase, tripToken) {
   const { data: rescues } = await supabase
     .from('rescue_requests')
     .select(
-      'id, status, original_company_id, accepted_by_company_id, passenger_confirm_status, passenger_confirm_token, accepted_at, closed_at, created_at'
+      'id, status, original_company_id, accepted_by_company_id, passenger_confirm_status, passenger_confirm_token, passenger_confirm_deadline_at, accepted_at, closed_at, created_at'
     )
     .eq('booking_request_id', booking.id)
     .order('created_at', { ascending: false })
