@@ -16,6 +16,12 @@ import {
 } from '../lib/api.js'
 import { tripPriceLabelFromBooking } from '../lib/rescuePrice.js'
 import { startRescueNotifications, stopRescueNotifications } from '../lib/rescueNotifications.js'
+import { listRescueOpportunitiesForCompany } from '../lib/rescue.js'
+import {
+  deriveActiveTrips,
+  enrichActiveTripsWithWinnerDetails,
+  renderActiveTripItemHtml,
+} from '../lib/activeTrips.js'
 import { signOutEverywhere } from '../lib/auth.js'
 import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
@@ -61,6 +67,7 @@ const dashState = {
   editingCarId: null,
   drawerOpen: false,
   qrOpen: false,
+  activeTripsExpanded: false,
 }
 
 /** Invalidates overlapping mounts (tab switches / concurrent loads). */
@@ -353,6 +360,39 @@ function renderPushNotifyCard(td, pushMode) {
   </section>`
 }
 
+function renderActiveTripsCard(td, ctx) {
+  const trips = Array.isArray(ctx.activeTrips) ? ctx.activeTrips : []
+  const count = trips.length
+  const expanded = !!ctx.activeTripsExpanded
+  const visible = expanded ? trips : trips.slice(0, 3)
+  const companyName = ctx.companyName || ''
+
+  const itemsHtml =
+    visible.length === 0
+      ? `<p class="text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.activeTripsEmpty || 'No active trips right now.')}</p>`
+      : `<div class="space-y-2.5">${visible
+          .map((trip) => renderActiveTripItemHtml(trip, td, { companyName }))
+          .join('')}</div>`
+
+  const moreBtn =
+    count > 3
+      ? `<button type="button" id="dash-active-trips-toggle" class="mt-3 w-full rounded-lg px-2 py-2 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-950/30 dark:hover:text-amber-300 ${DASH_FOCUS}">${escapeHtml(
+          expanded ? td.activeTripsShowLess || 'Show less' : td.activeTripsViewAll || 'View all'
+        )}</button>`
+      : ''
+
+  return `<section id="dash-active-trips-card" class="${DASH_CARD} p-4 sm:p-5" aria-label="${escapeHtml(
+    td.activeTripsTitle || 'Active trips'
+  )}">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(td.activeTripsTitle || 'Active trips')}</h2>
+      <span class="rounded-lg bg-gray-100 px-2 py-0.5 text-xs font-bold tabular-nums text-gray-700 dark:bg-slate-800 dark:text-slate-200">${count}</span>
+    </div>
+    <div class="mt-3">${itemsHtml}</div>
+    ${moreBtn}
+  </section>`
+}
+
 function renderOverviewBody(td, ctx, tpwa) {
   const { bookingStats, pushMode } = ctx
 
@@ -378,6 +418,8 @@ function renderOverviewBody(td, ctx, tpwa) {
     ${renderHeroCard(td, ctx)}
 
     ${renderPushNotifyCard(td, pushMode)}
+
+    ${renderActiveTripsCard(td, ctx)}
 
     <section class="${DASH_CARD} p-5 sm:p-6">
       <div class="flex items-center justify-between gap-3">
@@ -572,6 +614,7 @@ export async function mountDashboardCompany(root, opts = {}) {
 
   let cars = []
   let bookings = []
+  let rescueOpportunities = []
   try {
     cars = await listCarsForCompany(company.id)
   } catch {
@@ -579,9 +622,25 @@ export async function mountDashboardCompany(root, opts = {}) {
   }
   if (gen !== dashMountGen) return
   try {
-    bookings = await listBookingRequestsForCompany(company.id)
+    ;[bookings, rescueOpportunities] = await Promise.all([
+      listBookingRequestsForCompany(company.id).catch(() => []),
+      listRescueOpportunitiesForCompany(company.id).catch(() => []),
+    ])
   } catch {
     bookings = []
+    rescueOpportunities = []
+  }
+  if (gen !== dashMountGen) return
+
+  let activeTrips = deriveActiveTrips({
+    companyId: company.id,
+    bookings,
+    opportunities: rescueOpportunities,
+  })
+  try {
+    activeTrips = await enrichActiveTripsWithWinnerDetails(activeTrips)
+  } catch {
+    /* keep preview rows */
   }
   if (gen !== dashMountGen) return
 
@@ -657,6 +716,9 @@ export async function mountDashboardCompany(root, opts = {}) {
       pricingStatus,
       carCount: cars.length,
       showPwaCard,
+      activeTrips,
+      activeTripsExpanded: dashState.activeTripsExpanded,
+      companyName: company.name,
     }, tpwa)
   } else if (t === 'cars') {
     const rows =
@@ -1193,6 +1255,11 @@ export async function mountDashboardCompany(root, opts = {}) {
   root.querySelector('#dash-pwa-later')?.addEventListener('click', () => {
     setPromptDismissed('operator', company.id)
     logDashboardPwaDebug('inline-card:dismissed')
+    mountDashboardCompany(root)
+  })
+
+  root.querySelector('#dash-active-trips-toggle')?.addEventListener('click', () => {
+    dashState.activeTripsExpanded = !dashState.activeTripsExpanded
     mountDashboardCompany(root)
   })
 

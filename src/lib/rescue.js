@@ -163,6 +163,7 @@ export async function listRescueOpportunitiesForCompany(companyId) {
         preview_estimated_price,
         passenger_confirm_status,
         passenger_confirmed_at,
+        closed_at,
         booking_request_id
       )
     `
