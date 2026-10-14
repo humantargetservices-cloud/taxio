@@ -762,19 +762,18 @@ export async function mountBookCompany(root, slug) {
               </dl>
             </div>
 
-            <div class="mt-5">
-              <label for="bk-complete-name" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.pickupNameLabel || 'Name for pickup')}</label>
-              <input id="bk-complete-name" type="text" autocomplete="name" maxlength="80" placeholder="${escapeHtml(tb.pickupNamePlaceholder || 'Adrien')}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
-              <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">${escapeHtml(tb.pickupNameHint || 'The driver will use this name to identify the passenger.')}</p>
+            <div class="mt-5 flex flex-col gap-3 min-[360px]:flex-row min-[360px]:items-end min-[360px]:gap-2.5">
+              <div class="min-w-0 min-[360px]:basis-[40%] min-[360px]:grow-0 min-[360px]:shrink-0">
+                <label for="bk-complete-name" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.pickupNameLabel || 'Name')}</label>
+                <input id="bk-complete-name" type="text" autocomplete="name" maxlength="80" placeholder="${escapeHtml(tb.pickupNamePlaceholder || 'Adrien')}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              </div>
+              <div class="min-w-0 min-[360px]:basis-[60%] min-[360px]:min-w-0 min-[360px]:grow">
+                <label for="bk-complete-phone" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.mobileNumberLabel || 'Phone')}</label>
+                <input id="bk-complete-phone" type="tel" autocomplete="tel" inputmode="tel" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              </div>
             </div>
 
-            <div class="mt-5">
-              <label for="bk-complete-phone" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.mobileNumberLabel || 'Mobile number')}</label>
-              <input id="bk-complete-phone" type="tel" autocomplete="tel" inputmode="tel" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
-              <p class="mt-1.5 text-xs text-slate-500 dark:text-slate-400">${escapeHtml(tb.mobileNumberHint || 'Used for this booking and taxi updates.')}</p>
-            </div>
-
-            <p class="mt-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">${escapeHtml(tb.contactPrivacyNote || 'Your contact details are shared only with the taxi company handling your trip.')}</p>
+            <p class="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">${escapeHtml(tb.contactPrivacyNote || 'Contact details are used only for this booking.')}</p>
 
             <button type="button" id="bk-continue-trip" class="mt-5 flex h-12 w-full items-center justify-center rounded-2xl bg-amber-400 px-4 text-sm font-black tracking-wide text-slate-900 shadow-sm transition hover:bg-amber-300">
               ${escapeHtml(tb.confirmBookingCta || 'CONFIRM BOOKING')}

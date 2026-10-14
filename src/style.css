@@ -11,10 +11,11 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Booking review popup — intl-tel-input */
+/* Booking review popup — intl-tel-input (compact row with Name) */
 .bk-iti.iti {
   width: 100%;
   display: block;
+  margin-top: 0.5rem;
 }
 .bk-iti .iti__tel-input {
   width: 100%;
