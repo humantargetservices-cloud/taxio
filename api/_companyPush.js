@@ -2,6 +2,7 @@
  * Shared helpers for company Web Push (subscribe + dispatch).
  * VAPID private key and webhook secret never leave the server.
  */
+import { timingSafeEqual } from 'node:crypto'
 import webpush from 'web-push'
 import { createClient } from '@supabase/supabase-js'
 import { makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'
@@ -51,9 +52,13 @@ export function secretsEqual(a, b) {
   const x = String(a || '')
   const y = String(b || '')
   if (!x || !y || x.length !== y.length) return false
-  let out = 0
-  for (let i = 0; i < x.length; i++) out |= x.charCodeAt(i) ^ y.charCodeAt(i)
-  return out === 0
+  try {
+    return timingSafeEqual(Buffer.from(x, 'utf8'), Buffer.from(y, 'utf8'))
+  } catch {
+    let out = 0
+    for (let i = 0; i < x.length; i++) out |= x.charCodeAt(i) ^ y.charCodeAt(i)
+    return out === 0
+  }
 }
 
 export function extractBearerToken(req) {
@@ -61,6 +66,12 @@ export function extractBearerToken(req) {
   return String(authHeader).replace(/^Bearer\s+/i, '').trim()
 }
 
+/**
+ * Webhook / manual dispatch secret.
+ * Preferred header: x-taxio-push-secret
+ * Fallback: Authorization Bearer (manual staging scripts only).
+ * Never accepted from URL query parameters.
+ */
 export function extractPushWebhookSecret(req) {
   const hdr =
     req.headers?.['x-taxio-push-secret'] ||
@@ -69,6 +80,36 @@ export function extractPushWebhookSecret(req) {
   const fromHeader = String(hdr || '').trim()
   if (fromHeader) return fromHeader
   return extractBearerToken(req)
+}
+
+/**
+ * Resolve outbox lookup keys from manual body OR Supabase Database Webhook envelope.
+ * Does not trust company_id / event_type from the payload for dispatch.
+ *
+ * Supported shapes:
+ * - { outbox_id } / { dedupe_key }
+ * - { record: { id, dedupe_key } }  (Supabase DB webhook INSERT)
+ * - { payload: { record: { id, dedupe_key } } }
+ * - { type, table, record } (full webhook envelope)
+ *
+ * @returns {{ outboxId: string, dedupeKey: string }}
+ */
+export function resolveOutboxLookupFromBody(body) {
+  const b = body && typeof body === 'object' ? body : {}
+  const record =
+    (b.record && typeof b.record === 'object' ? b.record : null) ||
+    (b.payload?.record && typeof b.payload.record === 'object' ? b.payload.record : null) ||
+    (b.data?.record && typeof b.data.record === 'object' ? b.data.record : null) ||
+    null
+
+  const outboxId = String(
+    b.outbox_id || b.outboxId || record?.id || (record ? '' : b.id) || ''
+  ).trim()
+  const dedupeKey = String(
+    b.dedupe_key || b.dedupeKey || record?.dedupe_key || record?.dedupeKey || ''
+  ).trim()
+
+  return { outboxId, dedupeKey }
 }
 
 export function makeUserClient(token) {

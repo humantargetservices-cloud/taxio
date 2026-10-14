@@ -1,7 +1,18 @@
 /**
  * POST /api/company-push-dispatch
  * Server-to-server only. Protected by COMPANY_PUSH_WEBHOOK_SECRET.
- * Dispatches one company_push_outbox row via Web Push (VAPID).
+ *
+ * Auth header (required):
+ *   x-taxio-push-secret: <COMPANY_PUSH_WEBHOOK_SECRET>
+ * Fallback for manual scripts:
+ *   Authorization: Bearer <COMPANY_PUSH_WEBHOOK_SECRET>
+ * Secret is NEVER accepted from URL query parameters.
+ *
+ * Accepts:
+ * - Manual: { outbox_id } | { dedupe_key }
+ * - Supabase Database Webhook INSERT envelope with record.id / record.dedupe_key
+ *
+ * Always reloads the authoritative outbox row from DB (does not trust webhook event fields).
  */
 import { json, makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'
 import {
@@ -11,10 +22,14 @@ import {
   getCompanyPushWebhookSecret,
   isGonePushError,
   loadSafePushContext,
+  resolveOutboxLookupFromBody,
   secretsEqual,
   sendWebPushToSubscription,
   validateVapidEnv,
 } from './_companyPush.js'
+
+/** Reclaim a stuck PROCESSING row after this age (ms). */
+const STALE_PROCESSING_MS = 2 * 60 * 1000
 
 function cors(req, res) {
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*')
@@ -25,6 +40,27 @@ function cors(req, res) {
   )
 }
 
+function rejectQuerySecret(req) {
+  try {
+    const url = new URL(req.url || '/', 'http://local')
+    if (url.searchParams.has('secret') || url.searchParams.has('token')) return true
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
+function isRetryableStatus(status) {
+  return status === 'PENDING' || status === 'FAILED'
+}
+
+function isStaleProcessing(row) {
+  if (row?.status !== 'PROCESSING') return false
+  const t = row.processing_at ? new Date(row.processing_at).getTime() : 0
+  if (!t) return true
+  return Date.now() - t > STALE_PROCESSING_MS
+}
+
 export default async function handler(req, res) {
   cors(req, res)
   if (req.method === 'OPTIONS') {
@@ -33,6 +69,13 @@ export default async function handler(req, res) {
     return res.end()
   }
   if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' })
+
+  if (rejectQuerySecret(req)) {
+    return json(res, 400, {
+      error: 'Secret must not be passed in the URL.',
+      code: 'SECRET_IN_QUERY_FORBIDDEN',
+    })
+  }
 
   const expected = getCompanyPushWebhookSecret()
   if (!expected) {
@@ -54,11 +97,10 @@ export default async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}
-    const outboxId = String(body.outbox_id || body.outboxId || body.id || '').trim()
-    const dedupeKey = String(body.dedupe_key || body.dedupeKey || '').trim()
+    const { outboxId, dedupeKey } = resolveOutboxLookupFromBody(body)
     if (!outboxId && !dedupeKey) {
       return json(res, 400, {
-        error: 'outbox_id or dedupe_key is required.',
+        error: 'outbox_id, dedupe_key, or webhook record.id/dedupe_key is required.',
         code: 'INVALID_INPUT',
       })
     }
@@ -68,12 +110,15 @@ export default async function handler(req, res) {
     if (outboxId) q = q.eq('id', outboxId)
     else q = q.eq('dedupe_key', dedupeKey)
 
-    const { data: outbox, error: loadErr } = await q.maybeSingle()
+    const { data: loaded, error: loadErr } = await q.maybeSingle()
     if (loadErr) {
       console.error('[company-push-dispatch:load]', loadErr.message)
       return json(res, 500, { error: 'Could not load outbox.', code: 'DB_ERROR' })
     }
-    if (!outbox) return json(res, 404, { error: 'Outbox event not found.', code: 'NOT_FOUND' })
+    if (!loaded) return json(res, 404, { error: 'Outbox event not found.', code: 'NOT_FOUND' })
+
+    // Authoritative row from DB — ignore webhook company_id / event_type for targeting
+    let outbox = loaded
 
     if (outbox.status === 'SENT') {
       return json(res, 200, {
@@ -84,16 +129,70 @@ export default async function handler(req, res) {
       })
     }
 
-    await admin
+    if (outbox.status === 'PROCESSING' && !isStaleProcessing(outbox)) {
+      return json(res, 200, {
+        ok: true,
+        code: 'ALREADY_PROCESSING',
+        outbox_id: outbox.id,
+      })
+    }
+
+    if (!isRetryableStatus(outbox.status) && !isStaleProcessing(outbox)) {
+      return json(res, 200, {
+        ok: false,
+        code: 'NOT_DISPATCHABLE',
+        outbox_id: outbox.id,
+        status: outbox.status,
+      })
+    }
+
+    // Claim processing (idempotent under concurrent webhook retries)
+    const claimFilterStatuses = isStaleProcessing(outbox)
+      ? ['PENDING', 'FAILED', 'PROCESSING']
+      : ['PENDING', 'FAILED']
+
+    const { data: claimed, error: claimErr } = await admin
       .from('company_push_outbox')
       .update({
         status: 'PROCESSING',
         processing_at: new Date().toISOString(),
         attempt_count: Number(outbox.attempt_count || 0) + 1,
+        last_error: null,
       })
       .eq('id', outbox.id)
+      .in('status', claimFilterStatuses)
+      .select('*')
+      .maybeSingle()
 
+    if (claimErr) {
+      console.error('[company-push-dispatch:claim]', claimErr.message)
+      return json(res, 500, { error: 'Could not claim outbox.', code: 'DB_ERROR' })
+    }
+
+    if (!claimed) {
+      const { data: again } = await admin
+        .from('company_push_outbox')
+        .select('*')
+        .eq('id', outbox.id)
+        .maybeSingle()
+      if (again?.status === 'SENT') {
+        return json(res, 200, {
+          ok: true,
+          code: 'ALREADY_SENT',
+          outbox_id: outbox.id,
+          sent: true,
+        })
+      }
+      return json(res, 200, {
+        ok: true,
+        code: 'ALREADY_PROCESSING',
+        outbox_id: outbox.id,
+      })
+    }
+
+    outbox = claimed
     const companyId = outbox.company_id
+
     const { data: subs, error: subErr } = await admin
       .from('company_push_subscriptions')
       .select('id, endpoint, p256dh, auth, enabled')
@@ -125,6 +224,7 @@ export default async function handler(req, res) {
         code: 'NO_SUBSCRIPTIONS',
         outbox_id: outbox.id,
         delivered: 0,
+        subscription_found: false,
       })
     }
 
@@ -138,7 +238,7 @@ export default async function handler(req, res) {
       event_type: outbox.event_type,
     }
 
-    // Hard guard: never ship passenger PII fields even if a future bug adds them
+    // Hard guard: never ship passenger PII fields
     delete payload.customer_phone
     delete payload.customer_name
     delete payload.passenger_phone
@@ -211,6 +311,7 @@ export default async function handler(req, res) {
         delivered,
         disabled,
         subscription_count: subs.length,
+        subscription_found: true,
       })
     }
 
@@ -229,6 +330,7 @@ export default async function handler(req, res) {
       outbox_id: outbox.id,
       delivered: 0,
       disabled,
+      subscription_found: true,
       error: failMsg,
     })
   } catch (err) {
