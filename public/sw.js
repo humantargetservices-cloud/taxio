@@ -1,6 +1,13 @@
-/** Minimal TAXIO service worker — installability only; no API or booking data caching. */
-const SHELL_CACHE = 'taxio-shell-v1'
-const PRECACHE_URLS = ['/', '/index.html', '/taxio-logo.png', '/manifest.webmanifest', '/pwa-fallback-icon.svg']
+/**
+ * TAXIO service worker — installability + offline shell fallback.
+ * Never caches /api/*, Supabase, or booking/Rescue/trip network authority.
+ *
+ * v2: network-first navigation (fresh HTML after deploy), versioned caches,
+ * hashed /assets/* cache-first (immutable filenames), purge taxio-shell-v1.
+ */
+const SHELL_CACHE = 'taxio-shell-v2'
+const ASSET_CACHE = 'taxio-assets-v2'
+const PRECACHE_URLS = ['/taxio-logo.png', '/manifest.webmanifest', '/pwa-fallback-icon.svg']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -17,45 +24,150 @@ self.addEventListener('activate', (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((key) => key !== SHELL_CACHE).map((key) => caches.delete(key)))
+        Promise.all(
+          keys
+            .filter((key) => key !== SHELL_CACHE && key !== ASSET_CACHE)
+            .map((key) => caches.delete(key))
+        )
       )
       .then(() => self.clients.claim())
   )
 })
+
+function isApiOrBackend(url) {
+  if (url.pathname.startsWith('/api')) return true
+  if (/supabase/i.test(url.hostname)) return true
+  return false
+}
+
+function isNavigationRequest(request) {
+  return request.mode === 'navigate' || request.destination === 'document'
+}
+
+function isHashedViteAsset(url) {
+  // Vite content-hashed bundles under /assets/
+  return url.pathname.startsWith('/assets/')
+}
+
+function isSameOriginStatic(url, request) {
+  if (url.origin !== self.location.origin) return false
+  if (isHashedViteAsset(url)) return true
+  return (
+    /\.(png|jpg|jpeg|webp|svg|ico|css|js|webmanifest)$/i.test(url.pathname) ||
+    url.pathname === '/manifest.webmanifest' ||
+    url.pathname === '/taxio-logo.png' ||
+    url.pathname === '/pwa-fallback-icon.svg'
+  )
+}
+
+/** Network-first HTML: always prefer live deploy; update shell fallback. */
+async function networkFirstNavigation(request) {
+  try {
+    const response = await fetch(request)
+    if (response && response.ok) {
+      const cache = await caches.open(SHELL_CACHE)
+      // Keep offline fallback in sync with latest deployed HTML
+      try {
+        await cache.put('/index.html', response.clone())
+      } catch {
+        /* ignore quota / opaque */
+      }
+    }
+    return response
+  } catch {
+    const cached =
+      (await caches.match('/index.html')) ||
+      (await caches.match(request)) ||
+      (await caches.match('/'))
+    if (cached) return cached
+    return new Response('TAXIO is offline. Please reconnect and try again.', {
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    })
+  }
+}
+
+/** Cache-first for content-hashed /assets/* only. */
+async function cacheFirstHashedAsset(request) {
+  const cached = await caches.match(request)
+  if (cached) return cached
+  const response = await fetch(request)
+  if (response && response.ok && response.type === 'basic') {
+    const cache = await caches.open(ASSET_CACHE)
+    try {
+      await cache.put(request, response.clone())
+    } catch {
+      /* ignore */
+    }
+  }
+  return response
+}
+
+/** Network-first for other same-origin static (icons, manifest, non-hashed). */
+async function networkFirstStatic(request) {
+  try {
+    const response = await fetch(request)
+    if (response && response.ok && response.type === 'basic') {
+      const cache = await caches.open(SHELL_CACHE)
+      try {
+        await cache.put(request, response.clone())
+      } catch {
+        /* ignore */
+      }
+    }
+    return response
+  } catch {
+    const cached = await caches.match(request)
+    if (cached) return cached
+    throw new Error('offline')
+  }
+}
 
 self.addEventListener('fetch', (event) => {
   const { request } = event
   if (request.method !== 'GET') return
 
   const url = new URL(request.url)
-  // Never cache API manifests (/api/company-manifest), booking data, or Supabase.
-  if (url.pathname.startsWith('/api')) return
-  if (/supabase/i.test(url.hostname)) return
 
-  if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(() => caches.match('/index.html')))
+  // Network authority only — never SW-cache APIs / backends
+  if (isApiOrBackend(url)) return
+
+  if (isNavigationRequest(request)) {
+    event.respondWith(networkFirstNavigation(request))
     return
   }
 
-  const sameOrigin = url.origin === self.location.origin
-  const staticAsset =
-    sameOrigin &&
-    (/\.(png|jpg|jpeg|webp|svg|ico|css|js|webmanifest)$/i.test(url.pathname) ||
-      url.pathname.startsWith('/assets/'))
+  // Do not cache-first HTML / index outside navigate (e.g. fetch of index.html)
+  if (url.origin === self.location.origin) {
+    if (
+      url.pathname === '/' ||
+      url.pathname === '/index.html' ||
+      url.pathname.endsWith('.html')
+    ) {
+      event.respondWith(networkFirstNavigation(request))
+      return
+    }
+  }
 
-  if (!staticAsset) return
+  if (isHashedViteAsset(url)) {
+    event.respondWith(cacheFirstHashedAsset(request))
+    return
+  }
 
-  event.respondWith(
-    caches.match(request).then(
-      (cached) =>
-        cached ||
-        fetch(request).then((response) => {
-          if (response.ok && response.type === 'basic') {
-            const copy = response.clone()
-            caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy))
-          }
-          return response
-        })
+  if (isSameOriginStatic(url, request)) {
+    event.respondWith(
+      networkFirstStatic(request).catch(
+        () =>
+          caches.match(request).then(
+            (c) =>
+              c ||
+              new Response('', {
+                status: 504,
+                statusText: 'Gateway Timeout',
+              })
+          )
+      )
     )
-  )
+  }
 })
