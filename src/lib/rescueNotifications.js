@@ -20,6 +20,7 @@ import {
   stopRescueLiveUpdates,
 } from './rescue.js'
 import {
+  findWonRescueById,
   overlayRemaining,
   pickOpenOpportunity,
   pickPendingDecisionBooking,
@@ -50,11 +51,53 @@ let refreshInflight = false
 const winnerDetailsCache = new Map()
 /** Rescue id we just accepted — keeps winner panel alive if opportunity list lags. */
 let trackedWinnerRescueId = ''
+/**
+ * Session-scoped: rescue we observed while WAITING this session.
+ * Terminal CONFIRMED/CANCELLED overlays only follow this id (never historical reopen).
+ */
+let liveWinnerRescueId = ''
 /** If a refresh was requested while one is in flight, run again after. */
 let refreshQueued = false
 
 function td() {
   return tDashboard(getLocale())
+}
+
+function dismissedWinnerStorageKey(companyId) {
+  return `taxio_rescue_dismissed_winners_${companyId}`
+}
+
+function loadDismissedWinnerIds(companyId) {
+  if (!companyId || typeof localStorage === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(dismissedWinnerStorageKey(companyId))
+    const arr = JSON.parse(raw || '[]')
+    if (!Array.isArray(arr)) return []
+    return arr.filter((x) => typeof x === 'string' && x).slice(-80)
+  } catch {
+    return []
+  }
+}
+
+function saveDismissedWinnerIds(companyId, ids) {
+  if (!companyId || typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(
+      dismissedWinnerStorageKey(companyId),
+      JSON.stringify((ids || []).filter((x) => typeof x === 'string' && x).slice(-80))
+    )
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function clearDismissedWinnerIds(companyId) {
+  if (!companyId || typeof localStorage === 'undefined') return
+  try {
+    localStorage.removeItem(dismissedWinnerStorageKey(companyId))
+  } catch {
+    /* ignore */
+  }
 }
 
 function queueRefresh() {
@@ -128,8 +171,12 @@ function bindHandlers(ctx) {
   portal.querySelectorAll('[data-mvp-dismiss-winner]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-mvp-dismiss-winner')
-      if (id && !dismissedWinnerIds.includes(id)) dismissedWinnerIds = [...dismissedWinnerIds, id]
+      if (id && !dismissedWinnerIds.includes(id)) {
+        dismissedWinnerIds = [...dismissedWinnerIds, id]
+        if (session?.companyId) saveDismissedWinnerIds(session.companyId, dismissedWinnerIds)
+      }
       if (id && trackedWinnerRescueId === id) trackedWinnerRescueId = ''
+      if (id && liveWinnerRescueId === id) liveWinnerRescueId = ''
       if (id) winnerDetailsCache.delete(id)
       lastSig = ''
       queueRefresh()
@@ -271,6 +318,7 @@ function bindHandlers(ctx) {
         ).trim()
         if (acceptedId) {
           trackedWinnerRescueId = acceptedId
+          liveWinnerRescueId = acceptedId
           winnerDetailsCache.delete(acceptedId)
         }
         showFlash(copy.rescueReservedBadge || 'Trip reserved for you')
@@ -365,23 +413,24 @@ async function refreshNotifications() {
 
     const pendingDecision = pickPendingDecisionBooking(bookings, dismissedIds)
     const openOpp = pickOpenOpportunity(opportunities)
-    let won = pickWonRescue(opportunities, companyId)
 
-    // Keep tracking the rescue we just accepted even if opportunity list briefly lags.
-    if (!won && trackedWinnerRescueId) {
-      const tracked = (opportunities || []).find(
-        (o) =>
-          (o.rescue_request_id === trackedWinnerRescueId || o.rescue?.id === trackedWinnerRescueId) &&
-          o.rescue?.accepted_by_company_id === companyId
-      )
-      if (tracked) won = tracked
-      else {
+    // Active alert: WAITING only. Never auto-pick historical CONFIRMED/CANCELLED on reopen.
+    let won = pickWonRescue(opportunities, companyId, { actionableOnly: true })
+
+    // In-session follow-through: after Accept / while WAITING this session, allow that id
+    // even if list lags — and keep it for CONFIRMED/CANCELLED until dismiss.
+    const followId = liveWinnerRescueId || trackedWinnerRescueId
+    if (!won && followId) {
+      const tracked = findWonRescueById(opportunities, companyId, followId)
+      if (tracked) {
+        won = tracked
+      } else if (trackedWinnerRescueId === followId || liveWinnerRescueId === followId) {
         won = {
-          rescue_request_id: trackedWinnerRescueId,
+          rescue_request_id: followId,
           status: 'ACCEPTED',
           company_id: companyId,
           rescue: {
-            id: trackedWinnerRescueId,
+            id: followId,
             status: 'ACCEPTED',
             accepted_by_company_id: companyId,
             passenger_confirm_status: 'WAITING_PASSENGER_CONFIRMATION',
@@ -391,8 +440,7 @@ async function refreshNotifications() {
     }
 
     let pcs = won?.rescue?.passenger_confirm_status || ''
-    const wonId = won?.rescue_request_id || won?.rescue?.id || trackedWinnerRescueId || ''
-    if (wonId) trackedWinnerRescueId = wonId
+    const wonId = won?.rescue_request_id || won?.rescue?.id || ''
     const winnerDismissed = wonId && dismissedWinnerIds.includes(wonId)
 
     let winnerPhase = null
@@ -401,13 +449,31 @@ async function refreshNotifications() {
       const resolved = await resolveWinnerConfirmState(wonId, pcs)
       pcs = resolved.pcs
       winnerDetails = resolved.winnerDetails
-      winnerPhase = resolved.winnerPhase
-      // Keep opportunity embed in sync for panel preview labels
       if (won.rescue && pcs) won.rescue.passenger_confirm_status = pcs
+
+      if (pcs === 'WAITING_PASSENGER_CONFIRMATION') {
+        liveWinnerRescueId = wonId
+        trackedWinnerRescueId = wonId
+        winnerPhase = 'waiting'
+      } else if (
+        (pcs === 'CONFIRMED' || pcs === 'CANCELLED_BY_PASSENGER') &&
+        liveWinnerRescueId === wonId
+      ) {
+        // Terminal overlay only for rescues observed live this session — not PWA reopen history.
+        winnerPhase = pcs === 'CONFIRMED' ? 'confirmed' : 'cancelled'
+        trackedWinnerRescueId = ''
+      } else {
+        // Historical terminal (e.g. Oct 12 CONFIRMED) — do not surface as operational alert.
+        winnerPhase = null
+        winnerDetails = null
+        if (trackedWinnerRescueId === wonId) trackedWinnerRescueId = ''
+        if (liveWinnerRescueId === wonId) liveWinnerRescueId = ''
+        winnerDetailsCache.delete(wonId)
+      }
     }
 
     // Drop stale PII cache when status leaves WAITING (confirm/cancel via WhatsApp/browser).
-    if (wonId && pcs && pcs !== 'WAITING_PASSENGER_CONFIRMATION') {
+    if (wonId && pcs && pcs !== 'WAITING_PASSENGER_CONFIRMATION' && liveWinnerRescueId === wonId) {
       const cached = winnerDetailsCache.get(wonId)
       if (cached && cached.passenger_confirm_status && cached.passenger_confirm_status !== pcs) {
         winnerDetailsCache.delete(wonId)
@@ -526,6 +592,10 @@ export function startRescueNotifications({ companyId, accessToken, companyName }
   stopRescueNotifications()
   const portal = ensurePortal()
   session = { companyId, accessToken, companyName: companyName || '', portal }
+  dismissedIds = []
+  dismissedWinnerIds = loadDismissedWinnerIds(companyId)
+  liveWinnerRescueId = ''
+  trackedWinnerRescueId = ''
   lastSig = ''
   queueRefresh()
   // 4s poll is authoritative fallback — realtime may not deliver passenger_confirm updates
@@ -540,6 +610,7 @@ export function startRescueNotifications({ companyId, accessToken, companyName }
 }
 
 export function stopRescueNotifications() {
+  const previousCompanyId = session?.companyId || ''
   stopRescueLiveUpdates()
   stopCountdown()
   if (flashTimer) {
@@ -550,6 +621,10 @@ export function stopRescueNotifications() {
   lastSig = ''
   session = null
   trackedWinnerRescueId = ''
+  liveWinnerRescueId = ''
+  dismissedIds = []
+  dismissedWinnerIds = []
+  if (previousCompanyId) clearDismissedWinnerIds(previousCompanyId)
   refreshQueued = false
   winnerDetailsCache.clear()
   const portal = document.getElementById('rescue-notification-root')

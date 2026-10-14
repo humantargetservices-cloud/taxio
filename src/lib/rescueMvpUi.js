@@ -106,14 +106,23 @@ export function overlayRemaining(deadlineIso, fallbackSec) {
  * Most recent Rescue this company won (ACCEPTED opportunity + ACCEPTED request).
  * company_id on the opportunity row is preferred but optional — list queries are
  * already scoped with .eq('company_id', companyId); accepted_by is authoritative.
+ *
+ * @param {object[]} opportunities
+ * @param {string} companyId
+ * @param {{ actionableOnly?: boolean }} [opts]
+ *   actionableOnly: only WAITING_PASSENGER_CONFIRMATION (no historical CONFIRMED/CANCELLED)
  */
-export function pickWonRescue(opportunities, companyId) {
+export function pickWonRescue(opportunities, companyId, opts = {}) {
+  const actionableOnly = opts.actionableOnly === true
   const mine = (opportunities || []).filter((o) => {
     if (o.status !== 'ACCEPTED') return false
     if (o.rescue?.status !== 'ACCEPTED') return false
     if (o.rescue?.accepted_by_company_id !== companyId) return false
     // If company_id was selected, require it; if omitted (older clients), trust scope + accepted_by.
     if (o.company_id != null && o.company_id !== companyId) return false
+    if (actionableOnly) {
+      return o.rescue?.passenger_confirm_status === 'WAITING_PASSENGER_CONFIRMATION'
+    }
     return true
   })
   mine.sort((a, b) => {
@@ -122,6 +131,21 @@ export function pickWonRescue(opportunities, companyId) {
     return tb - ta
   })
   return mine[0] || null
+}
+
+/** Find a specific won rescue by id (any passenger_confirm_status). */
+export function findWonRescueById(opportunities, companyId, rescueRequestId) {
+  const id = String(rescueRequestId || '').trim()
+  if (!id) return null
+  return (
+    (opportunities || []).find(
+      (o) =>
+        (o.rescue_request_id === id || o.rescue?.id === id) &&
+        o.status === 'ACCEPTED' &&
+        o.rescue?.status === 'ACCEPTED' &&
+        o.rescue?.accepted_by_company_id === companyId
+    ) || null
+  )
 }
 
 /** Non-blocking winner panel: waiting / confirmed / cancelled. */
