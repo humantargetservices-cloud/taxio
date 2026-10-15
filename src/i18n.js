@@ -541,7 +541,9 @@ export const translations = {
       taximeterNote:
         'Final fare may depend on route, waiting time, traffic, or taximeter.',
       estimateSelectHint:
-        'Select pickup and destination from the address suggestions to see an estimated price.',
+        'Enter pickup and destination to see an estimated price. Selecting a suggestion is preferred.',
+      estimateAddressUnconfirmed:
+        "We couldn't confirm this address. Please select the correct address from the suggestions.",
       estimateUnavailable:
         'Price estimate is not available for this route. You can still send the request by WhatsApp.',
       acceptRiderLead: 'I agree to the ',
@@ -1350,7 +1352,9 @@ export const translations = {
       taximeterNote:
         'Le prix final peut dépendre de l’itinéraire, du temps d’attente, de la circulation ou du taximètre.',
       estimateSelectHint:
-        'Sélectionnez l’adresse de prise en charge et la destination dans les suggestions pour voir un prix estimé.',
+        'Indiquez le départ et la destination pour voir un prix estimé. Sélectionner une suggestion est préférable.',
+      estimateAddressUnconfirmed:
+        'Nous n’avons pas pu confirmer cette adresse. Veuillez sélectionner la bonne adresse dans les suggestions.',
       estimateUnavailable:
         'L’estimation du prix n’est pas disponible pour ce trajet. Vous pouvez quand même envoyer la demande via WhatsApp.',
       acceptRiderLead: "J'accepte les ",
@@ -2160,7 +2164,9 @@ export const translations = {
       taximeterNote:
         'Definitieve prijs kan afhangen van route, wachttijd, verkeer of taximeter.',
       estimateSelectHint:
-        'Selecteer ophaaladres en bestemming uit de adresvoorstellen om een geschatte prijs te zien.',
+        'Vul ophaaladres en bestemming in om een geschatte prijs te zien. Een voorstel selecteren heeft de voorkeur.',
+      estimateAddressUnconfirmed:
+        'We konden dit adres niet bevestigen. Selecteer het juiste adres uit de voorstellen.',
       estimateUnavailable:
         'Prijsinschatting is niet beschikbaar voor deze route. U kunt de aanvraag nog steeds via WhatsApp verzenden.',
       acceptRiderLead: 'Ik ga akkoord met de ',

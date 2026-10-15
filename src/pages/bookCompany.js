@@ -366,6 +366,165 @@ function reverseGeocodeLatLng(lat, lng) {
   })
 }
 
+/** Session geocode cache — same typed text reuses one Google Geocoder result. */
+const typedAddressGeocodeCache = new Map()
+
+const BROAD_GEOCODE_TYPES = new Set([
+  'country',
+  'continent',
+  'administrative_area_level_1',
+  'administrative_area_level_2',
+  'administrative_area_level_3',
+  'locality',
+  'political',
+  'colloquial_area',
+])
+
+function geocodeHasComponent(result, type) {
+  return (result?.address_components || []).some((c) => (c.types || []).includes(type))
+}
+
+/**
+ * Accept only precise street-level (or similar) geocode results — never country/city alone.
+ * If the passenger typed a number, prefer a result that includes street_number.
+ */
+function isUsableStreetGeocodeResult(result, typedQuery) {
+  if (!result?.geometry?.location) return false
+  const formatted = String(result.formatted_address || '').trim()
+  if (formatted.length < 5) return false
+
+  const types = Array.isArray(result.types) ? result.types : []
+  if (types.length && types.every((t) => BROAD_GEOCODE_TYPES.has(t))) return false
+
+  const preciseType = types.some((t) =>
+    ['street_address', 'premise', 'subpremise', 'establishment', 'point_of_interest', 'intersection'].includes(
+      t
+    )
+  )
+  const hasRoute = geocodeHasComponent(result, 'route')
+  const hasStreetNumber = geocodeHasComponent(result, 'street_number')
+  const hasLocality =
+    geocodeHasComponent(result, 'locality') ||
+    geocodeHasComponent(result, 'postal_town') ||
+    geocodeHasComponent(result, 'sublocality') ||
+    geocodeHasComponent(result, 'postal_code')
+
+  if (!preciseType && !hasRoute) return false
+  if (!hasLocality && !preciseType) return false
+
+  const typed = String(typedQuery || '')
+  if (/\d/.test(typed) && !hasStreetNumber && !preciseType) return false
+
+  return true
+}
+
+function readGeocodeLatLng(result) {
+  const loc = result?.geometry?.location
+  if (!loc) return { lat: null, lng: null }
+  const lat = typeof loc.lat === 'function' ? loc.lat() : Number(loc.lat)
+  const lng = typeof loc.lng === 'function' ? loc.lng() : Number(loc.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { lat: null, lng: null }
+  return { lat, lng }
+}
+
+/**
+ * Forward-geocode typed address text (autocomplete fallback).
+ * @returns {Promise<{ ok: true, formattedAddress: string, lat: number, lng: number, placeId: string|null } | { ok: false, code: string }>}
+ */
+async function geocodeTypedAddress(query) {
+  const q = String(query || '').trim()
+  if (q.length < 5) return { ok: false, code: 'TOO_SHORT' }
+
+  const key = q.toLowerCase()
+  if (typedAddressGeocodeCache.has(key)) {
+    return typedAddressGeocodeCache.get(key)
+  }
+
+  const pending = (async () => {
+    try {
+      await loadGoogleMapsPlaces()
+    } catch {
+      return { ok: false, code: 'MAPS_UNAVAILABLE' }
+    }
+    const g = window.google?.maps
+    if (!g?.Geocoder) return { ok: false, code: 'NO_GEOCODER' }
+
+    return new Promise((resolve) => {
+      const geocoder = new g.Geocoder()
+      // region bias (Belgium TAXIO) — not a hard country lock
+      geocoder.geocode({ address: q, region: 'be' }, (results, status) => {
+        if (status !== g.GeocoderStatus.OK || !results?.length) {
+          resolve({ ok: false, code: status === 'ZERO_RESULTS' ? 'NOT_FOUND' : 'GEOCODE_FAILED' })
+          return
+        }
+        const match = results.find((r) => isUsableStreetGeocodeResult(r, q))
+        if (!match) {
+          resolve({ ok: false, code: 'AMBIGUOUS' })
+          return
+        }
+        const { lat, lng } = readGeocodeLatLng(match)
+        if (lat == null || lng == null) {
+          resolve({ ok: false, code: 'NO_COORDS' })
+          return
+        }
+        resolve({
+          ok: true,
+          formattedAddress: String(match.formatted_address || q).trim(),
+          lat,
+          lng,
+          placeId: match.place_id ? String(match.place_id) : null,
+        })
+      })
+    })
+  })()
+
+  typedAddressGeocodeCache.set(key, pending)
+  try {
+    const result = await pending
+    typedAddressGeocodeCache.set(key, Promise.resolve(result))
+    return result
+  } catch (err) {
+    typedAddressGeocodeCache.delete(key)
+    return { ok: false, code: 'NETWORK', error: err?.message || String(err) }
+  }
+}
+
+/**
+ * Ensure a booking address field has lat/lng: reuse confirmed place, else geocode typed text.
+ * Does not call onUpdate (caller controls estimate refresh).
+ */
+async function ensureBookingFieldResolved(inputEl, state) {
+  const text = String(inputEl?.value || '').trim()
+  if (!text) return { ok: false, code: 'EMPTY' }
+
+  if (
+    typeof state?.committed === 'string' &&
+    state.committed.length > 0 &&
+    text === state.committed &&
+    Number.isFinite(state.lat) &&
+    Number.isFinite(state.lng)
+  ) {
+    return { ok: true, reused: true }
+  }
+
+  const geo = await geocodeTypedAddress(text)
+  if (!geo.ok) return geo
+
+  const committed = commitBookingFieldPlace({
+    inputEl,
+    state,
+    formattedAddress: geo.formattedAddress,
+    lat: geo.lat,
+    lng: geo.lng,
+    placeId: geo.placeId,
+    onUpdate: null,
+  })
+  if (!committed || !Number.isFinite(state.lat) || !Number.isFinite(state.lng)) {
+    return { ok: false, code: 'COMMIT_FAILED' }
+  }
+  return { ok: true, reused: false }
+}
+
 function digitsOnly(phone) {
   return String(phone || '').replace(/\D/g, '')
 }
@@ -1341,13 +1500,35 @@ Estimate price: ${estimatePrice}${refLine}`
   function bookingFieldHasConfirmedPlace(state, inputEl) {
     const v = String(inputEl?.value || '').trim()
     const c = state?.committed
-    return typeof c === 'string' && c.length > 0 && v === c
+    return (
+      typeof c === 'string' &&
+      c.length > 0 &&
+      v === c &&
+      Number.isFinite(state?.lat) &&
+      Number.isFinite(state?.lng)
+    )
+  }
+
+  function bothAddressesTyped() {
+    return !!pickupEl.value.trim() && !!dropEl.value.trim()
+  }
+
+  function setEstimateHintMessage(text) {
+    if (!estHint) return
+    const t = String(text || '').trim()
+    if (!t) {
+      estHint.classList.add('hidden')
+      estHint.classList.remove('flex')
+      return
+    }
+    estHint.textContent = t
+    estHint.classList.remove('hidden')
+    estHint.classList.add('flex')
   }
 
   function syncEstimateDisplay() {
     if (isHourlyMode()) {
-      estHint?.classList.add('hidden')
-      estHint?.classList.remove('flex')
+      setEstimateHintMessage('')
       estUnavail?.classList.add('hidden')
       estUnavail?.classList.remove('flex')
       estWrap?.classList.add('hidden')
@@ -1359,36 +1540,37 @@ Estimate price: ${estimatePrice}${refLine}`
     const doText = dropEl.value.trim()
     const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
     const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
+    const msgs = tBooking(getLocale())
 
     estUnavail?.classList.add('hidden')
     estUnavail?.classList.remove('flex')
 
     if (!puText && !doText) {
-      estHint?.classList.add('hidden')
-      estHint?.classList.remove('flex')
+      setEstimateHintMessage('')
       estWrap?.classList.add('hidden')
       latestEstimate = null
       return
     }
 
     if (!puText || !doText) {
-      estHint?.classList.add('hidden')
-      estHint?.classList.remove('flex')
+      setEstimateHintMessage('')
       estWrap?.classList.add('hidden')
       latestEstimate = null
       return
     }
 
     if (!pickupOk || !dropoffOk) {
-      estHint?.classList.remove('hidden')
-      estHint?.classList.add('flex')
+      // Typed text present — resolve runs on estimate; soft hint until confirmed
+      setEstimateHintMessage(
+        msgs.estimateSelectHint ||
+          'Enter pickup and destination to see an estimated price.'
+      )
       estWrap?.classList.add('hidden')
       latestEstimate = null
       return
     }
 
-    estHint?.classList.add('hidden')
-    estHint?.classList.remove('flex')
+    setEstimateHintMessage('')
   }
 
   function showEstimateUnavailable(reason, detail) {
@@ -1428,33 +1610,61 @@ Estimate price: ${estimatePrice}${refLine}`
   }
 
   async function refreshEstimate() {
-    syncEstimateDisplay()
-    if (isHourlyMode()) return
-
-    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
-    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
-    if (!pickupOk || !dropoffOk) return
-
-    const cacheKey = estimateCacheKey()
-    const cached = estimateSessionCache.get(cacheKey)
-    if (cached) {
-      applyEstimateToUi(cached)
+    if (isHourlyMode()) {
+      syncEstimateDisplay()
+      return
+    }
+    if (!bothAddressesTyped()) {
+      syncEstimateDisplay()
       return
     }
 
+    const msgs = tBooking(getLocale())
     const reqId = ++estimateRequestId
     estWrap?.classList.remove('hidden')
     estUnavail?.classList.add('hidden')
     estUnavail?.classList.remove('flex')
     estLoading?.classList.remove('hidden')
     estBody?.classList.add('hidden')
+    setEstimateHintMessage('')
 
-    const useCoords =
-      Number.isFinite(pickupPlacesState.lat) &&
-      Number.isFinite(pickupPlacesState.lng) &&
-      Number.isFinite(dropoffPlacesState.lat) &&
-      Number.isFinite(dropoffPlacesState.lng)
     try {
+      // Autocomplete selection preferred; typed text → Geocoder fallback (deduped)
+      const [pickupResolved, dropoffResolved] = await Promise.all([
+        ensureBookingFieldResolved(pickupEl, pickupPlacesState),
+        ensureBookingFieldResolved(dropEl, dropoffPlacesState),
+      ])
+      if (reqId !== estimateRequestId) return
+
+      if (!pickupResolved.ok || !dropoffResolved.ok) {
+        latestEstimate = null
+        estWrap?.classList.add('hidden')
+        estLoading?.classList.add('hidden')
+        setEstimateHintMessage(
+          msgs.estimateAddressUnconfirmed ||
+            "We couldn't confirm this address. Please select the correct address from the suggestions."
+        )
+        console.warn('[taxio-booking] Address resolve failed', {
+          pickup: pickupResolved.code,
+          dropoff: dropoffResolved.code,
+        })
+        return
+      }
+
+      syncEstimateDisplay()
+
+      const cacheKey = estimateCacheKey()
+      const cached = estimateSessionCache.get(cacheKey)
+      if (cached) {
+        applyEstimateToUi(cached)
+        return
+      }
+
+      const useCoords =
+        Number.isFinite(pickupPlacesState.lat) &&
+        Number.isFinite(pickupPlacesState.lng) &&
+        Number.isFinite(dropoffPlacesState.lat) &&
+        Number.isFinite(dropoffPlacesState.lng)
       if (!useCoords) {
         showEstimateUnavailable('missing_coordinates')
         return
@@ -1489,9 +1699,7 @@ Estimate price: ${estimatePrice}${refLine}`
 
   function queueEstimate() {
     if (isHourlyMode()) return
-    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
-    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
-    if (!pickupOk || !dropoffOk) return
+    if (!bothAddressesTyped()) return
     if (estimateTimer) window.clearTimeout(estimateTimer)
     estimateTimer = window.setTimeout(() => {
       estimateTimer = null
@@ -1504,9 +1712,7 @@ Estimate price: ${estimatePrice}${refLine}`
   function requestEstimateIfReady() {
     syncEstimateDisplay()
     if (isHourlyMode()) return
-    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
-    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
-    if (!pickupOk || !dropoffOk) {
+    if (!bothAddressesTyped()) {
       cancelPendingEstimate()
       return
     }
@@ -1609,11 +1815,13 @@ Estimate price: ${estimatePrice}${refLine}`
     const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
     const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
     if (!pickupOk || !dropoffOk) {
+      // Keep estimate cleared until resolve/geocode or autocomplete commit finishes
       cancelPendingEstimate()
       latestEstimate = null
     }
     syncEstimateDisplay()
-    if (pickupOk && dropoffOk && !isHourlyMode()) {
+    // Typed addresses (no dropdown pick) still queue estimate → geocode fallback inside refresh
+    if (bothAddressesTyped() && !isHourlyMode()) {
       queueEstimate()
     }
   }
@@ -1972,12 +2180,47 @@ Estimate price: ${estimatePrice}${refLine}`
     }
     // Opening completion must NOT start the 25s timer — draft prepare runs in background.
     if (!bookingContactGate(true)) return
-    showCompleteStep()
-    setChannelButtonsLocked(false)
-    void startDraftPrepare().catch((err) => {
-      console.warn('[createDraftBookingLog]', err?.message || err)
-      showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
-    })
+
+    const openReview = () => {
+      showCompleteStep()
+      setChannelButtonsLocked(false)
+      void startDraftPrepare().catch((err) => {
+        console.warn('[createDraftBookingLog]', err?.message || err)
+        showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
+      })
+    }
+
+    if (isHourlyMode()) {
+      openReview()
+      return
+    }
+
+    // Resolve typed pickup/destination (if needed) before review so estimate/price can show
+    void (async () => {
+      bookBtn.setAttribute('aria-disabled', 'true')
+      try {
+        const [pickupResolved, dropoffResolved] = await Promise.all([
+          ensureBookingFieldResolved(pickupEl, pickupPlacesState),
+          ensureBookingFieldResolved(dropEl, dropoffPlacesState),
+        ])
+        if (!pickupResolved.ok || !dropoffResolved.ok) {
+          errEl.textContent =
+            msgs.estimateAddressUnconfirmed ||
+            "We couldn't confirm this address. Please select the correct address from the suggestions."
+          errEl.classList.remove('hidden')
+          refreshWaState()
+          return
+        }
+        try {
+          await refreshEstimate()
+        } catch {
+          /* review still allowed; price may be unavailable */
+        }
+        openReview()
+      } finally {
+        refreshWaState()
+      }
+    })()
   })
 
   root.querySelector('#bk-complete-edit')?.addEventListener('click', () => {
