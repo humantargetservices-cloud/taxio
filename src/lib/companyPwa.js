@@ -178,18 +178,36 @@ export function primeBookingPwaManifest(slug) {
   return prefetchCompanyManifest(href, slug)
 }
 
+/** In-flight dedupe: same href shares one fetch (router prime + booking mount). */
+const inflightManifestByHref = new Map()
+
 /** Fetch manifest so Chrome registers company identity before install prompt. */
 export async function prefetchCompanyManifest(href, label) {
-  try {
-    const res = await fetch(href, { cache: 'no-store', credentials: 'omit', mode: 'cors' })
-    if (res.ok) {
-      const manifest = await res.json()
-      logPwaDev(`manifest applied for: ${manifest?.name || label || 'booking'}`)
-    }
-  } catch (err) {
-    logPwaDev('manifest prefetch failed', err?.message || err)
+  const key = String(href || '').trim()
+  if (!key) {
+    setPwaManifestReady(true)
+    return
   }
-  setPwaManifestReady(true)
+  const existing = inflightManifestByHref.get(key)
+  if (existing) return existing
+
+  const pending = (async () => {
+    try {
+      const res = await fetch(key, { cache: 'no-store', credentials: 'omit', mode: 'cors' })
+      if (res.ok) {
+        const manifest = await res.json()
+        logPwaDev(`manifest applied for: ${manifest?.name || label || 'booking'}`)
+      }
+    } catch (err) {
+      logPwaDev('manifest prefetch failed', err?.message || err)
+    } finally {
+      inflightManifestByHref.delete(key)
+      setPwaManifestReady(true)
+    }
+  })()
+
+  inflightManifestByHref.set(key, pending)
+  return pending
 }
 
 /**

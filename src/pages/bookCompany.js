@@ -488,7 +488,8 @@ export async function mountBookCompany(root, slug) {
   }
 
   const pwaIdentity = applyCompanyPwaIdentity({ context: 'booking', company, slug })
-  await prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName || slug)
+  // Never block booking form on manifest (router already primes; prefetch dedupes in-flight)
+  void prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName || slug)
 
   initPwaInstallPrompt({
     context: 'booking',

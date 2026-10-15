@@ -77,6 +77,22 @@ const dashState = {
 /** Invalidates overlapping mounts (tab switches / concurrent loads). */
 let dashMountGen = 0
 
+/**
+ * Last successful dashboard data snapshot for local UI remounts (tabs/drawer/QR)
+ * without repeating the startup network waterfall.
+ * @type {null | {
+ *   session: object,
+ *   profile: object | null,
+ *   company: object,
+ *   cars: any[],
+ *   bookings: any[],
+ *   rescueOpportunities: any[],
+ *   activeTrips: any[],
+ *   pushMode: string,
+ * }}
+ */
+let dashDataCache = null
+
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
 const DASH_SHELL =
   `min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200/70 pb-[calc(${DASH_MOBILE_NAV_HEIGHT}+env(safe-area-inset-bottom,0px)+1.5rem)] sm:pb-10 dark:from-[#06080f] dark:via-slate-950 dark:to-[#0a0f1a]`
@@ -559,13 +575,15 @@ function renderSetupActionCard(td, item, progress, variant) {
 
 export async function mountDashboardCompany(root, opts = {}) {
   const soft = opts.soft === true
+  /** Local UI only (tabs/drawer/QR/theme): re-paint from cache — no startup network waterfall. */
+  const localUi = opts.localUi === true && !!dashDataCache?.company && !!dashDataCache?.session
   const gen = ++dashMountGen
 
   syncDocumentLang(getLocale())
   syncPublicThemeClass()
   const dashDark = isPublicDarkMode()
   const loadLang = getLocale()
-  if (!soft) {
+  if (!soft && !localUi) {
     root.innerHTML = `
     <div class="min-h-screen flex flex-col items-center justify-center bg-[#eef0f3] dark:bg-slate-950">
       <div class="h-10 w-10 animate-pulse rounded-full border-2 border-gray-300 border-t-yellow-500 dark:border-slate-600 dark:border-t-amber-400"></div>
@@ -573,80 +591,111 @@ export async function mountDashboardCompany(root, opts = {}) {
     </div>`
   }
 
-  const session = await getSession()
-  if (gen !== dashMountGen) return
-  if (!session) {
-    navigate('/login/company')
-    return
-  }
-  const profile = await getMyProfile(session.user.id)
-  if (gen !== dashMountGen) return
-  if (profile?.first_login_required) {
-    navigate('/change-password/company')
-    return
-  }
-
-  if (profile?.company_onboarding_completed === false) {
-    navigate('/onboarding/company')
-    return
-  }
-
-  const company = await getCompanyForUser(session.user.id)
-  if (gen !== dashMountGen) return
-  if (!company) {
-    navigate('/register')
-    return
-  }
-  if (company.status === 'pending') {
-    navigate('/pending-approval')
-    return
-  }
-  if (company.status === 'suspended') {
-    navigate('/pending-approval')
-    return
-  }
-  if (company.status === 'rejected') {
-    navigate('/pending-approval')
-    return
-  }
-
-  const pwaIdentity = applyCompanyPwaIdentity({ context: 'dashboard', company })
-  // Never block dashboard paint on manifest / PWA prefetch
-  void prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
-  initServiceWorkerRegistration()
-  setActiveOperatorPwaCompany(company.id)
-
+  let session
+  let profile
+  let company
   let cars = []
   let bookings = []
   let rescueOpportunities = []
-  try {
-    cars = await listCarsForCompany(company.id)
-  } catch {
-    cars = []
-  }
-  if (gen !== dashMountGen) return
-  try {
-    ;[bookings, rescueOpportunities] = await Promise.all([
-      listBookingRequestsForCompany(company.id).catch(() => []),
-      listRescueOpportunitiesForCompany(company.id).catch(() => []),
-    ])
-  } catch {
-    bookings = []
-    rescueOpportunities = []
-  }
-  if (gen !== dashMountGen) return
+  let activeTrips = []
+  /** OneSignal UI mode — never await before first paint (resolved in background). */
+  let pushMode = dashDataCache?.pushMode || 'prompt'
 
-  let activeTrips = deriveActiveTrips({
-    companyId: company.id,
-    bookings,
-    opportunities: rescueOpportunities,
-  })
-  try {
-    activeTrips = await enrichActiveTripsWithWinnerDetails(activeTrips)
-  } catch {
-    /* keep preview rows */
+  if (localUi) {
+    session = dashDataCache.session
+    profile = dashDataCache.profile
+    company = dashDataCache.company
+    cars = dashDataCache.cars || []
+    bookings = dashDataCache.bookings || []
+    rescueOpportunities = dashDataCache.rescueOpportunities || []
+    activeTrips = dashDataCache.activeTrips || []
+    pushMode = dashDataCache.pushMode || 'prompt'
+  } else {
+    session = await getSession()
+    if (gen !== dashMountGen) return
+    if (!session) {
+      dashDataCache = null
+      navigate('/login/company')
+      return
+    }
+    profile = await getMyProfile(session.user.id)
+    if (gen !== dashMountGen) return
+    if (profile?.first_login_required) {
+      navigate('/change-password/company')
+      return
+    }
+
+    if (profile?.company_onboarding_completed === false) {
+      navigate('/onboarding/company')
+      return
+    }
+
+    company = await getCompanyForUser(session.user.id)
+    if (gen !== dashMountGen) return
+    if (!company) {
+      dashDataCache = null
+      navigate('/register')
+      return
+    }
+    if (company.status === 'pending') {
+      navigate('/pending-approval')
+      return
+    }
+    if (company.status === 'suspended') {
+      navigate('/pending-approval')
+      return
+    }
+    if (company.status === 'rejected') {
+      navigate('/pending-approval')
+      return
+    }
+
+    const pwaIdentity = applyCompanyPwaIdentity({ context: 'dashboard', company })
+    // Never block dashboard paint on manifest / PWA prefetch
+    void prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
+    initServiceWorkerRegistration()
+    setActiveOperatorPwaCompany(company.id)
+
+    try {
+      cars = await listCarsForCompany(company.id)
+    } catch {
+      cars = []
+    }
+    if (gen !== dashMountGen) return
+    try {
+      ;[bookings, rescueOpportunities] = await Promise.all([
+        listBookingRequestsForCompany(company.id).catch(() => []),
+        listRescueOpportunitiesForCompany(company.id).catch(() => []),
+      ])
+    } catch {
+      bookings = []
+      rescueOpportunities = []
+    }
+    if (gen !== dashMountGen) return
+
+    activeTrips = deriveActiveTrips({
+      companyId: company.id,
+      bookings,
+      opportunities: rescueOpportunities,
+    })
+    try {
+      activeTrips = await enrichActiveTripsWithWinnerDetails(activeTrips)
+    } catch {
+      /* keep preview rows */
+    }
+    if (gen !== dashMountGen) return
+
+    dashDataCache = {
+      session,
+      profile,
+      company,
+      cars,
+      bookings,
+      rescueOpportunities,
+      activeTrips,
+      pushMode,
+    }
   }
-  if (gen !== dashMountGen) return
 
   // Rescue notifications run AFTER paint — never block dashboard load
   if (dashState.tab === 'rescue') dashState.tab = 'overview'
@@ -655,9 +704,6 @@ export async function mountDashboardCompany(root, opts = {}) {
   const tpwa = buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name)
   const pwaShortcutDone = isOperatorShortcutComplete(company.id)
   const showPwaCard = shouldShowOperatorDashboardPwaCard(company.id)
-  // OneSignal is the only active notification-status authority (not legacy localStorage/DB)
-  const pushMode = await resolveOneSignalPushUiMode(company.id)
-  if (gen !== dashMountGen) return
   logDashboardPwaDebug(showPwaCard ? 'inline-card:visible' : 'inline-card:hidden', {
     tab: dashState.tab,
     companySlug: company.slug,
@@ -1024,48 +1070,51 @@ export async function mountDashboardCompany(root, opts = {}) {
       <div id="dash-modal-root"></div>
     </div>`
 
+  const remountLocalUi = () => mountDashboardCompany(root, { localUi: true })
+
   root.querySelectorAll('[data-dash-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       dashState.tab = btn.getAttribute('data-dash-tab')
       dashState.modal = null
       dashState.drawerOpen = false
-      mountDashboardCompany(root)
+      remountLocalUi()
     })
   })
 
   root.querySelector('#dash-menu-btn')?.addEventListener('click', () => {
     dashState.drawerOpen = !dashState.drawerOpen
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-drawer-backdrop')?.addEventListener('click', () => {
     dashState.drawerOpen = false
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-qr-open')?.addEventListener('click', () => {
     dashState.qrOpen = true
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-qr-close')?.addEventListener('click', () => {
     dashState.qrOpen = false
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-qr-backdrop')?.addEventListener('click', () => {
     dashState.qrOpen = false
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#co-toggle-dark')?.addEventListener('click', () => {
     setPublicDarkMode(!isPublicDarkMode())
     syncPublicThemeClass()
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#co-logout')?.addEventListener('click', async () => {
     stopRescueNotifications()
+    dashDataCache = null
     await signOutEverywhere()
     navigate('/')
   })
@@ -1094,7 +1143,7 @@ export async function mountDashboardCompany(root, opts = {}) {
     b.addEventListener('click', () => {
       const lc = b.getAttribute('data-dash-lang')
       if (lc) setLocale(lc)
-      mountDashboardCompany(root)
+      remountLocalUi()
     })
   })
 
@@ -1103,13 +1152,13 @@ export async function mountDashboardCompany(root, opts = {}) {
     if (action === 'pricing') {
       dashState.tab = 'pricing'
       dashState.drawerOpen = false
-      mountDashboardCompany(root)
+      remountLocalUi()
       return
     }
     if (action === 'photo' || action === 'motto' || action === 'whatsapp') {
       dashState.tab = 'essential'
       dashState.drawerOpen = false
-      mountDashboardCompany(root)
+      remountLocalUi()
       return
     }
     if (action === 'preview') {
@@ -1119,7 +1168,7 @@ export async function mountDashboardCompany(root, opts = {}) {
         /* ignore */
       }
       window.open(bookPublicUrl, '_blank', 'noopener,noreferrer')
-      window.setTimeout(() => mountDashboardCompany(root), 400)
+      window.setTimeout(() => remountLocalUi(), 400)
       return
     }
     if (action === 'qr') {
@@ -1134,7 +1183,7 @@ export async function mountDashboardCompany(root, opts = {}) {
         locale,
       })
       window.open(url, '_blank', 'noopener,noreferrer')
-      window.setTimeout(() => mountDashboardCompany(root), 400)
+      window.setTimeout(() => remountLocalUi(), 400)
       return
     }
     if (action === 'support') {
@@ -1154,10 +1203,10 @@ export async function mountDashboardCompany(root, opts = {}) {
       companyId: company.id,
       strings: tpwa,
       variant: 'operator',
-      onComplete: () => mountDashboardCompany(root),
+      onComplete: () => remountLocalUi(),
     })
     logDashboardPwaDebug('install:result', { result })
-    mountDashboardCompany(root)
+    remountLocalUi()
   }
 
   root.onclick = (e) => {
@@ -1241,13 +1290,16 @@ export async function mountDashboardCompany(root, opts = {}) {
     })
   })
 
-  // Rescue overlays live outside the dashboard mount (display-only vs server cron)
+  // Rescue overlays live outside the dashboard mount (display-only vs server cron).
+  // Full data load starts/keeps the poll; local UI remounts must not re-trigger fetch.
   try {
-    startRescueNotifications({
-      companyId: company.id,
-      accessToken: session.access_token,
-      companyName: company.name,
-    })
+    if (!localUi) {
+      startRescueNotifications({
+        companyId: company.id,
+        accessToken: session.access_token,
+        companyName: company.name,
+      })
+    }
     // Soft remount Active Trips after Rescue accept / confirm / cancel (no winner overlay)
     setActiveTripsRefreshHandler(() => {
       if (gen !== dashMountGen) return
@@ -1264,12 +1316,12 @@ export async function mountDashboardCompany(root, opts = {}) {
   root.querySelector('#dash-pwa-later')?.addEventListener('click', () => {
     setPromptDismissed('operator', company.id)
     logDashboardPwaDebug('inline-card:dismissed')
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-active-trips-toggle')?.addEventListener('click', () => {
     dashState.activeTripsExpanded = !dashState.activeTripsExpanded
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelectorAll('[data-complete-trip]').forEach((btn) => {
@@ -1338,11 +1390,13 @@ export async function mountDashboardCompany(root, opts = {}) {
       // OneSignal path (legacy PushManager / company_push_subscriptions not UI authority)
       const result = await enableOneSignalTripNotifications(company.id)
       if (result.ok) {
-        mountDashboardCompany(root)
+        if (dashDataCache) dashDataCache.pushMode = 'on'
+        remountLocalUi()
         return
       }
       if (result.code === 'DENIED' || result.permission === 'denied') {
-        mountDashboardCompany(root)
+        if (dashDataCache) dashDataCache.pushMode = 'blocked'
+        remountLocalUi()
         return
       }
       showPushFailure(result.userMessage || null, result.technicalReason || null)
@@ -1367,22 +1421,36 @@ export async function mountDashboardCompany(root, opts = {}) {
     }
   })
 
-  // Associate company External ID on authenticated dashboard load (no JWT to OneSignal)
-  void associateOneSignalCompany(company.id)
-
-  // Soft re-sync: permission granted but OneSignal may still need explicit opt-in.
-  // Remount at most once per page load so sync cannot create a dashboard refresh loop.
-  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    const syncGen = gen
-    void softSyncOneSignalTripNotifications(company.id)
-      .then((result) => {
-        if (!result.ok || syncGen !== dashMountGen) return
-        if (pushMode === 'on') return
-        if (window.__taxioOneSignalUiRemounted) return
-        window.__taxioOneSignalUiRemounted = true
-        mountDashboardCompany(root)
+  // OneSignal: never block first paint — resolve in background, then local UI update.
+  if (!localUi) {
+    const paintedPushMode = pushMode
+    void resolveOneSignalPushUiMode(company.id)
+      .then((mode) => {
+        if (gen !== dashMountGen) return
+        if (dashDataCache) dashDataCache.pushMode = mode
+        if (mode === paintedPushMode) return
+        remountLocalUi()
       })
       .catch(() => {})
+
+    // Associate company External ID on authenticated dashboard load (no JWT to OneSignal)
+    void associateOneSignalCompany(company.id)
+
+    // Soft re-sync: permission granted but OneSignal may still need explicit opt-in.
+    // Remount at most once per page load so sync cannot create a dashboard refresh loop.
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      const syncGen = gen
+      void softSyncOneSignalTripNotifications(company.id)
+        .then((result) => {
+          if (!result.ok || syncGen !== dashMountGen) return
+          if (dashDataCache?.pushMode === 'on' || paintedPushMode === 'on') return
+          if (window.__taxioOneSignalUiRemounted) return
+          window.__taxioOneSignalUiRemounted = true
+          if (dashDataCache) dashDataCache.pushMode = 'on'
+          remountLocalUi()
+        })
+        .catch(() => {})
+    }
   }
 
   if (t === 'pricing') {
