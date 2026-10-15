@@ -380,13 +380,136 @@ const BROAD_GEOCODE_TYPES = new Set([
   'colloquial_area',
 ])
 
+/** Street-type / connector words — not enough alone to resolve an address. */
+const ADDRESS_FILLER_TOKENS = new Set([
+  'rue',
+  'avenue',
+  'av',
+  'ave',
+  'straat',
+  'str',
+  'road',
+  'rd',
+  'street',
+  'st',
+  'boulevard',
+  'bd',
+  'blvd',
+  'laan',
+  'weg',
+  'place',
+  'plein',
+  'chemin',
+  'allee',
+  'allée',
+  'chaussee',
+  'chaussée',
+  'route',
+  'dreve',
+  'drève',
+  'impasse',
+  'square',
+  'quai',
+  'de',
+  'la',
+  'le',
+  'les',
+  'du',
+  'des',
+  'van',
+  'der',
+  'den',
+  'het',
+  'of',
+  'the',
+  'a',
+  'an',
+  'and',
+  'et',
+  'en',
+  'sur',
+  'sous',
+])
+
+/** City/country-only queries must not resolve to a street guess. */
+const BROAD_PLACE_ONLY_TOKENS = new Set([
+  'belgium',
+  'belgie',
+  'belgië',
+  'belgique',
+  'brussels',
+  'bruxelles',
+  'brussel',
+  'antwerp',
+  'antwerpen',
+  'anvers',
+  'ghent',
+  'gent',
+  'gand',
+  'brugge',
+  'bruges',
+  'leuven',
+  'louvain',
+  'liege',
+  'liège',
+  'luik',
+  'namur',
+  'namen',
+  'mons',
+  'bergen',
+  'charleroi',
+  'mechelen',
+  'malines',
+])
+
+function normalizeAddressMatchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function addressMatchTokens(value) {
+  return normalizeAddressMatchText(value).split(/\s+/).filter(Boolean)
+}
+
 function geocodeHasComponent(result, type) {
   return (result?.address_components || []).some((c) => (c.types || []).includes(type))
 }
 
+function geocodeComponentName(result, type) {
+  const comp = (result?.address_components || []).find((c) => (c.types || []).includes(type))
+  return comp ? String(comp.long_name || comp.short_name || '').trim() : ''
+}
+
 /**
- * Accept only precise street-level (or similar) geocode results — never country/city alone.
- * If the passenger typed a number, prefer a result that includes street_number.
+ * Obviously incomplete typed text — never geocode / never estimate from these alone.
+ * Examples: "rue de", "avenue", "straat", "Brussels", "Belgium"
+ */
+function isTypedAddressIncomplete(query) {
+  const q = String(query || '').trim()
+  if (q.length < 8) return true
+  const tokens = addressMatchTokens(q)
+  if (tokens.length < 2) return true
+
+  const meaningful = tokens.filter((t) => !ADDRESS_FILLER_TOKENS.has(t) && !/^\d+[a-z]?$/.test(t))
+  if (meaningful.length === 0) return true
+  if (meaningful.every((t) => BROAD_PLACE_ONLY_TOKENS.has(t))) return true
+
+  // Need at least one substantial non-city street/name token (e.g. "Loi"), or a number + place.
+  const hasStreetName = meaningful.some((t) => t.length >= 3 && !BROAD_PLACE_ONLY_TOKENS.has(t))
+  const hasNumber = tokens.some((t) => /^\d+[a-z]?$/.test(t))
+  if (!hasStreetName && !(hasNumber && meaningful.some((t) => BROAD_PLACE_ONLY_TOKENS.has(t)))) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Accept only precise street-level results that strongly match what the passenger typed.
+ * Never accept Google's first guess solely because coordinates exist.
  */
 function isUsableStreetGeocodeResult(result, typedQuery) {
   if (!result?.geometry?.location) return false
@@ -412,8 +535,64 @@ function isUsableStreetGeocodeResult(result, typedQuery) {
   if (!preciseType && !hasRoute) return false
   if (!hasLocality && !preciseType) return false
 
-  const typed = String(typedQuery || '')
-  if (/\d/.test(typed) && !hasStreetNumber && !preciseType) return false
+  return geocodeStronglyMatchesTyped(result, typedQuery, {
+    hasRoute,
+    hasStreetNumber,
+    preciseType,
+  })
+}
+
+function geocodeStronglyMatchesTyped(result, typedQuery, flags = {}) {
+  const typedNorm = normalizeAddressMatchText(typedQuery)
+  const typedTokens = addressMatchTokens(typedQuery)
+  if (!typedNorm || typedTokens.length < 2) return false
+
+  const routeName = normalizeAddressMatchText(geocodeComponentName(result, 'route'))
+  const streetNumber = normalizeAddressMatchText(geocodeComponentName(result, 'street_number'))
+  const locality = normalizeAddressMatchText(
+    geocodeComponentName(result, 'locality') ||
+      geocodeComponentName(result, 'postal_town') ||
+      geocodeComponentName(result, 'sublocality')
+  )
+  const postal = normalizeAddressMatchText(geocodeComponentName(result, 'postal_code'))
+  const formattedNorm = normalizeAddressMatchText(result.formatted_address)
+  const haystack = `${formattedNorm} ${routeName} ${streetNumber} ${locality} ${postal}`.trim()
+
+  const significantTyped = typedTokens.filter(
+    (t) => !ADDRESS_FILLER_TOKENS.has(t) && !BROAD_PLACE_ONLY_TOKENS.has(t) && !/^\d+[a-z]?$/.test(t)
+  )
+  const streetNameTokens = significantTyped.filter((t) => t.length >= 3)
+  if (streetNameTokens.length === 0) return false
+
+  // Road/street name must substantially match typed street text.
+  const routeOrFormattedHasStreet = streetNameTokens.every((t) => haystack.includes(t))
+  if (!routeOrFormattedHasStreet) return false
+
+  if (routeName) {
+    const longest = [...streetNameTokens].sort((a, b) => b.length - a.length)[0]
+    if (longest && !routeName.includes(longest)) {
+      // Allow if every street token appears in route, else reject unrelated roads.
+      const anyInRoute = streetNameTokens.some((t) => routeName.includes(t))
+      if (!anyInRoute) return false
+    }
+  } else if (!flags.preciseType) {
+    return false
+  }
+
+  // If passenger typed a street number, returned number must match.
+  const typedNumbers = typedTokens.filter((t) => /^\d+[a-z]?$/.test(t))
+  if (typedNumbers.length) {
+    if (!streetNumber && !flags.hasStreetNumber) return false
+    if (!streetNumber || !typedNumbers.includes(streetNumber)) return false
+  }
+
+  // Important typed tokens (incl. city when present) must appear in result.
+  const important = typedTokens.filter(
+    (t) => t.length >= 3 && !ADDRESS_FILLER_TOKENS.has(t)
+  )
+  for (const t of important) {
+    if (!haystack.includes(t)) return false
+  }
 
   return true
 }
@@ -429,11 +608,12 @@ function readGeocodeLatLng(result) {
 
 /**
  * Forward-geocode typed address text (autocomplete fallback).
+ * Only called from estimate / BOOK resolve — never from raw keystrokes alone.
  * @returns {Promise<{ ok: true, formattedAddress: string, lat: number, lng: number, placeId: string|null } | { ok: false, code: string }>}
  */
 async function geocodeTypedAddress(query) {
   const q = String(query || '').trim()
-  if (q.length < 5) return { ok: false, code: 'TOO_SHORT' }
+  if (isTypedAddressIncomplete(q)) return { ok: false, code: 'INCOMPLETE' }
 
   const key = q.toLowerCase()
   if (typedAddressGeocodeCache.has(key)) {
@@ -459,7 +639,7 @@ async function geocodeTypedAddress(query) {
         }
         const match = results.find((r) => isUsableStreetGeocodeResult(r, q))
         if (!match) {
-          resolve({ ok: false, code: 'AMBIGUOUS' })
+          resolve({ ok: false, code: 'MISMATCH' })
           return
         }
         const { lat, lng } = readGeocodeLatLng(match)
@@ -469,7 +649,9 @@ async function geocodeTypedAddress(query) {
         }
         resolve({
           ok: true,
-          formattedAddress: String(match.formatted_address || q).trim(),
+          // Keep passenger text for display; coords come from the matched result.
+          formattedAddress: q,
+          googleFormattedAddress: String(match.formatted_address || q).trim(),
           lat,
           lng,
           placeId: match.place_id ? String(match.place_id) : null,
@@ -491,6 +673,7 @@ async function geocodeTypedAddress(query) {
 
 /**
  * Ensure a booking address field has lat/lng: reuse confirmed place, else geocode typed text.
+ * Geocode fallback keeps the passenger's typed visible text (does not replace with Google label).
  * Does not call onUpdate (caller controls estimate refresh).
  */
 async function ensureBookingFieldResolved(inputEl, state) {
@@ -507,13 +690,16 @@ async function ensureBookingFieldResolved(inputEl, state) {
     return { ok: true, reused: true }
   }
 
+  if (isTypedAddressIncomplete(text)) return { ok: false, code: 'INCOMPLETE' }
+
   const geo = await geocodeTypedAddress(text)
   if (!geo.ok) return geo
 
+  // Commit coords against the passenger's typed text — never swap in an unrelated Google label.
   const committed = commitBookingFieldPlace({
     inputEl,
     state,
-    formattedAddress: geo.formattedAddress,
+    formattedAddress: text,
     lat: geo.lat,
     lng: geo.lng,
     placeId: geo.placeId,
@@ -1513,6 +1699,21 @@ Estimate price: ${estimatePrice}${refLine}`
     return !!pickupEl.value.trim() && !!dropEl.value.trim()
   }
 
+  /** Confirmed pick, or typed text complete enough to attempt fallback (never mid-"rue de"). */
+  function fieldReadyForEstimateAttempt(state, inputEl) {
+    if (bookingFieldHasConfirmedPlace(state, inputEl)) return true
+    const text = String(inputEl?.value || '').trim()
+    if (!text) return false
+    return !isTypedAddressIncomplete(text)
+  }
+
+  function bothAddressesReadyForEstimateAttempt() {
+    return (
+      fieldReadyForEstimateAttempt(pickupPlacesState, pickupEl) &&
+      fieldReadyForEstimateAttempt(dropoffPlacesState, dropEl)
+    )
+  }
+
   function setEstimateHintMessage(text) {
     if (!estHint) return
     const t = String(text || '').trim()
@@ -1560,10 +1761,16 @@ Estimate price: ${estimatePrice}${refLine}`
     }
 
     if (!pickupOk || !dropoffOk) {
-      // Typed text present — resolve runs on estimate; soft hint until confirmed
+      const incompleteTyped =
+        (!pickupOk && puText && isTypedAddressIncomplete(puText)) ||
+        (!dropoffOk && doText && isTypedAddressIncomplete(doText))
+      // Incomplete typed text → ask to complete/select; otherwise soft hint until confirmed
       setEstimateHintMessage(
-        msgs.estimateSelectHint ||
-          'Enter pickup and destination to see an estimated price.'
+        incompleteTyped
+          ? msgs.estimateAddressUnconfirmed ||
+              "We couldn't confirm this address. Please select the correct address from the suggestions."
+          : msgs.estimateSelectHint ||
+              'Enter pickup and destination to see an estimated price.'
       )
       estWrap?.classList.add('hidden')
       latestEstimate = null
@@ -1699,7 +1906,8 @@ Estimate price: ${estimatePrice}${refLine}`
 
   function queueEstimate() {
     if (isHourlyMode()) return
-    if (!bothAddressesTyped()) return
+    // Do not geocode / estimate from partial keystrokes ("rue de", city-only, etc.)
+    if (!bothAddressesReadyForEstimateAttempt()) return
     if (estimateTimer) window.clearTimeout(estimateTimer)
     estimateTimer = window.setTimeout(() => {
       estimateTimer = null
@@ -1712,7 +1920,7 @@ Estimate price: ${estimatePrice}${refLine}`
   function requestEstimateIfReady() {
     syncEstimateDisplay()
     if (isHourlyMode()) return
-    if (!bothAddressesTyped()) {
+    if (!bothAddressesReadyForEstimateAttempt()) {
       cancelPendingEstimate()
       return
     }
@@ -1815,13 +2023,13 @@ Estimate price: ${estimatePrice}${refLine}`
     const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
     const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
     if (!pickupOk || !dropoffOk) {
-      // Keep estimate cleared until resolve/geocode or autocomplete commit finishes
+      // Keep estimate cleared until autocomplete commit or fallback resolve finishes
       cancelPendingEstimate()
       latestEstimate = null
     }
     syncEstimateDisplay()
-    // Typed addresses (no dropdown pick) still queue estimate → geocode fallback inside refresh
-    if (bothAddressesTyped() && !isHourlyMode()) {
+    // Fallback geocode only inside refreshEstimate / BOOK — and only once typed text looks complete
+    if (bothAddressesReadyForEstimateAttempt() && !isHourlyMode()) {
       queueEstimate()
     }
   }
