@@ -101,6 +101,7 @@ function commitBookingFieldPlace({ inputEl, state, formattedAddress, lat, lng, p
   try {
     inputEl.value = addr
     state.committed = addr
+    state.verifiedAddress = addr
     state.placeId = placeId != null && String(placeId).length ? String(placeId) : null
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       state.lat = lat
@@ -119,6 +120,30 @@ function commitBookingFieldPlace({ inputEl, state, formattedAddress, lat, lng, p
 }
 
 /**
+ * Typed-address verify: store Google lat/lng + normalized address internally.
+ * Never changes the passenger's visible input text.
+ */
+function verifyBookingFieldInternally({
+  inputEl,
+  state,
+  displayText,
+  verifiedAddress,
+  lat,
+  lng,
+  placeId,
+}) {
+  const display = String(displayText || inputEl?.value || '').trim()
+  if (!display || !state) return false
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false
+  state.committed = display
+  state.verifiedAddress = String(verifiedAddress || '').trim() || display
+  state.placeId = placeId != null && String(placeId).length ? String(placeId) : null
+  state.lat = lat
+  state.lng = lng
+  return true
+}
+
+/**
  * One booking address field: own DOM suggestion panel + AutocompleteService + PlacesService.getDetails.
  * No shared Google `.pac-container` (root cause of pickup/drop-off cross-talk).
  */
@@ -127,6 +152,7 @@ function attachBookingAddressController({ inputEl, panelEl, state, onUpdate, pow
     return { detach: () => {} }
   }
   if (state.committed === undefined) state.committed = null
+  if (state.verifiedAddress === undefined) state.verifiedAddress = null
   if (state.lat === undefined) state.lat = null
   if (state.lng === undefined) state.lng = null
   if (state.placeId === undefined) state.placeId = null
@@ -184,17 +210,24 @@ function attachBookingAddressController({ inputEl, panelEl, state, onUpdate, pow
       hidePanel()
       return
     }
-    acService.getPlacePredictions({ input: q }, (predictions, status) => {
-      if (
-        status !== google.maps.places.PlacesServiceStatus.OK ||
-        !predictions ||
-        predictions.length === 0
-      ) {
-        hidePanel()
-        return
+    acService.getPlacePredictions(
+      {
+        input: q,
+        // Belgium-beta: hard country restriction (not merely a region bias)
+        componentRestrictions: { country: 'be' },
+      },
+      (predictions, status) => {
+        if (
+          status !== google.maps.places.PlacesServiceStatus.OK ||
+          !predictions ||
+          predictions.length === 0
+        ) {
+          hidePanel()
+          return
+        }
+        showPredictions(predictions)
       }
-      showPredictions(predictions)
-    })
+    )
   }
 
   function applyPlaceDetails(place) {
@@ -240,6 +273,7 @@ function attachBookingAddressController({ inputEl, panelEl, state, onUpdate, pow
     const c = state.committed
     if (typeof c === 'string' && c.length > 0 && v !== c) {
       state.committed = null
+      state.verifiedAddress = null
       state.lat = null
       state.lng = null
       state.placeId = null
@@ -460,7 +494,21 @@ const BROAD_PLACE_ONLY_TOKENS = new Set([
   'charleroi',
   'mechelen',
   'malines',
+  'aarschot',
 ])
+
+/** Multilingual BE city aliases — typed city need not match Google's language exactly. */
+const CITY_ALIAS_GROUPS = [
+  ['brussels', 'bruxelles', 'brussel'],
+  ['antwerp', 'antwerpen', 'anvers'],
+  ['ghent', 'gent', 'gand'],
+  ['brugge', 'bruges'],
+  ['leuven', 'louvain'],
+  ['liege', 'luik'],
+  ['namur', 'namen'],
+  ['mons', 'bergen'],
+  ['mechelen', 'malines'],
+]
 
 function normalizeAddressMatchText(value) {
   return String(value || '')
@@ -479,14 +527,33 @@ function geocodeHasComponent(result, type) {
   return (result?.address_components || []).some((c) => (c.types || []).includes(type))
 }
 
-function geocodeComponentName(result, type) {
+function geocodeComponentName(result, type, preferShort = false) {
   const comp = (result?.address_components || []).find((c) => (c.types || []).includes(type))
-  return comp ? String(comp.long_name || comp.short_name || '').trim() : ''
+  if (!comp) return ''
+  if (preferShort) return String(comp.short_name || comp.long_name || '').trim()
+  return String(comp.long_name || comp.short_name || '').trim()
+}
+
+function tokenMatchesHaystack(token, haystack) {
+  if (!token || !haystack) return false
+  if (haystack.includes(token)) return true
+  for (const group of CITY_ALIAS_GROUPS) {
+    if (!group.includes(token)) continue
+    if (group.some((alias) => haystack.includes(alias))) return true
+  }
+  return false
+}
+
+/** Belgian postal codes are 4 digits — exclude them when detecting typed street numbers. */
+function typedStreetNumberCandidates(tokens) {
+  const nums = tokens.filter((t) => /^\d+[a-z]?$/.test(t))
+  const nonPostal = nums.filter((t) => !/^\d{4}$/.test(t))
+  return nonPostal.length ? nonPostal : []
 }
 
 /**
  * Obviously incomplete typed text — never geocode / never estimate from these alone.
- * Examples: "rue de", "avenue", "straat", "Brussels", "Belgium"
+ * Examples: "rue de", "avenue", "straat", "Bruss", "Belgium"
  */
 function isTypedAddressIncomplete(query) {
   const q = String(query || '').trim()
@@ -498,21 +565,30 @@ function isTypedAddressIncomplete(query) {
   if (meaningful.length === 0) return true
   if (meaningful.every((t) => BROAD_PLACE_ONLY_TOKENS.has(t))) return true
 
-  // Need at least one substantial non-city street/name token (e.g. "Loi"), or a number + place.
+  // Need at least one substantial non-city street/name token (e.g. "Loi" / "Leuvensesteenweg").
   const hasStreetName = meaningful.some((t) => t.length >= 3 && !BROAD_PLACE_ONLY_TOKENS.has(t))
-  const hasNumber = tokens.some((t) => /^\d+[a-z]?$/.test(t))
-  if (!hasStreetName && !(hasNumber && meaningful.some((t) => BROAD_PLACE_ONLY_TOKENS.has(t)))) {
-    return true
-  }
+  if (!hasStreetName) return true
   return false
 }
 
+function geocodeIsInBelgium(result) {
+  const short = String(geocodeComponentName(result, 'country', true) || '')
+    .trim()
+    .toUpperCase()
+  if (short === 'BE') return true
+  const long = normalizeAddressMatchText(geocodeComponentName(result, 'country'))
+  return long === 'belgium' || long === 'belgie' || long === 'belgique'
+}
+
 /**
- * Accept only precise street-level results that strongly match what the passenger typed.
- * Never accept Google's first guess solely because coordinates exist.
+ * Accept precise Belgian street-level results that practically match typed text.
+ * Tolerates punctuation, casing, accents, and common address token order.
+ * Still rejects wrong street numbers and non-Belgium results.
  */
 function isUsableStreetGeocodeResult(result, typedQuery) {
   if (!result?.geometry?.location) return false
+  if (!geocodeIsInBelgium(result)) return false
+
   const formatted = String(result.formatted_address || '').trim()
   if (formatted.length < 5) return false
 
@@ -535,17 +611,16 @@ function isUsableStreetGeocodeResult(result, typedQuery) {
   if (!preciseType && !hasRoute) return false
   if (!hasLocality && !preciseType) return false
 
-  return geocodeStronglyMatchesTyped(result, typedQuery, {
+  return geocodePracticallyMatchesTyped(result, typedQuery, {
     hasRoute,
     hasStreetNumber,
     preciseType,
   })
 }
 
-function geocodeStronglyMatchesTyped(result, typedQuery, flags = {}) {
-  const typedNorm = normalizeAddressMatchText(typedQuery)
+function geocodePracticallyMatchesTyped(result, typedQuery, flags = {}) {
   const typedTokens = addressMatchTokens(typedQuery)
-  if (!typedNorm || typedTokens.length < 2) return false
+  if (typedTokens.length < 2) return false
 
   const routeName = normalizeAddressMatchText(geocodeComponentName(result, 'route'))
   const streetNumber = normalizeAddressMatchText(geocodeComponentName(result, 'street_number'))
@@ -557,42 +632,46 @@ function geocodeStronglyMatchesTyped(result, typedQuery, flags = {}) {
   const postal = normalizeAddressMatchText(geocodeComponentName(result, 'postal_code'))
   const formattedNorm = normalizeAddressMatchText(result.formatted_address)
   const haystack = `${formattedNorm} ${routeName} ${streetNumber} ${locality} ${postal}`.trim()
+  const typedNorm = typedTokens.join(' ')
 
-  const significantTyped = typedTokens.filter(
-    (t) => !ADDRESS_FILLER_TOKENS.has(t) && !BROAD_PLACE_ONLY_TOKENS.has(t) && !/^\d+[a-z]?$/.test(t)
+  const streetNameTokens = typedTokens.filter(
+    (t) =>
+      t.length >= 3 &&
+      !ADDRESS_FILLER_TOKENS.has(t) &&
+      !BROAD_PLACE_ONLY_TOKENS.has(t) &&
+      !/^\d+[a-z]?$/.test(t)
   )
-  const streetNameTokens = significantTyped.filter((t) => t.length >= 3)
   if (streetNameTokens.length === 0) return false
 
-  // Road/street name must substantially match typed street text.
-  const routeOrFormattedHasStreet = streetNameTokens.every((t) => haystack.includes(t))
-  if (!routeOrFormattedHasStreet) return false
+  // Street match: longest typed street token in route/formatted, OR route tokens in typed text.
+  const longestStreet = [...streetNameTokens].sort((a, b) => b.length - a.length)[0]
+  const streetInResult =
+    (longestStreet && (routeName.includes(longestStreet) || haystack.includes(longestStreet))) ||
+    streetNameTokens.some((t) => routeName.includes(t) || haystack.includes(t))
+  const routeTokens = routeName
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !ADDRESS_FILLER_TOKENS.has(t))
+  const routeInTyped = routeTokens.length > 0 && routeTokens.every((t) => typedNorm.includes(t))
+  if (!streetInResult && !routeInTyped) return false
+  if (!routeName && !flags.preciseType) return false
 
-  if (routeName) {
-    const longest = [...streetNameTokens].sort((a, b) => b.length - a.length)[0]
-    if (longest && !routeName.includes(longest)) {
-      // Allow if every street token appears in route, else reject unrelated roads.
-      const anyInRoute = streetNameTokens.some((t) => routeName.includes(t))
-      if (!anyInRoute) return false
-    }
-  } else if (!flags.preciseType) {
-    return false
+  // Explicit street number (not BE postal) must match Google's street_number exactly.
+  const typedNums = typedStreetNumberCandidates(typedTokens)
+  if (typedNums.length) {
+    if (!streetNumber || !flags.hasStreetNumber) return false
+    if (!typedNums.includes(streetNumber)) return false
   }
 
-  // If passenger typed a street number, returned number must match.
-  const typedNumbers = typedTokens.filter((t) => /^\d+[a-z]?$/.test(t))
-  if (typedNumbers.length) {
-    if (!streetNumber && !flags.hasStreetNumber) return false
-    if (!streetNumber || !typedNumbers.includes(streetNumber)) return false
+  // If a city token was typed, require a practical city/locality match (aliases OK).
+  const typedCities = typedTokens.filter((t) => BROAD_PLACE_ONLY_TOKENS.has(t) && t.length >= 3)
+  if (typedCities.length) {
+    const cityOk = typedCities.some((t) => tokenMatchesHaystack(t, haystack))
+    if (!cityOk) return false
   }
 
-  // Important typed tokens (incl. city when present) must appear in result.
-  const important = typedTokens.filter(
-    (t) => t.length >= 3 && !ADDRESS_FILLER_TOKENS.has(t)
-  )
-  for (const t of important) {
-    if (!haystack.includes(t)) return false
-  }
+  // Optional postal: if typed a 4-digit postal and Google has one, they should match.
+  const typedPostals = typedTokens.filter((t) => /^\d{4}$/.test(t))
+  if (typedPostals.length && postal && !typedPostals.includes(postal)) return false
 
   return true
 }
@@ -609,13 +688,13 @@ function readGeocodeLatLng(result) {
 /**
  * Forward-geocode typed address text (autocomplete fallback).
  * Only called from estimate / BOOK resolve — never from raw keystrokes alone.
- * @returns {Promise<{ ok: true, formattedAddress: string, lat: number, lng: number, placeId: string|null } | { ok: false, code: string }>}
+ * Belgium-restricted. Does not mutate the input field.
  */
 async function geocodeTypedAddress(query) {
   const q = String(query || '').trim()
   if (isTypedAddressIncomplete(q)) return { ok: false, code: 'INCOMPLETE' }
 
-  const key = q.toLowerCase()
+  const key = `be:${q.toLowerCase()}`
   if (typedAddressGeocodeCache.has(key)) {
     return typedAddressGeocodeCache.get(key)
   }
@@ -631,32 +710,37 @@ async function geocodeTypedAddress(query) {
 
     return new Promise((resolve) => {
       const geocoder = new g.Geocoder()
-      // region bias (Belgium TAXIO) — not a hard country lock
-      geocoder.geocode({ address: q, region: 'be' }, (results, status) => {
-        if (status !== g.GeocoderStatus.OK || !results?.length) {
-          resolve({ ok: false, code: status === 'ZERO_RESULTS' ? 'NOT_FOUND' : 'GEOCODE_FAILED' })
-          return
+      geocoder.geocode(
+        {
+          address: q,
+          componentRestrictions: { country: 'BE' },
+          region: 'be',
+        },
+        (results, status) => {
+          if (status !== g.GeocoderStatus.OK || !results?.length) {
+            resolve({ ok: false, code: status === 'ZERO_RESULTS' ? 'NOT_FOUND' : 'GEOCODE_FAILED' })
+            return
+          }
+          const match = results.find((r) => isUsableStreetGeocodeResult(r, q))
+          if (!match) {
+            resolve({ ok: false, code: 'MISMATCH' })
+            return
+          }
+          const { lat, lng } = readGeocodeLatLng(match)
+          if (lat == null || lng == null) {
+            resolve({ ok: false, code: 'NO_COORDS' })
+            return
+          }
+          resolve({
+            ok: true,
+            displayText: q,
+            verifiedAddress: String(match.formatted_address || q).trim(),
+            lat,
+            lng,
+            placeId: match.place_id ? String(match.place_id) : null,
+          })
         }
-        const match = results.find((r) => isUsableStreetGeocodeResult(r, q))
-        if (!match) {
-          resolve({ ok: false, code: 'MISMATCH' })
-          return
-        }
-        const { lat, lng } = readGeocodeLatLng(match)
-        if (lat == null || lng == null) {
-          resolve({ ok: false, code: 'NO_COORDS' })
-          return
-        }
-        resolve({
-          ok: true,
-          // Keep passenger text for display; coords come from the matched result.
-          formattedAddress: q,
-          googleFormattedAddress: String(match.formatted_address || q).trim(),
-          lat,
-          lng,
-          placeId: match.place_id ? String(match.place_id) : null,
-        })
-      })
+      )
     })
   })()
 
@@ -673,8 +757,7 @@ async function geocodeTypedAddress(query) {
 
 /**
  * Ensure a booking address field has lat/lng: reuse confirmed place, else geocode typed text.
- * Geocode fallback keeps the passenger's typed visible text (does not replace with Google label).
- * Does not call onUpdate (caller controls estimate refresh).
+ * Typed fallback never overwrites visible input — only stores verified coords internally.
  */
 async function ensureBookingFieldResolved(inputEl, state) {
   const text = String(inputEl?.value || '').trim()
@@ -695,17 +778,16 @@ async function ensureBookingFieldResolved(inputEl, state) {
   const geo = await geocodeTypedAddress(text)
   if (!geo.ok) return geo
 
-  // Commit coords against the passenger's typed text — never swap in an unrelated Google label.
-  const committed = commitBookingFieldPlace({
+  const verified = verifyBookingFieldInternally({
     inputEl,
     state,
-    formattedAddress: text,
+    displayText: text,
+    verifiedAddress: geo.verifiedAddress,
     lat: geo.lat,
     lng: geo.lng,
     placeId: geo.placeId,
-    onUpdate: null,
   })
-  if (!committed || !Number.isFinite(state.lat) || !Number.isFinite(state.lng)) {
+  if (!verified || !Number.isFinite(state.lat) || !Number.isFinite(state.lng)) {
     return { ok: false, code: 'COMMIT_FAILED' }
   }
   return { ok: true, reused: false }
@@ -1197,8 +1279,20 @@ export async function mountBookCompany(root, slug) {
   let estimateTimer = null
   const pickupEl = root.querySelector('#bk-pickup')
   const dropEl = root.querySelector('#bk-dropoff')
-  const pickupPlacesState = { committed: null, lat: null, lng: null, placeId: null }
-  const dropoffPlacesState = { committed: null, lat: null, lng: null, placeId: null }
+  const pickupPlacesState = {
+    committed: null,
+    verifiedAddress: null,
+    lat: null,
+    lng: null,
+    placeId: null,
+  }
+  const dropoffPlacesState = {
+    committed: null,
+    verifiedAddress: null,
+    lat: null,
+    lng: null,
+    placeId: null,
+  }
   const dropoffWrap = root.querySelector('#bk-dropoff-wrap')
   const whenWrap = root.querySelector('#bk-when-wrap')
   const hourlyWrap = root.querySelector('#bk-hourly-wrap')
