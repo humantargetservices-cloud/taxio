@@ -94,13 +94,21 @@ async function loadRescueNotifyContext(admin, rescueRequestId) {
     return { ok: false, code: 'NO_ACTION', reason: 'NO_PASSENGER_PHONE' }
   }
 
-  const { data: winnerCo } = await admin
-    .from('companies')
-    .select('id, name')
-    .eq('id', rescue.accepted_by_company_id)
-    .maybeSingle()
+  if (!rescue.original_company_id) {
+    return { ok: false, code: 'NO_ACTION', reason: 'NO_ORIGINAL_COMPANY' }
+  }
 
-  const winnerCompanyName = String(winnerCo?.name || 'A taxi company').trim() || 'A taxi company'
+  const [{ data: originalCo }, { data: winnerCo }] = await Promise.all([
+    admin.from('companies').select('id, name').eq('id', rescue.original_company_id).maybeSingle(),
+    admin.from('companies').select('id, name').eq('id', rescue.accepted_by_company_id).maybeSingle(),
+  ])
+
+  const originalCompanyName = String(originalCo?.name || '').trim()
+  const winnerCompanyName = String(winnerCo?.name || '').trim()
+  if (!originalCompanyName || !winnerCompanyName) {
+    return { ok: false, code: 'NO_ACTION', reason: 'MISSING_COMPANY_NAMES' }
+  }
+
   const tripUrl = rescuePassengerTripUrl(tripToken)
 
   return {
@@ -110,6 +118,7 @@ async function loadRescueNotifyContext(admin, rescueRequestId) {
     tripToken,
     tripUrl,
     passengerPhone,
+    originalCompanyName,
     winnerCompanyName,
   }
 }
@@ -141,7 +150,7 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
   const ctx = await loadRescueNotifyContext(admin, rescueRequestId)
   if (!ctx.ok) return ctx
 
-  const { rescue, tripToken, tripUrl, passengerPhone, winnerCompanyName } = ctx
+  const { rescue, tripToken, tripUrl, passengerPhone, originalCompanyName, winnerCompanyName } = ctx
 
   if (rescue.passenger_confirm_whatsapp_sent_at) {
     return {
@@ -167,6 +176,7 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
   if (dryRun) {
     const sendResult = await sendRescueOfferTemplate({
       toPhone: passengerPhone,
+      originalCompanyName,
       winnerCompanyName,
       tripToken,
       dryRun: true,
@@ -178,7 +188,12 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
       error: sendResult.error,
       metaTemplateSetupRequired: sendResult.metaTemplateSetupRequired === true,
       tripUrl,
+      originalCompanyName,
       winnerCompanyName,
+      tripToken,
+      bodyParamCount: sendResult.bodyParameters?.length ?? null,
+      bodyParameters: sendResult.bodyParameters || null,
+      urlParameter: sendResult.urlParameter || null,
       dryRunPayload: sendResult.dryRunPayload || null,
       passengerPhoneDigits: whatsappCloudRecipient(passengerPhone),
       dryRun: true,
@@ -206,6 +221,7 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
 
   const sendResult = await sendRescueOfferTemplate({
     toPhone: passengerPhone,
+    originalCompanyName,
     winnerCompanyName,
     tripToken,
     dryRun: false,
@@ -242,6 +258,7 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
     messageId: sendResult.messageId || null,
     template: sendResult.template || null,
     tripUrl,
+    originalCompanyName,
     winnerCompanyName,
     passengerPhoneDigits: whatsappCloudRecipient(passengerPhone),
   }
@@ -290,6 +307,7 @@ export async function notifyRescuePassengerReminderWhatsApp(admin, opts = {}) {
   if (dryRun) {
     const sendResult = await sendRescueReminderTemplate({
       toPhone: passengerPhone,
+      winnerCompanyName,
       tripToken,
       dryRun: true,
     })
@@ -301,6 +319,10 @@ export async function notifyRescuePassengerReminderWhatsApp(admin, opts = {}) {
       metaTemplateSetupRequired: sendResult.metaTemplateSetupRequired === true,
       tripUrl,
       winnerCompanyName,
+      tripToken,
+      bodyParamCount: sendResult.bodyParameters?.length ?? null,
+      bodyParameters: sendResult.bodyParameters || null,
+      urlParameter: sendResult.urlParameter || null,
       dryRunPayload: sendResult.dryRunPayload || null,
       dryRun: true,
     }
@@ -346,6 +368,7 @@ export async function notifyRescuePassengerReminderWhatsApp(admin, opts = {}) {
 
   const sendResult = await sendRescueReminderTemplate({
     toPhone: passengerPhone,
+    winnerCompanyName,
     tripToken,
     dryRun: false,
   })

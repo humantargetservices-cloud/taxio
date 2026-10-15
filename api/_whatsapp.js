@@ -79,17 +79,31 @@ export function parseRescueButtonPayload(rawPayload) {
 }
 
 /**
- * Active offer template: body {{1}} = winner company; URL button → /trip/{{1}} suffix = trip token.
+ * Active offer template (taxio_rescue_offer_staging):
+ * Body {{1}} = original Company A, {{2}} = Rescue winner
+ * URL button → /trip/{{1}} suffix = passenger_trip_token
  */
-export function buildRescueOfferTemplateComponents({ winnerCompanyName, tripToken }) {
-  const winner = String(winnerCompanyName || 'A taxi company').slice(0, 60)
+export function buildRescueOfferTemplateComponents({
+  originalCompanyName,
+  winnerCompanyName,
+  tripToken,
+}) {
+  const original = String(originalCompanyName || '').trim().slice(0, 60)
+  const winner = String(winnerCompanyName || '').trim().slice(0, 60)
   const token = String(tripToken || '').trim()
   return {
-    bodyParameters: [{ type: 'text', text: winner }],
+    bodyParameters: [
+      { type: 'text', text: original },
+      { type: 'text', text: winner },
+    ],
+    urlParameter: token,
     components: [
       {
         type: 'body',
-        parameters: [{ type: 'text', text: winner }],
+        parameters: [
+          { type: 'text', text: original },
+          { type: 'text', text: winner },
+        ],
       },
       {
         type: 'button',
@@ -102,13 +116,21 @@ export function buildRescueOfferTemplateComponents({ winnerCompanyName, tripToke
 }
 
 /**
- * Active reminder template: no body vars; URL button → /trip/{{1}} suffix = trip token.
+ * Active reminder template (taxio_rescue_reminder_staging):
+ * Body {{1}} = Rescue winner
+ * URL button → /trip/{{1}} suffix = passenger_trip_token
  */
-export function buildRescueReminderTemplateComponents({ tripToken }) {
+export function buildRescueReminderTemplateComponents({ winnerCompanyName, tripToken }) {
+  const winner = String(winnerCompanyName || '').trim().slice(0, 60)
   const token = String(tripToken || '').trim()
   return {
-    bodyParameters: [],
+    bodyParameters: [{ type: 'text', text: winner }],
+    urlParameter: token,
     components: [
+      {
+        type: 'body',
+        parameters: [{ type: 'text', text: winner }],
+      },
       {
         type: 'button',
         sub_type: 'url',
@@ -280,14 +302,20 @@ async function sendCloudTemplate({ toPhone, templateName, components, bodyParamC
  */
 export async function sendRescueOfferTemplate({
   toPhone,
+  originalCompanyName,
   winnerCompanyName,
   tripToken,
   dryRun = false,
 }) {
   const token = String(tripToken || '').trim()
   if (token.length < 20) return { ok: false, skipped: true, error: 'INVALID_TRIP_TOKEN' }
+  const original = String(originalCompanyName || '').trim()
+  const winner = String(winnerCompanyName || '').trim()
+  if (!original || !winner) {
+    return { ok: false, skipped: true, error: 'MISSING_COMPANY_NAMES' }
+  }
 
-  if (!rescueOfferTemplateConfigured()) {
+  if (!rescueOfferTemplateConfigured() && !dryRun) {
     return {
       ok: false,
       skipped: true,
@@ -297,24 +325,46 @@ export async function sendRescueOfferTemplate({
     }
   }
 
-  const built = buildRescueOfferTemplateComponents({ winnerCompanyName, tripToken: token })
-  return sendCloudTemplate({
+  const built = buildRescueOfferTemplateComponents({
+    originalCompanyName: original,
+    winnerCompanyName: winner,
+    tripToken: token,
+  })
+  const result = await sendCloudTemplate({
     toPhone,
-    templateName: rescueOfferTemplateName(),
+    templateName: rescueOfferTemplateName() || 'taxio_rescue_offer_staging',
     components: built.components,
     bodyParamCount: built.bodyParameters.length,
     dryRun,
   })
+  if (dryRun && result.ok) {
+    return {
+      ...result,
+      bodyParameters: built.bodyParameters,
+      urlParameter: built.urlParameter,
+      originalCompanyName: original,
+      winnerCompanyName: winner,
+      tripToken: token,
+    }
+  }
+  return result
 }
 
 /**
  * 20-minute reminder WhatsApp — View Booking only.
  */
-export async function sendRescueReminderTemplate({ toPhone, tripToken, dryRun = false }) {
+export async function sendRescueReminderTemplate({
+  toPhone,
+  winnerCompanyName,
+  tripToken,
+  dryRun = false,
+}) {
   const token = String(tripToken || '').trim()
   if (token.length < 20) return { ok: false, skipped: true, error: 'INVALID_TRIP_TOKEN' }
+  const winner = String(winnerCompanyName || '').trim()
+  if (!winner) return { ok: false, skipped: true, error: 'MISSING_WINNER_NAME' }
 
-  if (!rescueReminderTemplateConfigured()) {
+  if (!rescueReminderTemplateConfigured() && !dryRun) {
     return {
       ok: false,
       skipped: true,
@@ -324,14 +374,27 @@ export async function sendRescueReminderTemplate({ toPhone, tripToken, dryRun = 
     }
   }
 
-  const built = buildRescueReminderTemplateComponents({ tripToken: token })
-  return sendCloudTemplate({
+  const built = buildRescueReminderTemplateComponents({
+    winnerCompanyName: winner,
+    tripToken: token,
+  })
+  const result = await sendCloudTemplate({
     toPhone,
-    templateName: rescueReminderTemplateName(),
+    templateName: rescueReminderTemplateName() || 'taxio_rescue_reminder_staging',
     components: built.components,
     bodyParamCount: built.bodyParameters.length,
     dryRun,
   })
+  if (dryRun && result.ok) {
+    return {
+      ...result,
+      bodyParameters: built.bodyParameters,
+      urlParameter: built.urlParameter,
+      winnerCompanyName: winner,
+      tripToken: token,
+    }
+  }
+  return result
 }
 
 /**
