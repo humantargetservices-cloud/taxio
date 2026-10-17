@@ -88,15 +88,91 @@ export function formatActiveTripWhen(iso) {
   }
 }
 
+function fillMessageTemplate(template, vars) {
+  let s = String(template || '')
+  for (const [k, v] of Object.entries(vars || {})) {
+    s = s.split(`{${k}}`).join(String(v ?? ''))
+  }
+  return s
+}
+
+const DEFAULT_COMPANY_TO_PASSENGER_WA = `Hello {passenger_name},
+
+This is {company_name} regarding your TAXIO booking {booking_reference}.
+
+Your trip is confirmed.
+
+Pickup: {pickup}
+Destination: {destination}
+Time: {trip_datetime}
+
+If you need to update anything, you can reply to this message.`
+
+export const DEFAULT_COMPANY_TO_PASSENGER_ON_WAY_WA = `Hello {passenger_name},
+
+This is {company_name} regarding your TAXIO booking {booking_reference}.
+
+I'm on my way to your pickup location.
+
+Pickup: {pickup}
+Destination: {destination}
+Time: {trip_datetime}
+
+If you need anything, you can reply to this message.`
+
+/**
+ * Professional prefilled WhatsApp from company/driver → passenger (confirmed trip).
+ * Does not change when PII becomes available — caller supplies unlocked fields only.
+ */
+export function buildCompanyToPassengerWhatsappMessage({
+  passengerName,
+  companyName,
+  bookingReference,
+  pickup,
+  destination,
+  tripDatetime,
+  template,
+} = {}) {
+  const name = String(passengerName || '').trim()
+  const safeName = name && name !== 'Booking request' ? name : 'there'
+  return fillMessageTemplate(template || DEFAULT_COMPANY_TO_PASSENGER_WA, {
+    passenger_name: safeName,
+    company_name: companyName || 'TAXIO',
+    booking_reference: bookingReference || '—',
+    pickup: pickup || '—',
+    destination: destination || '—',
+    trip_datetime: tripDatetime || '—',
+  })
+}
+
 /** Normalize passenger phone digits for wa.me / tel: (BE-friendly). */
-export function passengerContactLinks(phoneRaw, { companyName, pickup, dropoff } = {}) {
+export function passengerContactLinks(
+  phoneRaw,
+  {
+    companyName,
+    pickup,
+    dropoff,
+    passengerName,
+    bookingReference,
+    tripDatetime,
+    messageTemplate,
+  } = {}
+) {
   const phone = String(phoneRaw || '').trim()
   if (!phone) return { phone: '', waHref: '', telHref: '' }
   let waDigits = phone.replace(/\D/g, '')
   if (waDigits.startsWith('00')) waDigits = waDigits.slice(2)
   if (waDigits.startsWith('0')) waDigits = `32${waDigits.slice(1)}`
   const telHref = `tel:${phone.replace(/\s+/g, '')}`
-  const prefill = `Hello, this is ${companyName || 'TAXIO'}. Regarding your TAXIO trip from ${pickup || '—'} to ${dropoff || '—'}.`
+  const prefill = buildCompanyToPassengerWhatsappMessage({
+    passengerName,
+    companyName,
+    bookingReference,
+    pickup,
+    destination: dropoff,
+    tripDatetime,
+    template: messageTemplate,
+  })
   const waHref =
     waDigits.length >= 8 && waDigits.length <= 15
       ? `https://wa.me/${waDigits}?text=${encodeURIComponent(prefill)}`
@@ -135,18 +211,27 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
     if (rescueTakenBookingIds.has(String(b.id))) continue
     // Legacy fallback only when completed_at is absent
     if (!isOperationalRideTime(b.ride_datetime)) continue
+    const pickupStatus = String(b.driver_pickup_status || '')
+      .trim()
+      .toUpperCase()
     trips.push({
       id: `booking:${b.id}`,
       kind: 'company_a_confirmed',
       phase: 'confirmed',
       bookingId: b.id,
+      bookingReference: b.booking_reference || null,
       rescueRequestId: null,
       pickup: preferRouteLabel(b.pickup_address),
+      pickupAddress: String(b.pickup_address || '').trim() || null,
+      pickupLat: Number.isFinite(Number(b.pickup_lat)) ? Number(b.pickup_lat) : null,
+      pickupLng: Number.isFinite(Number(b.pickup_lng)) ? Number(b.pickup_lng) : null,
       dropoff: preferRouteLabel(b.dropoff_address),
       whenIso: b.ride_datetime || null,
       priceLabel: tripPriceLabelFromBooking(b) || null,
       passengerName: String(b.customer_name || '').trim() || null,
       passengerPhone: String(b.customer_phone || '').trim() || null,
+      driverPickupStatus:
+        pickupStatus === 'ON_THE_WAY' || pickupStatus === 'ARRIVED' ? pickupStatus : null,
       needsPii: false,
       sortAt: new Date(b.ride_datetime || b.created_at || 0).getTime() || 0,
     })
@@ -171,6 +256,7 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
       id: `rescue:${rid}`,
       rescueRequestId: rid,
       bookingId: r.booking_request_id || null,
+      bookingReference: r.preview_booking_reference || r.booking_reference || null,
       pickup: preferRouteLabel(r.preview_pickup_label),
       dropoff: preferRouteLabel(r.preview_dropoff_label),
       whenIso: r.preview_ride_datetime || null,
@@ -202,6 +288,10 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
         phase: 'confirmed',
         passengerName: null,
         passengerPhone: null,
+        pickupAddress: null,
+        pickupLat: null,
+        pickupLng: null,
+        driverPickupStatus: null,
         needsPii: true,
       })
     }
@@ -236,10 +326,20 @@ export async function enrichActiveTripsWithWinnerDetails(trips) {
           t.needsPii = false
           return
         }
-        if (b.pickup_address) t.pickup = preferRouteLabel(b.pickup_address, t.pickup)
+        if (b.pickup_address) {
+          t.pickup = preferRouteLabel(b.pickup_address, t.pickup)
+          t.pickupAddress = String(b.pickup_address || '').trim() || t.pickupAddress
+        }
         if (b.dropoff_address) t.dropoff = preferRouteLabel(b.dropoff_address, t.dropoff)
         if (b.ride_datetime) t.whenIso = b.ride_datetime
         if (b.id) t.bookingId = b.id
+        if (b.booking_reference) t.bookingReference = b.booking_reference
+        if (Number.isFinite(Number(b.pickup_lat))) t.pickupLat = Number(b.pickup_lat)
+        if (Number.isFinite(Number(b.pickup_lng))) t.pickupLng = Number(b.pickup_lng)
+        const ps = String(b.driver_pickup_status || '')
+          .trim()
+          .toUpperCase()
+        t.driverPickupStatus = ps === 'ON_THE_WAY' || ps === 'ARRIVED' ? ps : null
         if (b.customer_name) t.passengerName = String(b.customer_name).trim() || null
         if (b.customer_phone) t.passengerPhone = String(b.customer_phone).trim() || null
         if (body.passenger_confirm_status === 'CANCELLED_BY_PASSENGER') {
@@ -276,6 +376,7 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
   const when = escapeHtml(formatActiveTripWhen(trip.whenIso))
   const price = trip.priceLabel ? escapeHtml(trip.priceLabel) : ''
 
+  const pickupProgress = String(trip.driverPickupStatus || '').toUpperCase()
   let badgeClass =
     'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300'
   let badge = td.activeTripsConfirmed || 'Confirmed'
@@ -285,6 +386,12 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
   } else if (phase === 'cancelled') {
     badgeClass = 'bg-slate-200 text-slate-700 dark:bg-slate-700/50 dark:text-slate-300'
     badge = td.activeTripsCancelled || 'Cancelled'
+  } else if (pickupProgress === 'ON_THE_WAY') {
+    badgeClass = 'bg-sky-100 text-sky-900 dark:bg-sky-500/15 dark:text-sky-300'
+    badge = td.activeTripsOnTheWay || 'On the way'
+  } else if (pickupProgress === 'ARRIVED') {
+    badgeClass = 'bg-violet-100 text-violet-900 dark:bg-violet-500/15 dark:text-violet-300'
+    badge = td.activeTripsArrived || 'Arrived'
   }
 
   const metaRow = `<div class="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
@@ -299,10 +406,18 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
     )}</p>`
   } else if (phase === 'confirmed') {
     const name = String(trip.passengerName || '').trim()
+    const waTemplate =
+      pickupProgress === 'ON_THE_WAY' || pickupProgress === 'ARRIVED'
+        ? td.waPassengerOnWayMessage || td.waPassengerConfirmedMessage
+        : td.waPassengerConfirmedMessage
     const { phone, waHref, telHref } = passengerContactLinks(trip.passengerPhone, {
       companyName: opts.companyName,
       pickup: trip.pickup,
       dropoff: trip.dropoff,
+      passengerName: name,
+      bookingReference: trip.bookingReference,
+      tripDatetime: formatDateTime(trip.whenIso),
+      messageTemplate: waTemplate,
     })
     const nameHtml =
       name && name !== 'Booking request'
@@ -314,28 +429,68 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
     const rescueAttr = trip.rescueRequestId
       ? ` data-complete-rescue="${escapeHtml(String(trip.rescueRequestId))}"`
       : ''
-    const completeBtn = `<button type="button"${bookingAttr}${rescueAttr} data-complete-trip class="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl border border-emerald-600/40 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20 sm:flex-none">${escapeHtml(
+    const progressAttrs = `${bookingAttr}${rescueAttr}`
+    const navDest =
+      Number.isFinite(trip.pickupLat) && Number.isFinite(trip.pickupLng)
+        ? `${trip.pickupLat},${trip.pickupLng}`
+        : String(trip.pickupAddress || trip.pickup || '').trim()
+    const navEncoded = encodeURIComponent(navDest || '')
+    const gmapsHref = navDest
+      ? `https://www.google.com/maps/dir/?api=1&destination=${navEncoded}&travelmode=driving`
+      : ''
+    const wazeHref = navDest
+      ? Number.isFinite(trip.pickupLat) && Number.isFinite(trip.pickupLng)
+        ? `https://waze.com/ul?ll=${trip.pickupLat}%2C${trip.pickupLng}&navigate=yes`
+        : `https://waze.com/ul?q=${navEncoded}&navigate=yes`
+      : ''
+    const btnBase =
+      'inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl px-3 py-2 text-xs font-bold sm:flex-none'
+    const navigateBtn = navDest
+      ? `<details class="relative flex-1 sm:flex-none">
+          <summary class="${btnBase} cursor-pointer list-none border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 [&::-webkit-details-marker]:hidden">${escapeHtml(
+            td.activeTripsNavigate || 'Navigate to pickup'
+          )}</summary>
+          <div class="absolute left-0 z-20 mt-1 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-600 dark:bg-slate-900">
+            <a href="${escapeHtml(gmapsHref)}" target="_blank" rel="noopener noreferrer" class="block px-3 py-2.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800">${escapeHtml(
+              td.activeTripsGoogleMaps || 'Google Maps'
+            )}</a>
+            <a href="${escapeHtml(wazeHref)}" target="_blank" rel="noopener noreferrer" class="block border-t border-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">${escapeHtml(
+              td.activeTripsWaze || 'Waze'
+            )}</a>
+          </div>
+        </details>`
+      : ''
+    const onWayBtn = `<button type="button"${progressAttrs} data-mark-on-way class="${btnBase} bg-sky-600 text-white hover:bg-sky-500">${escapeHtml(
+      td.activeTripsOnWay || "I'm on my way"
+    )}</button>`
+    const arrivedBtn = `<button type="button"${progressAttrs} data-mark-arrived class="${btnBase} bg-violet-600 text-white hover:bg-violet-500">${escapeHtml(
+      td.activeTripsIveArrived || "I've arrived"
+    )}</button>`
+    const completeBtn = `<button type="button"${progressAttrs} data-complete-trip class="${btnBase} border border-emerald-600/40 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20">${escapeHtml(
       td.activeTripsComplete || 'Complete trip'
     )}</button>`
-    const actions = `<div class="mt-2 flex flex-wrap gap-2">
-        ${
-          waHref
-            ? `<a href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500 sm:flex-none">${escapeHtml(
-                td.wa || 'WhatsApp'
-              )}</a>`
-            : ''
-        }
-        ${
-          telHref
-            ? `<a href="${escapeHtml(telHref)}" class="inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 sm:flex-none">${escapeHtml(
-                td.call || 'Call'
-              )}</a>`
-            : phone
-              ? `<span class="text-xs text-gray-500">${escapeHtml(phone)}</span>`
-              : ''
-        }
-        ${completeBtn}
-      </div>`
+    const waBtn = waHref
+      ? `<a href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer" class="${btnBase} bg-emerald-600 text-white hover:bg-emerald-500">${escapeHtml(
+          td.wa || 'WhatsApp'
+        )}</a>`
+      : ''
+    const callBtn = telHref
+      ? `<a href="${escapeHtml(telHref)}" class="${btnBase} border border-gray-200 bg-white text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700">${escapeHtml(
+          td.call || 'Call'
+        )}</a>`
+      : phone
+        ? `<span class="text-xs text-gray-500">${escapeHtml(phone)}</span>`
+        : ''
+
+    let actionBits = []
+    if (!pickupProgress) {
+      actionBits = [navigateBtn, onWayBtn, waBtn, callBtn]
+    } else if (pickupProgress === 'ON_THE_WAY') {
+      actionBits = [navigateBtn, arrivedBtn, waBtn, callBtn]
+    } else {
+      actionBits = [waBtn, callBtn, completeBtn]
+    }
+    const actions = `<div class="mt-2 flex flex-wrap gap-2">${actionBits.filter(Boolean).join('')}</div>`
     foot = `${nameHtml}${actions}`
   }
 

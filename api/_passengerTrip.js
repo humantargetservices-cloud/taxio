@@ -54,6 +54,10 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     return { ok: false, state: 'INVALID', code: 'INVALID' }
   }
 
+  const pickupStatus = String(booking.driver_pickup_status || '')
+    .trim()
+    .toUpperCase()
+  const etaRaw = Number(booking.driver_eta_minutes)
   const trip = {
     booking_reference: booking.booking_reference || null,
     pickup: booking.pickup_address || null,
@@ -63,6 +67,14 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     service_type: booking.service_type || null,
     estimated_price_eur: cleanPrice(booking.estimated_price_eur),
     price_currency: booking.price_currency || 'EUR',
+    driver_pickup_status:
+      pickupStatus === 'ON_THE_WAY' || pickupStatus === 'ARRIVED' ? pickupStatus : null,
+    driver_eta_minutes:
+      pickupStatus === 'ON_THE_WAY' && Number.isFinite(etaRaw) && etaRaw >= 0
+        ? Math.round(etaRaw)
+        : null,
+    driver_on_way_at: booking.driver_on_way_at || null,
+    driver_arrived_at: booking.driver_arrived_at || null,
   }
 
   const companyAName = companyA?.name || 'your taxi company'
@@ -220,13 +232,24 @@ export async function loadTripByPassengerToken(supabase, tripToken) {
   const token = String(tripToken || '').trim()
   if (token.length < 20) return { booking: null }
 
-  const { data: booking, error } = await supabase
+  let { data: booking, error } = await supabase
     .from('booking_requests')
     .select(
-      'id, company_id, status, booking_reference, pickup_address, dropoff_address, ride_datetime, car_type, service_type, estimated_price_eur, price_currency, decision_deadline_at, passenger_trip_token, created_at'
+      'id, company_id, status, booking_reference, pickup_address, dropoff_address, ride_datetime, car_type, service_type, estimated_price_eur, price_currency, decision_deadline_at, passenger_trip_token, created_at, completed_at, driver_pickup_status, driver_on_way_at, driver_arrived_at, driver_eta_minutes, driver_eta_updated_at, pickup_lat, pickup_lng'
     )
     .eq('passenger_trip_token', token)
     .maybeSingle()
+
+  // Before migration 15: fall back without pickup-progress columns
+  if (error && /driver_pickup_status|pickup_lat|schema cache|column/i.test(error.message || '')) {
+    ;({ data: booking, error } = await supabase
+      .from('booking_requests')
+      .select(
+        'id, company_id, status, booking_reference, pickup_address, dropoff_address, ride_datetime, car_type, service_type, estimated_price_eur, price_currency, decision_deadline_at, passenger_trip_token, created_at, completed_at'
+      )
+      .eq('passenger_trip_token', token)
+      .maybeSingle())
+  }
 
   if (error || !booking) return { booking: null, error }
 

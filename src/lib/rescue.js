@@ -218,6 +218,42 @@ export async function completeCompanyTrip({ companyId, bookingRequestId, rescueR
   }
 }
 
+/** Driver → ON_THE_WAY (optional one-shot driver coords for ETA only; never stored). */
+export async function markDriverOnTheWay({
+  companyId,
+  bookingRequestId,
+  rescueRequestId,
+  driverLat,
+  driverLng,
+}) {
+  try {
+    return await rescueAuthedPost({
+      action: 'mark_on_way',
+      companyId,
+      bookingRequestId: bookingRequestId || undefined,
+      rescueRequestId: rescueRequestId || undefined,
+      driver_lat: Number.isFinite(driverLat) ? driverLat : undefined,
+      driver_lng: Number.isFinite(driverLng) ? driverLng : undefined,
+    })
+  } catch (e) {
+    return { ok: false, status: 0, body: { code: 'NETWORK', error: e?.message || 'failed' } }
+  }
+}
+
+/** Driver → ARRIVED (no GPS required). */
+export async function markDriverArrived({ companyId, bookingRequestId, rescueRequestId }) {
+  try {
+    return await rescueAuthedPost({
+      action: 'mark_arrived',
+      companyId,
+      bookingRequestId: bookingRequestId || undefined,
+      rescueRequestId: rescueRequestId || undefined,
+    })
+  } catch (e) {
+    return { ok: false, status: 0, body: { code: 'NETWORK', error: e?.message || 'failed' } }
+  }
+}
+
 export async function passengerRescuePreview(token) {
   const res = await fetch(apiUrl('/api/rescue'), {
     method: 'POST',

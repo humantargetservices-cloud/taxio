@@ -8,8 +8,18 @@ import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
 import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { cleanTripPriceDisplay } from '../lib/rescuePrice.js'
+import { tTripLive } from '../i18n.js'
+import { getLocale } from '../lib/locale.js'
 
 const POLL_MS = 4000
+
+function fillTpl(template, vars) {
+  let s = String(template || '')
+  for (const [k, v] of Object.entries(vars || {})) {
+    s = s.split(`{${k}}`).join(String(v ?? ''))
+  }
+  return s
+}
 
 function shell(inner) {
   return `<div class="min-h-screen bg-gradient-to-b from-slate-100 via-[#eef0f3] to-slate-200 px-4 py-8">
@@ -30,30 +40,59 @@ function priceLabel(trip) {
   return cleanTripPriceDisplay(raw) || raw
 }
 
-function tripSummaryHtml(trip) {
+function tripSummaryHtml(trip, tl) {
   if (!trip) return ''
   const when = formatDateTime(trip.ride_datetime) || '—'
-  const drop =
+  const destination =
     trip.service_type === 'hourly'
-      ? ''
-      : `<p class="mt-1 text-sm text-gray-800"><span class="font-semibold text-gray-500">To:</span> ${escapeHtml(trip.dropoff || '—')}</p>`
+      ? tl.hourlyDestination || 'Hourly'
+      : trip.dropoff || '—'
+  const ref = String(trip.booking_reference || '').trim()
   return `<div class="mt-4 rounded-xl border border-gray-100 bg-slate-50 px-4 py-3">
     <p class="text-sm font-semibold text-gray-900">${escapeHtml(trip.pickup || '—')} → ${escapeHtml(
-      trip.service_type === 'hourly' ? 'Hourly' : trip.dropoff || '—'
+      destination
     )}</p>
-    <p class="mt-1 text-sm font-semibold text-amber-700">Estimated price: ${escapeHtml(priceLabel(trip))}</p>
-    <p class="mt-1 text-xs text-gray-500">When: ${escapeHtml(when)}</p>
-    <p class="mt-1 text-xs text-gray-500">Vehicle: ${escapeHtml(trip.vehicle || '—')}</p>
+    <p class="mt-1 text-sm font-semibold text-amber-700">${escapeHtml(
+      tl.estimatedPrice || 'Estimated price'
+    )}: ${escapeHtml(priceLabel(trip))}</p>
+    <p class="mt-1 text-xs text-gray-500">${escapeHtml(tl.when || 'When')}: ${escapeHtml(when)}</p>
+    <p class="mt-1 text-xs text-gray-500">${escapeHtml(tl.vehicle || 'Vehicle')}: ${escapeHtml(
+      trip.vehicle || '—'
+    )}</p>
     ${
-      trip.booking_reference
-        ? `<p class="mt-1 text-xs text-gray-500">Ref: ${escapeHtml(trip.booking_reference)}</p>`
+      ref
+        ? `<div class="mt-2 flex items-center gap-2 text-xs text-gray-600">
+      <span>${escapeHtml(tl.refLabel || 'Ref')}: <span class="font-semibold text-gray-800" data-booking-ref>${escapeHtml(
+          ref
+        )}</span></span>
+      <button type="button" data-copy-ref class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="${escapeHtml(
+        tl.copyRef || 'Copy reference'
+      )}" title="${escapeHtml(tl.copyRef || 'Copy reference')}">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5" aria-hidden="true"><path d="M8 2a1 1 0 0 0-1 1v1H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a1 1 0 0 0 1-1V6.414A2 2 0 0 0 14.414 5L12 2.586A2 2 0 0 0 10.586 2H8zm4 4V3.414L14.586 6H13a1 1 0 0 1-1-1zM5 6h3v1a1 1 0 0 0 1 1h4v7H5V6z"/></svg>
+      </button>
+      <span data-copy-feedback class="hidden text-[11px] font-semibold text-emerald-700">${escapeHtml(
+        tl.copied || 'Copied'
+      )}</span>
+    </div>`
         : ''
     }
-    ${drop && trip.service_type === 'hourly' ? drop : ''}
   </div>`
 }
 
-function contactButtonsHtml(contacts, companyName) {
+function buildPassengerToCompanyMessage(tl, { companyName, bookingReference, pickup, destination, tripDatetime }) {
+  const tpl =
+    tl.contactWaBody ||
+    `Hello {company_name},\n\nI'm contacting you about my TAXIO booking {booking_reference}.\n\nPickup: {pickup}\nDestination: {destination}\nTime: {trip_datetime}\n\nPlease let me know if you need any additional information.\n\nThank you.`
+  return fillTpl(tpl, {
+    company_name: companyName || 'TAXIO',
+    booking_reference: bookingReference || '—',
+    pickup: pickup || '—',
+    destination: destination || '—',
+    trip_datetime: tripDatetime || '—',
+  })
+}
+
+function contactButtonsHtml(contacts, companyName, trip, tl) {
   if (!contacts) return ''
   const phone = String(contacts.phone || '').trim()
   const email = String(contacts.email || '').trim()
@@ -61,27 +100,118 @@ function contactButtonsHtml(contacts, companyName) {
   if (waDigits.startsWith('00')) waDigits = waDigits.slice(2)
   if (waDigits.startsWith('0')) waDigits = `32${waDigits.slice(1)}`
   const name = companyName || contacts.name || 'TAXIO'
-  const prefill = `Hello, this is regarding my TAXIO booking with ${name}.`
+  const destination =
+    trip?.service_type === 'hourly'
+      ? tl.hourlyDestination || 'Hourly'
+      : trip?.dropoff || '—'
+  const when = formatDateTime(trip?.ride_datetime) || '—'
+  const prefill = buildPassengerToCompanyMessage(tl, {
+    companyName: name,
+    bookingReference: trip?.booking_reference,
+    pickup: trip?.pickup,
+    destination,
+    tripDatetime: when,
+  })
+  const mailSubject = fillTpl(tl.contactEmailSubject || 'TAXIO booking {booking_reference} — {company_name}', {
+    booking_reference: trip?.booking_reference || '—',
+    company_name: name,
+  })
+  const mailBody = buildPassengerToCompanyMessage(tl, {
+    companyName: name,
+    bookingReference: trip?.booking_reference,
+    pickup: trip?.pickup,
+    destination,
+    tripDatetime: when,
+  })
   const parts = []
   if (waDigits.length >= 8 && waDigits.length <= 15) {
     parts.push(
       `<a href="https://wa.me/${escapeHtml(waDigits)}?text=${encodeURIComponent(
         prefill
-      )}" target="_blank" rel="noopener noreferrer" class="flex min-h-[48px] w-full items-center justify-center rounded-xl bg-[#25D366] px-3 py-2.5 text-sm font-bold text-white hover:bg-[#1ebe5d]">WhatsApp</a>`
+      )}" target="_blank" rel="noopener noreferrer" class="flex min-h-[48px] w-full items-center justify-center rounded-xl bg-[#25D366] px-3 py-2.5 text-sm font-bold text-white hover:bg-[#1ebe5d]">${escapeHtml(
+        tl.whatsapp || 'WhatsApp'
+      )}</a>`
     )
   }
   if (phone) {
     parts.push(
-      `<a href="tel:${escapeHtml(phone)}" class="flex min-h-[48px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50">Call</a>`
+      `<a href="tel:${escapeHtml(phone)}" class="flex min-h-[48px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50">${escapeHtml(
+        tl.call || 'Call'
+      )}</a>`
     )
   }
   if (email) {
+    const mailto = `mailto:${email}?subject=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(
+      mailBody
+    )}`
     parts.push(
-      `<a href="mailto:${escapeHtml(email)}" class="flex min-h-[48px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50">Email</a>`
+      `<a href="${escapeHtml(mailto)}" class="flex min-h-[48px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50">${escapeHtml(
+        tl.email || 'Email'
+      )}</a>`
     )
   }
   if (!parts.length) return ''
-  return `<div class="mt-5 grid gap-2">${parts.join('')}</div>`
+  const heading = fillTpl(tl.contactHeading || 'Contact {company_name}', { company_name: name })
+  return `<div class="mt-5">
+    <p class="mb-2 text-sm font-bold text-slate-800">${escapeHtml(heading)}</p>
+    <div class="grid gap-2">${parts.join('')}</div>
+  </div>`
+}
+
+function pickupProgressRailHtml(status, tl) {
+  const s = String(status || '').toUpperCase()
+  const step = s === 'ARRIVED' ? 2 : s === 'ON_THE_WAY' ? 1 : 0
+  const taxiLeft = step === 0 ? '8%' : step === 1 ? '48%' : '88%'
+  const pulse = step < 2 ? 'animate-pulse' : ''
+  return `<div class="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-3 py-3" aria-hidden="true">
+    <div class="relative mx-auto h-10 max-w-xs">
+      <div class="absolute left-3 right-3 top-1/2 h-1 -translate-y-1/2 rounded-full bg-slate-200"></div>
+      <div class="absolute left-3 top-1/2 h-1 -translate-y-1/2 rounded-full bg-emerald-400 transition-all duration-500" style="width:calc(${taxiLeft} - 0.75rem)"></div>
+      <div class="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-lg ${pulse}" style="left:${taxiLeft}">🚕</div>
+      <span class="absolute left-0 top-7 text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(
+        tl.progressConfirmed || 'Confirmed'
+      )}</span>
+      <span class="absolute right-0 top-7 text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(
+        tl.progressPickup || 'Pickup'
+      )}</span>
+    </div>
+  </div>`
+}
+
+function confirmedCard(company, trip, contacts, tl) {
+  const summary = tripSummaryHtml(trip, tl)
+  const status = String(trip?.driver_pickup_status || '').toUpperCase()
+  const eta = Number(trip?.driver_eta_minutes)
+  const hasEta = status === 'ON_THE_WAY' && Number.isFinite(eta) && eta >= 0
+  let badge = tl.bookingConfirmedBadge || 'BOOKING CONFIRMED'
+  let heading = fillTpl(tl.confirmedHeading || 'Your trip with {company_name} is confirmed', {
+    company_name: company,
+  })
+  let sub = tl.confirmedTaxiSub || tl.confirmedSub || 'Your taxi is confirmed.'
+  let badgeClass = 'text-emerald-700'
+
+  if (status === 'ON_THE_WAY') {
+    badge = tl.driverOnWayBadge || 'DRIVER ON THE WAY'
+    heading = tl.driverOnWayHeading || 'Your driver is on the way.'
+    sub = hasEta
+      ? fillTpl(tl.driverEtaApprox || 'Approx. {eta} min to pickup', { eta: String(Math.round(eta)) })
+      : tl.driverOnWaySub || 'Your driver is on the way.'
+    badgeClass = 'text-sky-700'
+  } else if (status === 'ARRIVED') {
+    badge = tl.driverArrivedBadge || 'DRIVER ARRIVED'
+    heading = tl.driverArrivedHeading || 'Your driver has arrived at the pickup location.'
+    sub = tl.driverArrivedSub || 'Your driver has arrived at the pickup location.'
+    badgeClass = 'text-violet-700'
+  }
+
+  return card(`
+      <p class="text-xs font-bold uppercase tracking-wide ${badgeClass}">${escapeHtml(badge)}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(heading)}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(sub)}</p>
+      ${pickupProgressRailHtml(status, tl)}
+      ${summary}
+      ${contactButtonsHtml(contacts, company, trip, tl)}
+    `)
 }
 
 async function fetchTripStatus(token) {
@@ -94,112 +224,156 @@ async function fetchTripStatus(token) {
 }
 
 function renderState(data) {
+  const tl = tTripLive(getLocale())
   const state = String(data?.state || 'INVALID')
   const trip = data?.trip || null
-  const company = data?.headline_company || data?.company_a_name || 'your taxi company'
-  const summary = tripSummaryHtml(trip)
+  const company = data?.headline_company || data?.company_a_name || tl.fallbackCompany || 'your taxi company'
+  const summary = tripSummaryHtml(trip, tl)
 
   if (state === 'INVALID' || state === 'EXPIRED') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-slate-500">TAXIO</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">Link unavailable</h1>
-      <p class="mt-2 text-sm text-gray-600">This trip link is invalid or no longer available.</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(tl.linkUnavailableTitle || 'Link unavailable')}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.linkUnavailableBody || 'This trip link is invalid or no longer available.'
+      )}</p>
     `)
   }
 
   if (state === 'OFFER_EXPIRED') {
     return card(`
-      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Expired</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">This taxi offer has expired.</h1>
-      <p class="mt-2 text-sm text-gray-600">The confirmation window ended. No further action is needed on this page.</p>
+      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">${escapeHtml(
+        tl.expiredBadge || 'Expired'
+      )}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        tl.offerExpiredTitle || 'This taxi offer has expired.'
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.offerExpiredBody || 'The confirmation window ended. No further action is needed on this page.'
+      )}</p>
       ${summary}
     `)
   }
 
   if (state === 'REQUESTING_COMPANY_A') {
     return card(`
-      <p class="text-xs font-bold uppercase tracking-wide text-amber-700">Waiting</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">Waiting for ${escapeHtml(company)}</h1>
-      <p class="mt-2 text-sm text-gray-600">Please wait while we confirm your taxi.</p>
+      <p class="text-xs font-bold uppercase tracking-wide text-amber-700">${escapeHtml(
+        tl.waitingBadge || 'Waiting'
+      )}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        fillTpl(tl.waitingHeading || 'Waiting for {company_name}', { company_name: company })
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.waitingBody || 'Please wait while we confirm your taxi.'
+      )}</p>
       ${summary}
-      <p class="mt-4 text-center text-xs font-medium text-slate-500">This page updates automatically…</p>
+      <p class="mt-4 text-center text-xs font-medium text-slate-500">${escapeHtml(
+        tl.autoUpdateHint || 'This page updates automatically…'
+      )}</p>
     `)
   }
 
   if (state === 'COMPANY_A_ACCEPTED') {
-    return card(`
-      <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">Accepted</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(company)} accepted your trip</h1>
-      <p class="mt-2 text-sm text-gray-600">You can contact them directly about this ride.</p>
-      ${summary}
-      ${contactButtonsHtml(data.contacts, company)}
-    `)
+    return confirmedCard(company, trip, data.contacts, tl)
   }
 
   if (state === 'SEARCHING_RESCUE') {
     return card(`
-      <p class="text-xs font-bold uppercase tracking-wide text-amber-700">Finding a taxi</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(company)} is unavailable</h1>
-      <p class="mt-2 text-sm text-gray-600">We’re finding another available taxi for you…</p>
+      <p class="text-xs font-bold uppercase tracking-wide text-amber-700">${escapeHtml(
+        tl.findingBadge || 'Finding a taxi'
+      )}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        fillTpl(tl.unavailableHeading || '{company_name} is unavailable', { company_name: company })
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.findingBody || 'We’re finding another available taxi for you…'
+      )}</p>
       ${summary}
-      <p class="mt-4 text-center text-xs font-medium text-slate-500">This page updates automatically…</p>
+      <p class="mt-4 text-center text-xs font-medium text-slate-500">${escapeHtml(
+        tl.autoUpdateHint || 'This page updates automatically…'
+      )}</p>
     `)
   }
 
   if (state === 'RESCUE_WINNER_FOUND') {
     return card(`
-      <p class="text-xs font-bold uppercase tracking-wide text-amber-700">Taxi found</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(company)} can take your trip</h1>
-      <p class="mt-2 text-sm text-gray-600">Same trip. Same estimated price.</p>
-      <p class="mt-1 text-sm font-medium text-amber-800">Please confirm within 30 minutes.</p>
+      <p class="text-xs font-bold uppercase tracking-wide text-amber-700">${escapeHtml(
+        tl.taxiFoundBadge || 'Taxi found'
+      )}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        fillTpl(tl.taxiFoundHeading || '{company_name} can take your trip', { company_name: company })
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.taxiFoundBody || 'Same trip. Same estimated price.'
+      )}</p>
+      <p class="mt-1 text-sm font-medium text-amber-800">${escapeHtml(
+        tl.confirmWithin || 'Please confirm within 30 minutes.'
+      )}</p>
       ${summary}
       <div class="mt-5 grid gap-2">
-        <button type="button" id="trip-confirm" class="min-h-[48px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500">CONFIRM TRIP</button>
-        <button type="button" id="trip-cancel" class="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800 hover:bg-slate-50">CANCEL</button>
+        <button type="button" id="trip-confirm" class="min-h-[48px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500">${escapeHtml(
+          tl.confirmTrip || 'CONFIRM TRIP'
+        )}</button>
+        <button type="button" id="trip-cancel" class="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800 hover:bg-slate-50">${escapeHtml(
+          tl.cancelTrip || 'CANCEL'
+        )}</button>
       </div>
       <p id="trip-msg" class="mt-3 hidden text-center text-sm font-medium text-red-600"></p>
     `)
   }
 
   if (state === 'CONFIRMED') {
-    return card(`
-      <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">Confirmed</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">Trip confirmed with ${escapeHtml(company)}</h1>
-      <p class="mt-2 text-sm text-gray-600">You can contact them about your ride.</p>
-      ${summary}
-      ${contactButtonsHtml(data.contacts, company)}
-    `)
+    return confirmedCard(company, trip, data.contacts, tl)
   }
 
   if (state === 'CANCELLED') {
     return card(`
-      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Cancelled</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">Trip cancelled</h1>
-      <p class="mt-2 text-sm text-gray-600">This reassignment was cancelled. No further action is needed.</p>
+      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">${escapeHtml(
+        tl.cancelledBadge || 'Cancelled'
+      )}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        tl.cancelledTitle || 'Trip cancelled'
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.cancelledBody || 'This reassignment was cancelled. No further action is needed.'
+      )}</p>
       ${summary}
     `)
   }
 
   if (state === 'NO_TAXI_AVAILABLE') {
     return card(`
-      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">Unavailable</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">No taxi is currently available for this trip.</h1>
-      <p class="mt-2 text-sm text-gray-600">Please try booking again later.</p>
+      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">${escapeHtml(
+        tl.unavailableBadge || 'Unavailable'
+      )}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        tl.noTaxiTitle || 'No taxi is currently available for this trip.'
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.noTaxiBody || 'Please try booking again later.'
+      )}</p>
       ${summary}
     `)
   }
 
   return card(`
-    <p class="text-center text-sm font-semibold text-gray-700">This trip link is no longer active.</p>
+    <p class="text-center text-sm font-semibold text-gray-700">${escapeHtml(
+      tl.linkInactive || 'This trip link is no longer active.'
+    )}</p>
   `)
 }
 
 export async function mountTripLive(root, secureToken) {
   document.title = 'TAXIO · Your trip'
   const token = String(secureToken || '').trim()
+  const tl = tTripLive(getLocale())
   if (token.length < 20) {
     root.innerHTML = shell(
-      card(`<p class="text-center text-sm font-semibold text-red-600">This trip link is invalid.</p>`)
+      card(
+        `<p class="text-center text-sm font-semibold text-red-600">${escapeHtml(
+          tl.invalidLink || 'This trip link is invalid.'
+        )}</p>`
+      )
     )
     return
   }
@@ -208,6 +382,7 @@ export async function mountTripLive(root, secureToken) {
   let lastState = ''
   let busy = false
   let latest = null
+  let copyTimer = null
 
   const stopPoll = () => {
     if (pollTimer) {
@@ -216,7 +391,29 @@ export async function mountTripLive(root, secureToken) {
     }
   }
 
+  const bindCopyRef = () => {
+    const btn = root.querySelector('[data-copy-ref]')
+    const feedback = root.querySelector('[data-copy-feedback]')
+    const refEl = root.querySelector('[data-booking-ref]')
+    if (!btn || !refEl) return
+    btn.addEventListener('click', async () => {
+      const text = String(refEl.textContent || '').trim()
+      if (!text) return
+      try {
+        await navigator.clipboard.writeText(text)
+      } catch {
+        return
+      }
+      if (feedback) {
+        feedback.classList.remove('hidden')
+        if (copyTimer) window.clearTimeout(copyTimer)
+        copyTimer = window.setTimeout(() => feedback.classList.add('hidden'), 1600)
+      }
+    })
+  }
+
   const bindActions = () => {
+    bindCopyRef()
     const msgEl = root.querySelector('#trip-msg')
     const setBusy = (v) => {
       busy = v
@@ -231,7 +428,8 @@ export async function mountTripLive(root, secureToken) {
       const confirmToken = latest?.confirm_token
       if (!confirmToken) {
         if (msgEl) {
-          msgEl.textContent = 'Confirmation is not available yet. Please wait a moment.'
+          msgEl.textContent =
+            tl.confirmNotReady || 'Confirmation is not available yet. Please wait a moment.'
           msgEl.classList.remove('hidden')
         }
         return
@@ -243,8 +441,8 @@ export async function mountTripLive(root, secureToken) {
         if (msgEl) {
           msgEl.textContent =
             result?.code === 'EXPIRED'
-              ? 'This taxi offer has expired.'
-              : 'Could not confirm. Please try again.'
+              ? tl.offerExpiredTitle || 'This taxi offer has expired.'
+              : tl.confirmFailed || 'Could not confirm. Please try again.'
           msgEl.classList.remove('hidden')
         }
         if (result?.code === 'EXPIRED') {
@@ -266,7 +464,7 @@ export async function mountTripLive(root, secureToken) {
       if (!result?.ok) {
         setBusy(false)
         if (msgEl) {
-          msgEl.textContent = 'Could not cancel. Please try again.'
+          msgEl.textContent = tl.cancelFailed || 'Could not cancel. Please try again.'
           msgEl.classList.remove('hidden')
         }
         return
@@ -279,15 +477,26 @@ export async function mountTripLive(root, secureToken) {
   const paint = (data) => {
     latest = data
     const state = String(data?.state || 'INVALID')
-    const terminal = ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED'].includes(state)
-    const acceptedDone = state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED'
-    if (terminal || acceptedDone) stopPoll()
+    const pickupStatus = String(data?.trip?.driver_pickup_status || '').toUpperCase()
+    const eta = data?.trip?.driver_eta_minutes
+    const progressKey = `${state}:${pickupStatus}:${eta ?? ''}`
+    const terminal = ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED'].includes(
+      state
+    )
+    // Keep polling after confirm until driver arrived (pickup progress updates)
+    const confirmedIdle =
+      (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') && pickupStatus === 'ARRIVED'
+    if (terminal || confirmedIdle) stopPoll()
+    else if (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') startPoll()
 
-    if (state === lastState && root.querySelector('#trip-confirm, #trip-cancel, a[href^="tel:"], a[href^="https://wa.me"]')) {
-      // Keep contacts/actions; still re-bind if needed after confirm paint
+    if (
+      progressKey === lastState &&
+      root.querySelector('#trip-confirm, #trip-cancel, a[href^="tel:"], a[href^="https://wa.me"]')
+    ) {
       if (state === 'RESCUE_WINNER_FOUND') return
+      if (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') return
     }
-    lastState = state
+    lastState = progressKey
     root.innerHTML = shell(renderState(data))
     bindActions()
   }
@@ -303,16 +512,23 @@ export async function mountTripLive(root, secureToken) {
     }
   }
 
-  root.innerHTML = shell(card(`<p class="text-center text-sm text-gray-500">Loading your trip…</p>`))
+  root.innerHTML = shell(
+    card(
+      `<p class="text-center text-sm text-gray-500">${escapeHtml(tl.loading || 'Loading your trip…')}</p>`
+    )
+  )
   await refresh()
 
   const startPoll = () => {
-    stopPoll()
+    if (pollTimer) return
     const state = String(latest?.state || '')
+    const pickupStatus = String(latest?.trip?.driver_pickup_status || '').toUpperCase()
+    if (['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED'].includes(state)) {
+      return
+    }
     if (
-      ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED', 'COMPANY_A_ACCEPTED', 'CONFIRMED'].includes(
-        state
-      )
+      (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') &&
+      pickupStatus === 'ARRIVED'
     ) {
       return
     }
@@ -329,9 +545,9 @@ export async function mountTripLive(root, secureToken) {
   }
   document.addEventListener('visibilitychange', onVis)
 
-  // Soft cleanup when router remounts — best-effort
   root._taxioTripCleanup = () => {
     stopPoll()
+    if (copyTimer) window.clearTimeout(copyTimer)
     document.removeEventListener('visibilitychange', onVis)
   }
 }

@@ -227,8 +227,18 @@ export const translations = {
       activeTripsAwaiting: 'Awaiting passenger',
       activeTripsConfirmed: 'Confirmed',
       activeTripsCancelled: 'Cancelled',
+      activeTripsOnTheWay: 'On the way',
+      activeTripsArrived: 'Arrived',
       activeTripsWaitingHint: 'Waiting for passenger confirmation',
       activeTripsCancelledHint: 'Passenger cancelled — no contact shared',
+      activeTripsNavigate: 'Navigate to pickup',
+      activeTripsGoogleMaps: 'Google Maps',
+      activeTripsWaze: 'Waze',
+      activeTripsOnWay: "I'm on my way",
+      activeTripsOnWayBusy: 'Updating…',
+      activeTripsOnWayError: 'Could not update trip status. Try again.',
+      activeTripsIveArrived: "I've arrived",
+      activeTripsArrivedError: 'Could not mark arrival. Try again.',
       activeTripsComplete: 'Complete trip',
       activeTripsCompleteConfirm: 'Mark this trip as completed?',
       activeTripsCompleteError: 'Could not complete this trip. Try again.',
@@ -336,6 +346,28 @@ export const translations = {
       rescueCancelledBadge: 'Trip cancelled by passenger',
       rescueCancelledBody: 'The passenger cancelled this reassignment. No passenger contact was shared.',
       rescueWhatsappPassenger: 'WHATSAPP PASSENGER',
+      waPassengerConfirmedMessage: `Hello {passenger_name},
+
+This is {company_name} regarding your TAXIO booking {booking_reference}.
+
+Your trip is confirmed.
+
+Pickup: {pickup}
+Destination: {destination}
+Time: {trip_datetime}
+
+If you need to update anything, you can reply to this message.`,
+      waPassengerOnWayMessage: `Hello {passenger_name},
+
+This is {company_name} regarding your TAXIO booking {booking_reference}.
+
+I'm on my way to your pickup location.
+
+Pickup: {pickup}
+Destination: {destination}
+Time: {trip_datetime}
+
+If you need anything, you can reply to this message.`,
       rescuePassengerName: 'Passenger',
       rescuePassengerPhone: 'WhatsApp / mobile',
       rescueNoPassengerPhone: 'No passenger WhatsApp number on this booking.',
@@ -568,7 +600,7 @@ export const translations = {
       summaryVehicle: 'Vehicle',
       summaryPrice: 'Estimated price',
       pickupNameLabel: 'Name',
-      pickupNamePlaceholder: 'Adrien',
+      pickupNamePlaceholder: 'Your name',
       pickupNameHint: 'The driver will use this name to identify the passenger.',
       mobileNumberLabel: 'Phone',
       mobileNumberHint: 'Used for this booking and taxi updates.',
@@ -622,6 +654,7 @@ export const translations = {
       waHourlyRefPriceValue: 'from €{rate}/hour, minimum {min} hours',
       errSchedule: 'Please select date and time for scheduled ride.',
       errScheduleBad: 'Please enter a valid schedule date and time.',
+      errSchedulePast: 'Please choose a future pickup time.',
       serviceType: 'Service type',
       standardRide: 'Standard ride',
       byHour: 'By hour',
@@ -645,6 +678,75 @@ export const translations = {
       demoNoWhatsapp:
         'The demo page cannot send bookings. Use a company’s real booking page from the directory to book a ride.',
       defaultSlogan: 'Your Ride, Your Way, Anytime!',
+    },
+    tripLive: {
+      bookingConfirmedBadge: 'BOOKING CONFIRMED',
+      confirmedHeading: 'Your trip with {company_name} is confirmed',
+      confirmedSub: 'You can contact them directly about this ride.',
+      confirmedTaxiSub: 'Your taxi is confirmed.',
+      driverOnWayBadge: 'DRIVER ON THE WAY',
+      driverOnWayHeading: 'Your driver is on the way.',
+      driverOnWaySub: 'Your driver is on the way.',
+      driverEtaApprox: 'Approx. {eta} min to pickup',
+      driverArrivedBadge: 'DRIVER ARRIVED',
+      driverArrivedHeading: 'Your driver has arrived at the pickup location.',
+      driverArrivedSub: 'Your driver has arrived at the pickup location.',
+      progressConfirmed: 'Confirmed',
+      progressPickup: 'Pickup',
+      contactHeading: 'Contact {company_name}',
+      contactWaBody: `Hello {company_name},
+
+I'm contacting you about my TAXIO booking {booking_reference}.
+
+Pickup: {pickup}
+Destination: {destination}
+Time: {trip_datetime}
+
+Please let me know if you need any additional information.
+
+Thank you.`,
+      contactEmailSubject: 'TAXIO booking {booking_reference} — {company_name}',
+      estimatedPrice: 'Estimated price',
+      when: 'When',
+      vehicle: 'Vehicle',
+      refLabel: 'Ref',
+      copyRef: 'Copy reference',
+      copied: 'Copied',
+      whatsapp: 'WhatsApp',
+      call: 'Call',
+      email: 'Email',
+      hourlyDestination: 'Hourly',
+      fallbackCompany: 'your taxi company',
+      linkUnavailableTitle: 'Link unavailable',
+      linkUnavailableBody: 'This trip link is invalid or no longer available.',
+      expiredBadge: 'Expired',
+      offerExpiredTitle: 'This taxi offer has expired.',
+      offerExpiredBody: 'The confirmation window ended. No further action is needed on this page.',
+      waitingBadge: 'Waiting',
+      waitingHeading: 'Waiting for {company_name}',
+      waitingBody: 'Please wait while we confirm your taxi.',
+      autoUpdateHint: 'This page updates automatically…',
+      findingBadge: 'Finding a taxi',
+      unavailableHeading: '{company_name} is unavailable',
+      findingBody: 'We’re finding another available taxi for you…',
+      taxiFoundBadge: 'Taxi found',
+      taxiFoundHeading: '{company_name} can take your trip',
+      taxiFoundBody: 'Same trip. Same estimated price.',
+      confirmWithin: 'Please confirm within 30 minutes.',
+      confirmTrip: 'CONFIRM TRIP',
+      cancelTrip: 'CANCEL',
+      cancelledBadge: 'Cancelled',
+      cancelledTitle: 'Trip cancelled',
+      cancelledBody: 'This reassignment was cancelled. No further action is needed.',
+      unavailableBadge: 'Unavailable',
+      noTaxiTitle: 'No taxi is currently available for this trip.',
+      noTaxiBody: 'Please try booking again later.',
+      linkInactive: 'This trip link is no longer active.',
+      invalidLink: 'This trip link is invalid.',
+      loading: 'Loading your trip…',
+      confirmNotReady: 'Confirmation is not available yet. Please wait a moment.',
+      confirmFailed: 'Could not confirm. Please try again.',
+      cancelFailed: 'Could not cancel. Please try again.',
     },
     pwa: {
       operatorTitle: 'Add your dashboard',
@@ -1036,8 +1138,18 @@ export const translations = {
       activeTripsAwaiting: 'En attente du passager',
       activeTripsConfirmed: 'Confirmée',
       activeTripsCancelled: 'Annulée',
+      activeTripsOnTheWay: 'En route',
+      activeTripsArrived: 'Arrivé',
       activeTripsWaitingHint: 'En attente de la confirmation du passager',
       activeTripsCancelledHint: 'Passager annulé — aucun contact partagé',
+      activeTripsNavigate: 'Naviguer vers la prise en charge',
+      activeTripsGoogleMaps: 'Google Maps',
+      activeTripsWaze: 'Waze',
+      activeTripsOnWay: 'Je suis en route',
+      activeTripsOnWayBusy: 'Mise à jour…',
+      activeTripsOnWayError: 'Impossible de mettre à jour le statut. Réessayez.',
+      activeTripsIveArrived: 'Je suis arrivé',
+      activeTripsArrivedError: 'Impossible de signaler l’arrivée. Réessayez.',
       activeTripsComplete: 'Terminer la course',
       activeTripsCompleteConfirm: 'Marquer cette course comme terminée ?',
       activeTripsCompleteError: 'Impossible de terminer cette course. Réessayez.',
@@ -1145,6 +1257,28 @@ export const translations = {
       rescueCancelledBadge: 'Course annulée par le passager',
       rescueCancelledBody: 'Le passager a annulé cette réaffectation. Aucun contact n’a été partagé.',
       rescueWhatsappPassenger: 'WHATSAPP PASSAGER',
+      waPassengerConfirmedMessage: `Bonjour {passenger_name},
+
+Ici {company_name} concernant votre réservation TAXIO {booking_reference}.
+
+Votre trajet est confirmé.
+
+Prise en charge : {pickup}
+Destination : {destination}
+Heure : {trip_datetime}
+
+Si vous devez modifier quelque chose, vous pouvez répondre à ce message.`,
+      waPassengerOnWayMessage: `Bonjour {passenger_name},
+
+Ici {company_name} concernant votre réservation TAXIO {booking_reference}.
+
+Je suis en route vers votre point de prise en charge.
+
+Prise en charge : {pickup}
+Destination : {destination}
+Heure : {trip_datetime}
+
+Si vous avez besoin de quoi que ce soit, vous pouvez répondre à ce message.`,
       rescuePassengerName: 'Passager',
       rescuePassengerPhone: 'WhatsApp / mobile',
       rescueNoPassengerPhone: 'Aucun numéro WhatsApp passager sur cette réservation.',
@@ -1379,7 +1513,7 @@ export const translations = {
       summaryVehicle: 'Véhicule',
       summaryPrice: 'Prix estimé',
       pickupNameLabel: 'Nom',
-      pickupNamePlaceholder: 'Adrien',
+      pickupNamePlaceholder: 'Votre nom',
       pickupNameHint: 'Le chauffeur utilisera ce nom pour identifier le passager.',
       mobileNumberLabel: 'Téléphone',
       mobileNumberHint: 'Utilisé pour cette réservation et les mises à jour taxi.',
@@ -1434,6 +1568,7 @@ export const translations = {
       waHourlyRefPriceValue: 'à partir de {rate} €/heure, minimum {min} heures',
       errSchedule: 'Veuillez choisir la date et l’heure.',
       errScheduleBad: 'Date ou heure invalide.',
+      errSchedulePast: 'Veuillez choisir une heure de prise en charge future.',
       serviceType: 'Type de service',
       standardRide: 'Course classique',
       byHour: 'Mise à disposition',
@@ -1457,6 +1592,75 @@ export const translations = {
       demoNoWhatsapp:
         'La page de démo ne permet pas d’envoyer de réservation. Utilisez la page de réservation réelle d’une entreprise (annuaire) pour réserver.',
       defaultSlogan: 'Votre trajet, à votre façon, à tout moment !',
+    },
+    tripLive: {
+      bookingConfirmedBadge: 'RÉSERVATION CONFIRMÉE',
+      confirmedHeading: 'Votre trajet avec {company_name} est confirmé',
+      confirmedSub: 'Vous pouvez les contacter directement au sujet de cette course.',
+      confirmedTaxiSub: 'Votre taxi est confirmé.',
+      driverOnWayBadge: 'CHAUFFEUR EN ROUTE',
+      driverOnWayHeading: 'Votre chauffeur est en route.',
+      driverOnWaySub: 'Votre chauffeur est en route.',
+      driverEtaApprox: 'Environ {eta} min jusqu’à la prise en charge',
+      driverArrivedBadge: 'CHAUFFEUR ARRIVÉ',
+      driverArrivedHeading: 'Votre chauffeur est arrivé au point de prise en charge.',
+      driverArrivedSub: 'Votre chauffeur est arrivé au point de prise en charge.',
+      progressConfirmed: 'Confirmé',
+      progressPickup: 'Prise en charge',
+      contactHeading: 'Contacter {company_name}',
+      contactWaBody: `Bonjour {company_name},
+
+Je vous contacte au sujet de ma réservation TAXIO {booking_reference}.
+
+Prise en charge : {pickup}
+Destination : {destination}
+Heure : {trip_datetime}
+
+N’hésitez pas à me dire si vous avez besoin d’informations supplémentaires.
+
+Merci.`,
+      contactEmailSubject: 'Réservation TAXIO {booking_reference} — {company_name}',
+      estimatedPrice: 'Prix estimé',
+      when: 'Quand',
+      vehicle: 'Véhicule',
+      refLabel: 'Réf',
+      copyRef: 'Copier la référence',
+      copied: 'Copié',
+      whatsapp: 'WhatsApp',
+      call: 'Appeler',
+      email: 'E-mail',
+      hourlyDestination: 'Mise à disposition',
+      fallbackCompany: 'votre société de taxi',
+      linkUnavailableTitle: 'Lien indisponible',
+      linkUnavailableBody: 'Ce lien de trajet est invalide ou n’est plus disponible.',
+      expiredBadge: 'Expiré',
+      offerExpiredTitle: 'Cette offre de taxi a expiré.',
+      offerExpiredBody: 'La fenêtre de confirmation est terminée. Aucune autre action n’est nécessaire sur cette page.',
+      waitingBadge: 'En attente',
+      waitingHeading: 'En attente de {company_name}',
+      waitingBody: 'Veuillez patienter pendant que nous confirmons votre taxi.',
+      autoUpdateHint: 'Cette page se met à jour automatiquement…',
+      findingBadge: 'Recherche d’un taxi',
+      unavailableHeading: '{company_name} est indisponible',
+      findingBody: 'Nous cherchons un autre taxi disponible pour vous…',
+      taxiFoundBadge: 'Taxi trouvé',
+      taxiFoundHeading: '{company_name} peut prendre votre trajet',
+      taxiFoundBody: 'Même trajet. Même prix estimé.',
+      confirmWithin: 'Veuillez confirmer dans les 30 minutes.',
+      confirmTrip: 'CONFIRMER LE TRAJET',
+      cancelTrip: 'ANNULER',
+      cancelledBadge: 'Annulé',
+      cancelledTitle: 'Trajet annulé',
+      cancelledBody: 'Cette réaffectation a été annulée. Aucune autre action n’est nécessaire.',
+      unavailableBadge: 'Indisponible',
+      noTaxiTitle: 'Aucun taxi n’est actuellement disponible pour ce trajet.',
+      noTaxiBody: 'Veuillez réessayer plus tard.',
+      linkInactive: 'Ce lien de trajet n’est plus actif.',
+      invalidLink: 'Ce lien de trajet est invalide.',
+      loading: 'Chargement de votre trajet…',
+      confirmNotReady: 'La confirmation n’est pas encore disponible. Veuillez patienter.',
+      confirmFailed: 'Impossible de confirmer. Veuillez réessayer.',
+      cancelFailed: 'Impossible d’annuler. Veuillez réessayer.',
     },
     pwa: {
       operatorTitle: 'Ajoutez votre tableau de bord',
@@ -1849,8 +2053,18 @@ export const translations = {
       activeTripsAwaiting: 'Wachten op passagier',
       activeTripsConfirmed: 'Bevestigd',
       activeTripsCancelled: 'Geannuleerd',
+      activeTripsOnTheWay: 'Onderweg',
+      activeTripsArrived: 'Aangekomen',
       activeTripsWaitingHint: 'Wachten op bevestiging van de passagier',
       activeTripsCancelledHint: 'Passagier geannuleerd — geen contact gedeeld',
+      activeTripsNavigate: 'Navigeer naar ophaalpunt',
+      activeTripsGoogleMaps: 'Google Maps',
+      activeTripsWaze: 'Waze',
+      activeTripsOnWay: 'Ik ben onderweg',
+      activeTripsOnWayBusy: 'Bezig…',
+      activeTripsOnWayError: 'Kon ritstatus niet bijwerken. Probeer opnieuw.',
+      activeTripsIveArrived: 'Ik ben aangekomen',
+      activeTripsArrivedError: 'Kon aankomst niet markeren. Probeer opnieuw.',
       activeTripsComplete: 'Rit afronden',
       activeTripsCompleteConfirm: 'Deze rit als voltooid markeren?',
       activeTripsCompleteError: 'Kon deze rit niet afronden. Probeer opnieuw.',
@@ -1958,6 +2172,28 @@ export const translations = {
       rescueCancelledBadge: 'Rit geannuleerd door passagier',
       rescueCancelledBody: 'De passagier heeft deze hertoewijzing geannuleerd. Er is geen contact gedeeld.',
       rescueWhatsappPassenger: 'WHATSAPP PASSAGIER',
+      waPassengerConfirmedMessage: `Hallo {passenger_name},
+
+Dit is {company_name} over uw TAXIO-boeking {booking_reference}.
+
+Uw rit is bevestigd.
+
+Ophaaladres: {pickup}
+Bestemming: {destination}
+Tijd: {trip_datetime}
+
+Als u iets wilt wijzigen, kunt u op dit bericht antwoorden.`,
+      waPassengerOnWayMessage: `Hallo {passenger_name},
+
+Dit is {company_name} over uw TAXIO-boeking {booking_reference}.
+
+Ik ben onderweg naar uw ophaaladres.
+
+Ophaaladres: {pickup}
+Bestemming: {destination}
+Tijd: {trip_datetime}
+
+Als u iets nodig heeft, kunt u op dit bericht antwoorden.`,
       rescuePassengerName: 'Passagier',
       rescuePassengerPhone: 'WhatsApp / mobiel',
       rescueNoPassengerPhone: 'Geen passagiers-WhatsApp-nummer op deze boeking.',
@@ -2191,7 +2427,7 @@ export const translations = {
       summaryVehicle: 'Voertuig',
       summaryPrice: 'Geschatte prijs',
       pickupNameLabel: 'Naam',
-      pickupNamePlaceholder: 'Adrien',
+      pickupNamePlaceholder: 'Jouw naam',
       pickupNameHint: 'De chauffeur gebruikt deze naam om de passagier te herkennen.',
       mobileNumberLabel: 'Telefoon',
       mobileNumberHint: 'Gebruikt voor deze boeking en taxi-updates.',
@@ -2245,6 +2481,7 @@ export const translations = {
       waHourlyRefPriceValue: 'vanaf €{rate}/uur, minimaal {min} uur',
       errSchedule: 'Kies datum en tijd voor de geplande rit.',
       errScheduleBad: 'Ongeldige datum of tijd.',
+      errSchedulePast: 'Kies een ophaaltijd in de toekomst.',
       serviceType: 'Soort dienst',
       standardRide: 'Standaard rit',
       byHour: 'Per uur',
@@ -2268,6 +2505,75 @@ export const translations = {
       demoNoWhatsapp:
         'De demopagina kan geen boekingen versturen. Gebruik de echte boekingspagina van een bedrijf (uit het overzicht) om een rit te boeken.',
       defaultSlogan: 'Jouw rit, jouw keuze, wanneer jij wilt!',
+    },
+    tripLive: {
+      bookingConfirmedBadge: 'BOEKING BEVESTIGD',
+      confirmedHeading: 'Uw rit met {company_name} is bevestigd',
+      confirmedSub: 'U kunt hen rechtstreeks contacteren over deze rit.',
+      confirmedTaxiSub: 'Uw taxi is bevestigd.',
+      driverOnWayBadge: 'CHAUFFEUR ONDERWEG',
+      driverOnWayHeading: 'Uw chauffeur is onderweg.',
+      driverOnWaySub: 'Uw chauffeur is onderweg.',
+      driverEtaApprox: 'Ongeveer {eta} min tot ophalen',
+      driverArrivedBadge: 'CHAUFFEUR AANGEKOMEN',
+      driverArrivedHeading: 'Uw chauffeur is aangekomen op het ophaalpunt.',
+      driverArrivedSub: 'Uw chauffeur is aangekomen op het ophaalpunt.',
+      progressConfirmed: 'Bevestigd',
+      progressPickup: 'Ophalen',
+      contactHeading: 'Contacteer {company_name}',
+      contactWaBody: `Hallo {company_name},
+
+Ik contacteer u over mijn TAXIO-boeking {booking_reference}.
+
+Ophaaladres: {pickup}
+Bestemming: {destination}
+Tijd: {trip_datetime}
+
+Laat het me weten als u extra informatie nodig heeft.
+
+Dank u.`,
+      contactEmailSubject: 'TAXIO-boeking {booking_reference} — {company_name}',
+      estimatedPrice: 'Geschatte prijs',
+      when: 'Wanneer',
+      vehicle: 'Voertuig',
+      refLabel: 'Ref',
+      copyRef: 'Referentie kopiëren',
+      copied: 'Gekopieerd',
+      whatsapp: 'WhatsApp',
+      call: 'Bellen',
+      email: 'E-mail',
+      hourlyDestination: 'Per uur',
+      fallbackCompany: 'uw taxibedrijf',
+      linkUnavailableTitle: 'Link niet beschikbaar',
+      linkUnavailableBody: 'Deze ritlink is ongeldig of niet meer beschikbaar.',
+      expiredBadge: 'Verlopen',
+      offerExpiredTitle: 'Dit taxiaanbod is verlopen.',
+      offerExpiredBody: 'Het bevestigingsvenster is afgelopen. Er is geen verdere actie nodig op deze pagina.',
+      waitingBadge: 'Wachten',
+      waitingHeading: 'Wachten op {company_name}',
+      waitingBody: 'Even geduld terwijl we uw taxi bevestigen.',
+      autoUpdateHint: 'Deze pagina wordt automatisch bijgewerkt…',
+      findingBadge: 'Taxi zoeken',
+      unavailableHeading: '{company_name} is niet beschikbaar',
+      findingBody: 'We zoeken een andere beschikbare taxi voor u…',
+      taxiFoundBadge: 'Taxi gevonden',
+      taxiFoundHeading: '{company_name} kan uw rit overnemen',
+      taxiFoundBody: 'Zelfde rit. Zelfde geschatte prijs.',
+      confirmWithin: 'Bevestig binnen 30 minuten.',
+      confirmTrip: 'RIT BEVESTIGEN',
+      cancelTrip: 'ANNULEREN',
+      cancelledBadge: 'Geannuleerd',
+      cancelledTitle: 'Rit geannuleerd',
+      cancelledBody: 'Deze hertoewijzing is geannuleerd. Er is geen verdere actie nodig.',
+      unavailableBadge: 'Niet beschikbaar',
+      noTaxiTitle: 'Er is momenteel geen taxi beschikbaar voor deze rit.',
+      noTaxiBody: 'Probeer later opnieuw te boeken.',
+      linkInactive: 'Deze ritlink is niet meer actief.',
+      invalidLink: 'Deze ritlink is ongeldig.',
+      loading: 'Uw rit laden…',
+      confirmNotReady: 'Bevestiging is nog niet beschikbaar. Even geduld.',
+      confirmFailed: 'Bevestigen mislukt. Probeer opnieuw.',
+      cancelFailed: 'Annuleren mislukt. Probeer opnieuw.',
     },
     pwa: {
       operatorTitle: 'Zet je dashboard op je telefoon',
@@ -2453,6 +2759,13 @@ export function tBooking(lang) {
   const L = normalizeLocale(lang)
   const base = translations.en.bookingPage || {}
   const loc = translations[L]?.bookingPage || {}
+  return { ...base, ...loc }
+}
+
+export function tTripLive(lang) {
+  const L = normalizeLocale(lang)
+  const base = translations.en.tripLive || {}
+  const loc = translations[L]?.tripLive || {}
   return { ...base, ...loc }
 }
 

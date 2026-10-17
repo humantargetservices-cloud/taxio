@@ -20,7 +20,12 @@ import {
   startRescueNotifications,
   stopRescueNotifications,
 } from '../lib/rescueNotifications.js'
-import { completeCompanyTrip, listRescueOpportunitiesForCompany } from '../lib/rescue.js'
+import {
+  completeCompanyTrip,
+  listRescueOpportunitiesForCompany,
+  markDriverArrived,
+  markDriverOnTheWay,
+} from '../lib/rescue.js'
 import {
   deriveActiveTrips,
   enrichActiveTripsWithWinnerDetails,
@@ -1324,12 +1329,99 @@ export async function mountDashboardCompany(root, opts = {}) {
     remountLocalUi()
   })
 
+  function showDashTripError(text) {
+    const msg = root.querySelector('#dash-msg')
+    if (!msg) return
+    msg.textContent = text
+    msg.classList.remove('hidden')
+  }
+
+  function readTripActionIds(btn) {
+    return {
+      bookingRequestId: btn.getAttribute('data-complete-booking') || '',
+      rescueRequestId: btn.getAttribute('data-complete-rescue') || '',
+    }
+  }
+
+  async function onceGeolocation() {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      return { lat: null, lng: null }
+    }
+    try {
+      const pos = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 0,
+        })
+      })
+      return {
+        lat: Number(pos.coords.latitude),
+        lng: Number(pos.coords.longitude),
+      }
+    } catch {
+      return { lat: null, lng: null }
+    }
+  }
+
+  root.querySelectorAll('[data-mark-on-way]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
+      btn.disabled = true
+      const label = btn.textContent
+      btn.textContent = td.activeTripsOnWayBusy || 'Updating…'
+      try {
+        const geo = await onceGeolocation()
+        const result = await markDriverOnTheWay({
+          companyId: company.id,
+          bookingRequestId: bookingRequestId || undefined,
+          rescueRequestId: rescueRequestId || undefined,
+          driverLat: geo.lat,
+          driverLng: geo.lng,
+        })
+        if (!result?.ok) {
+          showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
+          btn.disabled = false
+          btn.textContent = label
+          return
+        }
+        mountDashboardCompany(root)
+      } catch {
+        showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
+        btn.disabled = false
+        btn.textContent = label
+      }
+    })
+  })
+
+  root.querySelectorAll('[data-mark-arrived]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
+      btn.disabled = true
+      try {
+        const result = await markDriverArrived({
+          companyId: company.id,
+          bookingRequestId: bookingRequestId || undefined,
+          rescueRequestId: rescueRequestId || undefined,
+        })
+        if (!result?.ok) {
+          showDashTripError(td.activeTripsArrivedError || 'Could not mark arrival. Try again.')
+          btn.disabled = false
+          return
+        }
+        mountDashboardCompany(root)
+      } catch {
+        showDashTripError(td.activeTripsArrivedError || 'Could not mark arrival. Try again.')
+        btn.disabled = false
+      }
+    })
+  })
+
   root.querySelectorAll('[data-complete-trip]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const confirmMsg = td.activeTripsCompleteConfirm || 'Mark this trip as completed?'
       if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) return
-      const bookingRequestId = btn.getAttribute('data-complete-booking') || ''
-      const rescueRequestId = btn.getAttribute('data-complete-rescue') || ''
+      const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
       btn.disabled = true
       try {
         const result = await completeCompanyTrip({
@@ -1338,22 +1430,14 @@ export async function mountDashboardCompany(root, opts = {}) {
           rescueRequestId: rescueRequestId || undefined,
         })
         if (!result?.ok) {
-          const msg = root.querySelector('#dash-msg')
-          if (msg) {
-            msg.textContent = td.activeTripsCompleteError || 'Could not complete this trip. Try again.'
-            msg.classList.remove('hidden')
-          }
+          showDashTripError(td.activeTripsCompleteError || 'Could not complete this trip. Try again.')
           btn.disabled = false
           return
         }
         mountDashboardCompany(root)
       } catch {
         btn.disabled = false
-        const msg = root.querySelector('#dash-msg')
-        if (msg) {
-          msg.textContent = td.activeTripsCompleteError || 'Could not complete this trip. Try again.'
-          msg.classList.remove('hidden')
-        }
+        showDashTripError(td.activeTripsCompleteError || 'Could not complete this trip. Try again.')
       }
     })
   })

@@ -11,6 +11,15 @@ import { mintPassengerTripToken, tripUrlForToken } from './_passengerTrip.js'
 
 const MAX_NOTES_LEN = 500
 const VEHICLE_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
+/** Allow tiny clock skew between client and server (Belgium trip-local → ISO). */
+const PAST_RIDE_SKEW_MS = 60_000
+const PAST_RIDE_ERROR = 'Please choose a future pickup time.'
+
+function isRideDatetimeInPast(iso) {
+  const t = new Date(iso).getTime()
+  if (!Number.isFinite(t)) return true
+  return t < Date.now() - PAST_RIDE_SKEW_MS
+}
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase()
@@ -137,7 +146,9 @@ async function activateDraftBooking(req, res, body) {
   const supabase = makeSupabaseServiceClient()
   const { data: existing, error: loadErr } = await supabase
     .from('booking_requests')
-    .select('id, company_id, status, booking_reference, decision_deadline_at, passenger_trip_token')
+    .select(
+      'id, company_id, status, booking_reference, decision_deadline_at, passenger_trip_token, ride_datetime'
+    )
     .eq('id', bookingId)
     .eq('company_id', companyId)
     .maybeSingle()
@@ -147,7 +158,7 @@ async function activateDraftBooking(req, res, body) {
     if (/passenger_trip_token|schema cache|column/i.test(loadErr.message || '')) {
       const { data: existingFallback, error: load2 } = await supabase
         .from('booking_requests')
-        .select('id, company_id, status, booking_reference, decision_deadline_at')
+        .select('id, company_id, status, booking_reference, decision_deadline_at, ride_datetime')
         .eq('id', bookingId)
         .eq('company_id', companyId)
         .maybeSingle()
@@ -169,6 +180,11 @@ async function activateDraftBooking(req, res, body) {
   }
   if (!existing) {
     return json(res, 404, { error: 'Booking draft not found.' })
+  }
+
+  // Authoritative: scheduled/hourly drafts must not activate with a past pickup time.
+  if (existing.ride_datetime && isRideDatetimeInPast(existing.ride_datetime)) {
+    return json(res, 400, { error: PAST_RIDE_ERROR, code: 'PAST_RIDE_DATETIME' })
   }
 
   const respondActivated = (row, already) => {
@@ -334,10 +350,14 @@ export default async function handler(req, res) {
     const honeypot = String(body.website || '').trim()
     const formStartedAt = Number(body.formStartedAt || 0)
     const submissionFingerprint = String(body.submissionFingerprint || '').trim().slice(0, 220)
-    const requestedRideDate =
-      body.ride_datetime && !Number.isNaN(new Date(body.ride_datetime).getTime())
-        ? new Date(body.ride_datetime).toISOString()
-        : new Date().toISOString()
+    const hasExplicitRideDatetime =
+      !!body.ride_datetime && !Number.isNaN(new Date(body.ride_datetime).getTime())
+    if (hasExplicitRideDatetime && isRideDatetimeInPast(body.ride_datetime)) {
+      return json(res, 400, { error: PAST_RIDE_ERROR, code: 'PAST_RIDE_DATETIME' })
+    }
+    const requestedRideDate = hasExplicitRideDatetime
+      ? new Date(body.ride_datetime).toISOString()
+      : new Date().toISOString()
     const notesRaw = String(body.notes || '')
     const notes = notesRaw.slice(0, MAX_NOTES_LEN)
     // SECURITY TODO (before production): recompute this once at create using Company A's
@@ -636,11 +656,25 @@ export default async function handler(req, res) {
       }
     }
 
+    const pickupLatRaw = Number(body.pickup_lat ?? body.pickupLat)
+    const pickupLngRaw = Number(body.pickup_lng ?? body.pickupLng)
+    const pickupLat =
+      Number.isFinite(pickupLatRaw) && pickupLatRaw >= -90 && pickupLatRaw <= 90
+        ? pickupLatRaw
+        : null
+    const pickupLng =
+      Number.isFinite(pickupLngRaw) && pickupLngRaw >= -180 && pickupLngRaw <= 180
+        ? pickupLngRaw
+        : null
+
     const bookingReference = generateBookingReference()
     const payload = {
       company_id: companyId,
       pickup_address: pickup,
       dropoff_address: dropoffFinal,
+      ...(pickupLat != null && pickupLng != null
+        ? { pickup_lat: pickupLat, pickup_lng: pickupLng }
+        : {}),
       car_type: carType,
       service_type: serviceType,
       duration_hours: serviceType === 'hourly' ? durationHours : null,
@@ -754,6 +788,13 @@ export default async function handler(req, res) {
         ...withoutHourlyCols,
         notes: notesWithHourly || null,
       }))
+    }
+    if (
+      insertErr &&
+      (missingColumn(insertErr, 'pickup_lat') || missingColumn(insertErr, 'pickup_lng'))
+    ) {
+      const { pickup_lat: _plat, pickup_lng: _plng, ...withoutPickupCoords } = payload
+      ;({ data: inserted, error: insertErr } = await insertReturning(withoutPickupCoords))
     }
     if (insertErr) {
       console.error('[public-booking:insert]', insertErr)

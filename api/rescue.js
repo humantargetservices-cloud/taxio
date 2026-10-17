@@ -12,6 +12,7 @@ import {
   notifyPendingRescuePassengerWhatsApps,
   notifyRescuePassengerConfirmWhatsApp,
 } from './_rescuePassengerNotify.js'
+import { fetchDrivingEtaMinutes, validateLatLng } from './_drivingEta.js'
 
 function makeUserClient(token) {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -250,9 +251,86 @@ export default async function handler(req, res) {
       return json(res, http, result)
     }
 
+    if (action === 'mark_on_way' || action === 'mark_arrived') {
+      const bookingRequestId = String(body.bookingRequestId || body.booking_request_id || '').trim()
+      const rescueRequestId = String(body.rescueRequestId || body.rescue_request_id || '').trim()
+      if (!companyId || (!bookingRequestId && !rescueRequestId)) {
+        return json(res, 400, {
+          error: 'companyId and bookingRequestId or rescueRequestId are required.',
+          code: 'INVALID_INPUT',
+        })
+      }
+
+      let etaMinutes = null
+      if (action === 'mark_on_way') {
+        const driverLoc = validateLatLng({
+          lat: body.driver_lat ?? body.driverLat,
+          lng: body.driver_lng ?? body.driverLng,
+        })
+        // Optional one-shot ETA — never persist driver coordinates
+        if (driverLoc) {
+          try {
+            const svc = makeSupabaseServiceClient()
+            let bookingId = bookingRequestId || null
+            if (!bookingId && rescueRequestId) {
+              const { data: r } = await svc
+                .from('rescue_requests')
+                .select('booking_request_id')
+                .eq('id', rescueRequestId)
+                .maybeSingle()
+              bookingId = r?.booking_request_id || null
+            }
+            if (bookingId) {
+              const { data: b } = await svc
+                .from('booking_requests')
+                .select('pickup_lat, pickup_lng')
+                .eq('id', bookingId)
+                .maybeSingle()
+              const pickup = validateLatLng({ lat: b?.pickup_lat, lng: b?.pickup_lng })
+              if (pickup) {
+                etaMinutes = await fetchDrivingEtaMinutes(driverLoc, pickup)
+              }
+            }
+          } catch (etaErr) {
+            console.warn('[rescue:mark_on_way:eta]', etaErr?.message || etaErr)
+          }
+        }
+      }
+
+      const rpcAction = action === 'mark_on_way' ? 'ON_THE_WAY' : 'ARRIVED'
+      const { data, error } = await userSb.rpc('taxio_company_set_pickup_progress', {
+        p_company_id: companyId,
+        p_action: rpcAction,
+        p_booking_request_id: bookingRequestId || null,
+        p_rescue_request_id: rescueRequestId || null,
+        p_eta_minutes: etaMinutes,
+      })
+      if (error) {
+        console.error(`[rescue:${action}]`, error.message)
+        // Column/RPC missing until migration applied
+        if (/taxio_company_set_pickup_progress|driver_pickup_status|schema cache|function/i.test(error.message || '')) {
+          return json(res, 503, {
+            ok: false,
+            code: 'PICKUP_PROGRESS_NOT_READY',
+            error: 'Pickup progress is not ready on this environment yet.',
+          })
+        }
+        return json(res, 500, { ok: false, code: 'RPC_ERROR', error: error.message })
+      }
+      const result = data && typeof data === 'object' ? data : { ok: false, code: 'EMPTY' }
+      const http = result.ok
+        ? 200
+        : result.code === 'FORBIDDEN' || result.code === 'NOT_AUTHENTICATED'
+          ? 403
+          : result.code === 'NOT_FOUND'
+            ? 404
+            : 409
+      return json(res, http, result)
+    }
+
     return json(res, 400, {
       error:
-        "action must be 'activate', 'decline', 'accept', 'tick', 'winner_details', 'complete_trip', or passenger_*",
+        "action must be 'activate', 'decline', 'accept', 'tick', 'winner_details', 'complete_trip', 'mark_on_way', 'mark_arrived', or passenger_*",
       code: 'INVALID_INPUT',
     })
   } catch (err) {

@@ -26,6 +26,11 @@ import {
   parseBookingAnalyticsSource,
   trackCompanyAnalyticsEvent,
 } from '../lib/companyAnalytics.js'
+import {
+  defaultFutureBelgiumDatetimeLocal,
+  isDatetimeLocalInPast,
+  toBelgiumDatetimeLocalValue,
+} from '../lib/belgiumTime.js'
 import intlTelInput from 'intl-tel-input/intlTelInputWithUtils'
 import 'intl-tel-input/styles'
 
@@ -1193,7 +1198,7 @@ export async function mountBookCompany(root, slug) {
             <div class="mt-5 flex flex-col gap-3 min-[360px]:flex-row min-[360px]:items-end min-[360px]:gap-2.5">
               <div class="min-w-0 min-[360px]:basis-[40%] min-[360px]:grow-0 min-[360px]:shrink-0">
                 <label for="bk-complete-name" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.pickupNameLabel || 'Name')}</label>
-                <input id="bk-complete-name" type="text" autocomplete="name" maxlength="80" placeholder="${escapeHtml(tb.pickupNamePlaceholder || 'Adrien')}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+                <input id="bk-complete-name" type="text" autocomplete="name" maxlength="80" placeholder="${escapeHtml(tb.pickupNamePlaceholder || 'Your name')}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
               </div>
               <div class="min-w-0 min-[360px]:basis-[60%] min-[360px]:min-w-0 min-[360px]:grow">
                 <label for="bk-complete-phone" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.mobileNumberLabel || 'Phone')}</label>
@@ -1618,7 +1623,14 @@ Estimate price: ${estimatePrice}${refLine}`
       fallback ||
       msgs.errBookingGeneric ||
       'Something went wrong. Please try again.'
+    const code = String(err?.code || err?.body?.code || '').trim()
     const m = String(err?.message || err || '').trim()
+    if (
+      code === 'PAST_RIDE_DATETIME' ||
+      /future pickup time|PAST_RIDE_DATETIME|ophaaltijd in de toekomst|heure de prise en charge future/i.test(m)
+    ) {
+      return msgs.errSchedulePast || 'Please choose a future pickup time.'
+    }
     if (!m) return fb
     if (/Too many attempts/i.test(m)) return m
     if (/Please wait a moment|agree to the Terms|enter a valid mobile|Pick-up|drop-off|Security verification/i.test(m)) {
@@ -1702,6 +1714,13 @@ Estimate price: ${estimatePrice}${refLine}`
           errEl.classList.remove('hidden')
           return false
         }
+        if (isDatetimeLocalInPast(startRaw)) {
+          errEl.textContent =
+            msgs.errSchedulePast || 'Please choose a future pickup time.'
+          errEl.classList.remove('hidden')
+          enforceScheduleMinAndDefault()
+          return false
+        }
         const hours = Number(hourlyHoursEl?.value)
         if (!Number.isFinite(hours) || hours < hourlyCfg.minHours) {
           errEl.textContent = String(msgs.errHourlyDuration).replace(
@@ -1717,6 +1736,21 @@ Estimate price: ${estimatePrice}${refLine}`
           errEl.textContent = msgs.errAddresses
           errEl.classList.remove('hidden')
           return false
+        }
+        if (rideMode === 'schedule') {
+          const raw = scheduleInput?.value || ''
+          if (!raw) {
+            errEl.textContent = msgs.errSchedule || 'Please select date and time for scheduled ride.'
+            errEl.classList.remove('hidden')
+            return false
+          }
+          if (isDatetimeLocalInPast(raw)) {
+            errEl.textContent =
+              msgs.errSchedulePast || 'Please choose a future pickup time.'
+            errEl.classList.remove('hidden')
+            enforceScheduleMinAndDefault()
+            return false
+          }
         }
       }
     }
@@ -1734,6 +1768,7 @@ Estimate price: ${estimatePrice}${refLine}`
       cancelPendingEstimate()
       estWrap?.classList.add('hidden')
       syncEstimateDisplay()
+      enforceScheduleMinAndDefault()
     }
     if (serviceStandardBtn && serviceHourlyBtn) {
       serviceStandardBtn.className = hourly ? bkSegOff : bkSegOn
@@ -1742,14 +1777,35 @@ Estimate price: ${estimatePrice}${refLine}`
     refreshWaState()
   }
 
+  function enforceScheduleMinAndDefault() {
+    const min = toBelgiumDatetimeLocalValue(new Date())
+    const fallback = defaultFutureBelgiumDatetimeLocal(15)
+    if (scheduleInput) {
+      scheduleInput.min = min
+      if (!scheduleInput.value || isDatetimeLocalInPast(scheduleInput.value)) {
+        scheduleInput.value = fallback
+      }
+    }
+    if (hourlyStartEl) {
+      hourlyStartEl.min = min
+      if (!hourlyStartEl.value || isDatetimeLocalInPast(hourlyStartEl.value)) {
+        hourlyStartEl.value = fallback
+      }
+    }
+  }
+
   function refreshWaState() {
     if (!bookBtn) return
     const puOk = !!pickupEl.value.trim()
+    const scheduleOk =
+      rideMode !== 'schedule' ||
+      (!!scheduleInput?.value && !isDatetimeLocalInPast(scheduleInput.value))
     const tripOk = isHourlyMode()
       ? puOk &&
         !!hourlyStartEl?.value &&
+        !isDatetimeLocalInPast(hourlyStartEl.value) &&
         Number(hourlyHoursEl?.value) >= hourlyCfg.minHours
-      : puOk && !!dropEl.value.trim()
+      : puOk && !!dropEl.value.trim() && scheduleOk
     const hasChannel = !!(companyWhatsAppDigits || normalizedCompanyPhone || company.email)
     const ok = termsEl.checked && tripOk && hasChannel
     bookBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
@@ -1775,6 +1831,7 @@ Estimate price: ${estimatePrice}${refLine}`
           : 'border-slate-200 bg-slate-50 font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-300')
     }
     if (scheduleWrap) scheduleWrap.classList.toggle('hidden', isNow)
+    if (!isNow) enforceScheduleMinAndDefault()
   }
 
   function bookingFieldHasConfirmedPlace(state, inputEl) {
@@ -2061,17 +2118,29 @@ Estimate price: ${estimatePrice}${refLine}`
   rideNowBtn?.addEventListener('click', () => {
     rideMode = 'now'
     syncRideTimingUi()
+    refreshWaState()
   })
   rideScheduleBtn?.addEventListener('click', () => {
     rideMode = 'schedule'
     syncRideTimingUi()
+    refreshWaState()
+  })
+
+  enforceScheduleMinAndDefault()
+  ;[scheduleInput, hourlyStartEl].forEach((el) => {
+    if (!el) return
+    el.addEventListener('focus', enforceScheduleMinAndDefault)
+    el.addEventListener('click', enforceScheduleMinAndDefault)
   })
 
   ;[pickupEl, dropEl, termsEl, scheduleInput, hourlyStartEl, hourlyHoursEl, hourlyNotesEl].forEach(
     (el) => {
       if (!el) return
       el.addEventListener('input', refreshWaState)
-      el.addEventListener('change', refreshWaState)
+      el.addEventListener('change', () => {
+        enforceScheduleMinAndDefault()
+        refreshWaState()
+      })
     }
   )
   refreshWaState()
@@ -2392,6 +2461,8 @@ Estimate price: ${estimatePrice}${refLine}`
       ? `Draft by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
       : `Draft quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
 
+    const pickupLat = Number.isFinite(pickupPlacesState.lat) ? pickupPlacesState.lat : null
+    const pickupLng = Number.isFinite(pickupPlacesState.lng) ? pickupPlacesState.lng : null
     return {
       company_id: company.id,
       pickup_address: pu,
@@ -2410,6 +2481,8 @@ Estimate price: ${estimatePrice}${refLine}`
       customer_phone: '',
       customer_email: null,
       ride_datetime: rideDateIso,
+      pickup_lat: pickupLat,
+      pickup_lng: pickupLng,
       notes: logNotes,
       termsAcceptance: {
         terms_accepted: true,
