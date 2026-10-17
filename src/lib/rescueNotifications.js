@@ -203,32 +203,40 @@ function bindHandlers(ctx) {
       if (!bookingId) return
       btn.disabled = true
       const msg = portal.querySelector('#rescue-a-msg')
-      const { error } = await updateBookingRequestStatus(companyId, bookingId, 'accepted')
-      if (error) {
-        const gone = /no longer available/i.test(error.message || '')
-        btn.disabled = false
+      try {
+        const { error } = await updateBookingRequestStatus(companyId, bookingId, 'accepted')
+        if (error) {
+          const gone = /no longer available/i.test(error.message || '')
+          if (msg) {
+            msg.textContent = gone
+              ? copy.bookingAcceptGone || error.message
+              : copy.bookingAcceptError || error.message
+            msg.classList.remove('hidden')
+          }
+          if (gone) {
+            if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
+            showFlash(copy.rescueActiveLooking || copy.rescueActivateSuccess)
+            void refreshNotifications()
+          }
+          return
+        }
+        if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
+        // Open Current Trip sheet once after Company A accept
+        try {
+          sessionStorage.setItem('taxio_auto_open_trip', `booking:${bookingId}`)
+        } catch {
+          /* ignore */
+        }
+        void refreshNotifications()
+        activeTripsRefreshHandler?.()
+      } catch {
         if (msg) {
-          msg.textContent = gone
-            ? copy.bookingAcceptGone || error.message
-            : copy.bookingAcceptError || error.message
+          msg.textContent = copy.bookingAcceptError || 'Could not accept. Try again.'
           msg.classList.remove('hidden')
         }
-        if (gone) {
-          if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
-          showFlash(copy.rescueActiveLooking || copy.rescueActivateSuccess)
-          void refreshNotifications()
-        }
-        return
+      } finally {
+        if (btn.isConnected) btn.disabled = false
       }
-      if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
-      // Open Current Trip sheet once after Company A accept
-      try {
-        sessionStorage.setItem('taxio_auto_open_trip', `booking:${bookingId}`)
-      } catch {
-        /* ignore */
-      }
-      void refreshNotifications()
-      activeTripsRefreshHandler?.()
     })
   })
 
@@ -252,7 +260,6 @@ function bindHandlers(ctx) {
             ) {
               const { error } = await updateBookingRequestStatus(companyId, bookingId, 'rejected')
               if (error) {
-                btn.disabled = false
                 if (msg) {
                   msg.textContent = copy.bookingRefuseError || error.message
                   msg.classList.remove('hidden')
@@ -263,7 +270,6 @@ function bindHandlers(ctx) {
               void refreshNotifications()
               return
             }
-            btn.disabled = false
             if (msg) {
               msg.textContent =
                 result.body?.code === 'SESSION_EXPIRED'
@@ -280,7 +286,6 @@ function bindHandlers(ctx) {
         }
         const { error } = await updateBookingRequestStatus(companyId, bookingId, 'rejected')
         if (error) {
-          btn.disabled = false
           if (msg) {
             msg.textContent = copy.bookingRefuseError || error.message
             msg.classList.remove('hidden')
@@ -290,11 +295,12 @@ function bindHandlers(ctx) {
         if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
         void refreshNotifications()
       } catch {
-        btn.disabled = false
         if (msg) {
           msg.textContent = copy.rescueActivateError
           msg.classList.remove('hidden')
         }
+      } finally {
+        if (btn.isConnected) btn.disabled = false
       }
     })
   })
@@ -320,7 +326,6 @@ function bindHandlers(ctx) {
           return
         }
         if (!result.ok) {
-          btn.disabled = false
           if (msg) {
             msg.textContent =
               result.body?.code === 'SESSION_EXPIRED'
@@ -348,11 +353,12 @@ function bindHandlers(ctx) {
         queueRefresh()
         requestActiveTripsRefresh()
       } catch {
-        btn.disabled = false
         if (msg) {
           msg.textContent = copy.rescueAcceptError
           msg.classList.remove('hidden')
         }
+      } finally {
+        if (btn.isConnected) btn.disabled = false
       }
     })
   })

@@ -28,8 +28,10 @@ import {
 } from '../lib/rescue.js'
 import {
   deriveActiveTrips,
+  deriveCompletedTrips,
   enrichActiveTripsWithWinnerDetails,
   renderActiveTripItemHtml,
+  renderCompletedTripItemHtml,
   renderCurrentTripSheetBodyHtml,
 } from '../lib/activeTrips.js'
 import { signOutEverywhere } from '../lib/auth.js'
@@ -78,6 +80,7 @@ const dashState = {
   drawerOpen: false,
   qrOpen: false,
   activeTripsExpanded: false,
+  completedTripsExpanded: false,
   /** @type {null | { gmapsHref: string, wazeHref: string }} */
   navSheet: null,
   softNotice: null,
@@ -559,6 +562,32 @@ function renderActiveTripsCard(td, ctx) {
   </section>`
 }
 
+function renderCompletedTripsCard(td, ctx) {
+  const trips = Array.isArray(ctx.completedTrips) ? ctx.completedTrips : []
+  const count = trips.length
+  const expanded = !!ctx.completedTripsExpanded
+  const listHtml = expanded
+    ? count === 0
+      ? `<p class="mt-3 text-sm ${DASH_MUTED}">${escapeHtml(td.completedTripsEmpty || 'No completed trips yet.')}</p>`
+      : `<div class="mt-3 space-y-2">${trips.map((t) => renderCompletedTripItemHtml(t, td)).join('')}</div>`
+    : ''
+
+  return `<section id="dash-completed-trips-card" class="${DASH_CARD} p-4 sm:p-5" aria-label="${escapeHtml(
+    td.completedTripsTitle || 'Completed trips'
+  )}">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(
+        td.completedTripsTitle || 'Completed trips'
+      )}</h2>
+      <span class="rounded-lg bg-gray-100 px-2 py-0.5 text-xs font-bold tabular-nums text-gray-700 dark:bg-slate-800 dark:text-slate-200">${count}</span>
+    </div>
+    <button type="button" id="dash-completed-trips-toggle" class="mt-3 w-full rounded-lg border border-gray-200 px-2 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800 ${DASH_FOCUS}">${escapeHtml(
+      expanded ? td.completedTripsHide || 'Hide' : td.completedTripsView || 'View'
+    )}</button>
+    ${listHtml}
+  </section>`
+}
+
 function renderOverviewBody(td, ctx, tpwa) {
   const { bookingStats, pushMode } = ctx
 
@@ -586,6 +615,8 @@ function renderOverviewBody(td, ctx, tpwa) {
     ${renderPushNotifyCard(td, pushMode)}
 
     ${renderActiveTripsCard(td, ctx)}
+
+    ${renderCompletedTripsCard(td, ctx)}
 
     <section class="${DASH_CARD} p-5 sm:p-6">
       <div class="flex items-center justify-between gap-3">
@@ -744,6 +775,7 @@ export async function mountDashboardCompany(root, opts = {}) {
   let bookings = []
   let rescueOpportunities = []
   let activeTrips = []
+  let completedTrips = []
   /** OneSignal UI mode — never await before first paint (resolved in background). */
   let pushMode = dashDataCache?.pushMode || 'prompt'
 
@@ -755,6 +787,7 @@ export async function mountDashboardCompany(root, opts = {}) {
     bookings = dashDataCache.bookings || []
     rescueOpportunities = dashDataCache.rescueOpportunities || []
     activeTrips = dashDataCache.activeTrips || []
+    completedTrips = dashDataCache.completedTrips || []
     pushMode = dashDataCache.pushMode || 'prompt'
   } else {
     session = await getSession()
@@ -824,10 +857,28 @@ export async function mountDashboardCompany(root, opts = {}) {
       bookings,
       opportunities: rescueOpportunities,
     })
+    const rescueCompletedSink = []
     try {
-      activeTrips = await enrichActiveTripsWithWinnerDetails(activeTrips)
+      activeTrips = await enrichActiveTripsWithWinnerDetails(activeTrips, {
+        completedSink: rescueCompletedSink,
+      })
     } catch {
       /* keep preview rows */
+    }
+    completedTrips = deriveCompletedTrips({
+      companyId: company.id,
+      bookings,
+      opportunities: rescueOpportunities,
+    })
+    if (rescueCompletedSink.length) {
+      const seen = new Set(completedTrips.map((t) => t.id))
+      for (const row of rescueCompletedSink) {
+        if (seen.has(row.id)) continue
+        completedTrips.push(row)
+        seen.add(row.id)
+      }
+      completedTrips.sort((a, b) => (b.sortAt || 0) - (a.sortAt || 0))
+      completedTrips = completedTrips.slice(0, 20)
     }
     if (gen !== dashMountGen) return
 
@@ -839,6 +890,7 @@ export async function mountDashboardCompany(root, opts = {}) {
       bookings,
       rescueOpportunities,
       activeTrips,
+      completedTrips,
       pushMode,
     }
   }
@@ -927,6 +979,8 @@ export async function mountDashboardCompany(root, opts = {}) {
       showPwaCard,
       activeTrips,
       activeTripsExpanded: dashState.activeTripsExpanded,
+      completedTrips,
+      completedTripsExpanded: dashState.completedTripsExpanded,
       companyName: company.name,
     }, tpwa)
   } else if (t === 'cars') {
@@ -1498,6 +1552,11 @@ export async function mountDashboardCompany(root, opts = {}) {
     remountLocalUi()
   })
 
+  root.querySelector('#dash-completed-trips-toggle')?.addEventListener('click', () => {
+    dashState.completedTripsExpanded = !dashState.completedTripsExpanded
+    remountLocalUi()
+  })
+
   const closeNavSheet = () => {
     if (!dashState.navSheet) return
     dashState.navSheet = null
@@ -1624,42 +1683,58 @@ export async function mountDashboardCompany(root, opts = {}) {
       btn.disabled = true
       const label = btn.textContent
       btn.textContent = td.activeTripsOnWayBusy || 'Updating…'
-      try {
-        // 1) Authoritative ON_THE_WAY immediately — never wait on GPS
-        const result = await markDriverOnTheWay({
-          companyId: company.id,
-          bookingRequestId: bookingRequestId || undefined,
-          rescueRequestId: rescueRequestId || undefined,
-        })
-        if (!result?.ok) {
-          showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
+      let remounted = false
+      const resetBtn = () => {
+        if (btn.isConnected) {
           btn.disabled = false
           btn.textContent = label
+        }
+      }
+      // Hard safety: never leave Updating… forever (Android overlay / hung network)
+      const safetyTimer = window.setTimeout(() => {
+        if (!remounted) resetBtn()
+      }, 15000)
+      try {
+        // 1) Authoritative ON_THE_WAY immediately — never await GPS / permissions here
+        const result = await Promise.race([
+          markDriverOnTheWay({
+            companyId: company.id,
+            bookingRequestId: bookingRequestId || undefined,
+            rescueRequestId: rescueRequestId || undefined,
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('on_way_timeout')), 12000)
+          ),
+        ])
+        if (!result?.ok) {
+          showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
+          resetBtn()
           return
         }
-        const perm = await queryGeoPermission()
-        if (perm !== 'granted') {
-          dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
-        }
+        // Remount UI NOW — GPS must not hold this open
+        remounted = true
+        dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
         mountDashboardCompany(root)
         // 2) Best-effort ETA only if permission already granted (no forced prompt)
-        if (perm === 'granted') {
-          void enhanceEtaInBackground({
+        void (async () => {
+          const perm = await queryGeoPermission()
+          if (perm !== 'granted') return
+          const enh = await enhanceEtaInBackground({
             bookingRequestId,
             rescueRequestId,
             requirePrompt: false,
-          }).then((enh) => {
-            if (enh?.ok && enh.geoOk) mountDashboardCompany(root)
-            else {
-              dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
-              remountLocalUi()
-            }
           })
-        }
+          if (enh?.ok && enh.geoOk) {
+            dashState.softNotice = null
+            mountDashboardCompany(root)
+          }
+        })()
       } catch {
         showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
-        btn.disabled = false
-        btn.textContent = label
+        resetBtn()
+      } finally {
+        window.clearTimeout(safetyTimer)
+        if (!remounted) resetBtn()
       }
     })
   })
@@ -1671,23 +1746,28 @@ export async function mountDashboardCompany(root, opts = {}) {
       const label = btn.textContent
       btn.textContent = td.activeTripsOnWayBusy || 'Updating…'
       try {
-        const enh = await enhanceEtaInBackground({
-          bookingRequestId,
-          rescueRequestId,
-          requirePrompt: true,
-        })
+        const enh = await Promise.race([
+          enhanceEtaInBackground({
+            bookingRequestId,
+            rescueRequestId,
+            requirePrompt: true,
+          }),
+          new Promise((resolve) => setTimeout(() => resolve({ ok: false, geoOk: false }), 10000)),
+        ])
         if (enh?.ok && enh.geoOk) {
           dashState.softNotice = null
           mountDashboardCompany(root)
           return
         }
         dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
-        btn.disabled = false
-        btn.textContent = label
         remountLocalUi()
       } catch {
-        btn.disabled = false
-        btn.textContent = label
+        /* soft */
+      } finally {
+        if (btn.isConnected) {
+          btn.disabled = false
+          btn.textContent = label
+        }
       }
     })
   })
@@ -1711,6 +1791,8 @@ export async function mountDashboardCompany(root, opts = {}) {
       } catch {
         showDashTripError(td.activeTripsArrivedError || 'Could not mark arrival. Try again.')
         btn.disabled = false
+      } finally {
+        if (btn.isConnected) btn.disabled = false
       }
     })
   })
@@ -1740,6 +1822,8 @@ export async function mountDashboardCompany(root, opts = {}) {
       } catch {
         btn.disabled = false
         showDashTripError(td.activeTripsCompleteError || 'Could not complete this trip. Try again.')
+      } finally {
+        if (btn.isConnected) btn.disabled = false
       }
     })
   })

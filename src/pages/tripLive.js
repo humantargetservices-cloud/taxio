@@ -11,6 +11,7 @@ import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { cleanTripPriceDisplay } from '../lib/rescuePrice.js'
 import { tTripLive } from '../i18n.js'
 import { getLocale } from '../lib/locale.js'
+import { syncPassengerActiveTripFromStatus } from '../lib/passengerActiveTrip.js'
 
 const POLL_MS = 4000
 
@@ -326,12 +327,12 @@ function renderState(data) {
         tl.completedBadge || 'TRIP COMPLETED'
       )}</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
-        fillTpl(tl.completedHeading || 'Your trip with {company_name} is complete', {
-          company_name: company,
-        })
+        tl.completedHeading || 'Trip completed'
       )}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
-        tl.completedBody || 'Thank you for riding with TAXIO.'
+        fillTpl(tl.completedBody || 'Thank you for riding with {company_name}.', {
+          company_name: company,
+        })
       )}</p>
       ${summary}
       ${contactButtonsHtml(data.contacts, company, trip, tl)}
@@ -538,24 +539,32 @@ export async function mountTripLive(root, secureToken) {
         return
       }
       setBusy(true)
-      const result = await passengerRescueConfirm(confirmToken)
-      if (!result?.ok) {
-        setBusy(false)
+      try {
+        const result = await passengerRescueConfirm(confirmToken)
+        if (!result?.ok) {
+          if (msgEl) {
+            msgEl.textContent =
+              result?.code === 'EXPIRED'
+                ? tl.offerExpiredTitle || 'This taxi offer has expired.'
+                : tl.confirmFailed || 'Could not confirm. Please try again.'
+            msgEl.classList.remove('hidden')
+          }
+          if (result?.code === 'EXPIRED') {
+            lastState = ''
+            await refresh()
+          }
+          return
+        }
+        lastState = ''
+        await refresh()
+      } catch {
         if (msgEl) {
-          msgEl.textContent =
-            result?.code === 'EXPIRED'
-              ? tl.offerExpiredTitle || 'This taxi offer has expired.'
-              : tl.confirmFailed || 'Could not confirm. Please try again.'
+          msgEl.textContent = tl.confirmFailed || 'Could not confirm. Please try again.'
           msgEl.classList.remove('hidden')
         }
-        if (result?.code === 'EXPIRED') {
-          lastState = ''
-          await refresh()
-        }
-        return
+      } finally {
+        setBusy(false)
       }
-      lastState = ''
-      await refresh()
     })
 
     root.querySelector('#trip-cancel')?.addEventListener('click', async () => {
@@ -563,23 +572,32 @@ export async function mountTripLive(root, secureToken) {
       const confirmToken = latest?.confirm_token
       if (!confirmToken) return
       setBusy(true)
-      const result = await passengerRescueCancel(confirmToken)
-      if (!result?.ok) {
-        setBusy(false)
+      try {
+        const result = await passengerRescueCancel(confirmToken)
+        if (!result?.ok) {
+          if (msgEl) {
+            msgEl.textContent = tl.cancelFailed || 'Could not cancel. Please try again.'
+            msgEl.classList.remove('hidden')
+          }
+          return
+        }
+        lastState = ''
+        await refresh()
+      } catch {
         if (msgEl) {
           msgEl.textContent = tl.cancelFailed || 'Could not cancel. Please try again.'
           msgEl.classList.remove('hidden')
         }
-        return
+      } finally {
+        setBusy(false)
       }
-      lastState = ''
-      await refresh()
     })
   }
 
   const paint = (data) => {
     latest = data
     const state = String(data?.state || 'INVALID')
+    syncPassengerActiveTripFromStatus(token, data)
     const pickupStatus = String(data?.trip?.driver_pickup_status || '').toUpperCase()
     const eta = data?.trip?.driver_eta_minutes
     const progressKey = `${state}:${pickupStatus}:${eta ?? ''}`

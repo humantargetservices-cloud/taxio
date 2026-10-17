@@ -307,9 +307,14 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
   return trips
 }
 
-/** Unlock passenger PII for confirmed Rescue winners via existing winner_details. */
-export async function enrichActiveTripsWithWinnerDetails(trips) {
+/**
+ * Unlock passenger PII for confirmed Rescue winners via existing winner_details.
+ * @param {object[]} trips
+ * @param {{ completedSink?: object[] }} [opts] — completed rescue trips appended here (out of Active)
+ */
+export async function enrichActiveTripsWithWinnerDetails(trips, opts = {}) {
   const list = Array.isArray(trips) ? trips : []
+  const completedSink = Array.isArray(opts?.completedSink) ? opts.completedSink : null
   const need = list.filter((t) => t.needsPii && t.rescueRequestId)
   if (!need.length) return list
 
@@ -328,6 +333,19 @@ export async function enrichActiveTripsWithWinnerDetails(trips) {
         }
         const b = body.booking || {}
         if (b.completed_at) {
+          if (completedSink) {
+            completedSink.push({
+              id: `done:rescue:${t.rescueRequestId}`,
+              bookingReference: b.booking_reference || t.bookingReference || null,
+              pickup: preferRouteLabel(b.pickup_address, t.pickup),
+              dropoff: preferRouteLabel(b.dropoff_address, t.dropoff),
+              whenIso: b.ride_datetime || b.completed_at || t.whenIso || null,
+              completedAt: b.completed_at,
+              priceLabel: tripPriceLabelFromBooking(b) || t.priceLabel || null,
+              passengerName: String(b.customer_name || t.passengerName || '').trim() || null,
+              sortAt: new Date(b.completed_at || 0).getTime() || 0,
+            })
+          }
           t.phase = 'drop'
           t.needsPii = false
           return
@@ -511,10 +529,17 @@ export function renderActiveTripActionsHtml(trip, td, opts = {}) {
 
   let arrivedHint = ''
   if (pickupProgress === 'ARRIVED') {
-    arrivedHint = `<p class="text-xs leading-snug text-violet-800/90 dark:text-violet-200/90">${escapeHtml(
+    arrivedHint = `<p class="text-sm font-semibold text-violet-800 dark:text-violet-200">${escapeHtml(
+      td.activeTripsPassengerPickup || 'Passenger pickup'
+    )}</p>
+    <p class="text-xs leading-snug text-violet-800/90 dark:text-violet-200/90">${escapeHtml(
       td.activeTripsArrivedHint || 'Driver has arrived at pickup.'
     )}</p>`
   }
+
+  const completeBtnLarge = `<button type="button"${progressAttrs} data-complete-trip class="inline-flex min-h-[52px] w-full items-center justify-center rounded-xl bg-emerald-600 px-3 py-3 text-sm font-bold text-white hover:bg-emerald-500">${escapeHtml(
+    td.activeTripsComplete || 'Complete trip'
+  )}</button>`
 
   let primary = ''
   if (!pickupProgress) {
@@ -526,7 +551,7 @@ export function renderActiveTripActionsHtml(trip, td, opts = {}) {
       ? `<div class="grid grid-cols-2 gap-2">${navigateBtn}${arrivedBtn}</div>`
       : arrivedBtn
   } else {
-    primary = completeBtn
+    primary = completeBtnLarge
   }
 
   return `<div class="space-y-2.5">
@@ -550,6 +575,8 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
   const when = escapeHtml(formatActiveTripWhen(trip.whenIso))
   const price = trip.priceLabel ? escapeHtml(trip.priceLabel) : ''
   const { badge, badgeClass } = tripBadgeMeta(trip, td)
+  const name = String(trip.passengerName || '').trim()
+  const showName = name && name !== 'Booking request'
 
   const header = `<div class="flex items-start justify-between gap-3">
     <p class="inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClass}">${escapeHtml(
@@ -558,10 +585,10 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
     ${price ? `<p class="shrink-0 text-sm font-bold tabular-nums text-amber-700 dark:text-amber-300">${price}</p>` : ''}
   </div>`
 
-  const details = `<div class="mt-2 space-y-1.5">
-    ${activeTripDetailRow(td.activeTripsPickupLabel || 'Pickup', pickup)}
-    ${activeTripDetailRow(td.activeTripsDestinationLabel || 'Destination', dropoff)}
-    ${activeTripDetailRow(td.activeTripsTimeLabel || 'Time', when)}
+  const routeLine = `<p class="mt-2 break-words text-sm font-semibold leading-snug text-gray-900 dark:text-slate-50">${pickup} <span class="font-normal text-gray-400 dark:text-slate-500">→</span> ${dropoff}</p>`
+  const meta = `<div class="mt-1.5 space-y-0.5 text-xs text-gray-500 dark:text-slate-400">
+    ${showName ? `<p class="font-medium text-gray-700 dark:text-slate-300">${escapeHtml(name)}</p>` : ''}
+    <p>${when}</p>
   </div>`
 
   let foot = ''
@@ -570,28 +597,84 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
       td.activeTripsWaitingHint || 'Waiting for passenger confirmation'
     )}</p>`
   } else if (trip.phase === 'confirmed') {
-    const name = String(trip.passengerName || '').trim()
-    const showName = name && name !== 'Booking request'
-    const passengerBlock = showName
-      ? `<div class="mt-2">${activeTripDetailRow(
-          td.activeTripsPassengerLabel || 'Passenger',
-          escapeHtml(name)
-        )}</div>`
-      : ''
-    const openBtn = `<button type="button" data-open-trip="${escapeHtml(
+    foot = `<button type="button" data-open-trip="${escapeHtml(
       String(trip.id)
     )}" class="mt-3 inline-flex min-h-[40px] w-full items-center justify-center rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-950 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/20">${escapeHtml(
       td.activeTripsOpenTrip || 'Open trip'
     )}</button>`
-    foot = `${passengerBlock}${openBtn}`
   }
 
   return `<article class="rounded-xl border border-gray-100/90 bg-white px-3.5 py-3 dark:border-slate-700/50 dark:bg-slate-900/60" data-active-trip="${escapeHtml(
     trip.id
   )}">
     ${header}
-    ${details}
+    ${routeLine}
+    ${meta}
     ${foot}
+  </article>`
+}
+
+/**
+ * Recent completed trips for Home (read-only). Company A bookings + Rescue wins.
+ * @param {{ companyId: string, bookings?: object[], opportunities?: object[] }} args
+ */
+export function deriveCompletedTrips({ companyId, bookings, opportunities }) {
+  const trips = []
+  if (!companyId) return trips
+
+  const rescueTaken = new Set()
+  for (const o of opportunities || []) {
+    const r = o?.rescue
+    if (
+      o?.status === 'ACCEPTED' &&
+      r?.status === 'ACCEPTED' &&
+      String(r.passenger_confirm_status || '') === 'CONFIRMED' &&
+      r.accepted_by_company_id &&
+      r.accepted_by_company_id !== companyId &&
+      r.booking_request_id
+    ) {
+      rescueTaken.add(String(r.booking_request_id))
+    }
+  }
+
+  for (const b of bookings || []) {
+    if (!b.completed_at) continue
+    if (String(b.status || '') !== 'accepted') continue
+    if (rescueTaken.has(String(b.id))) continue
+    trips.push({
+      id: `done:booking:${b.id}`,
+      bookingReference: b.booking_reference || null,
+      pickup: preferRouteLabel(b.pickup_address),
+      dropoff: preferRouteLabel(b.dropoff_address),
+      whenIso: b.ride_datetime || b.completed_at || null,
+      completedAt: b.completed_at,
+      priceLabel: tripPriceLabelFromBooking(b) || null,
+      passengerName: String(b.customer_name || '').trim() || null,
+      sortAt: new Date(b.completed_at || 0).getTime() || 0,
+    })
+  }
+
+  trips.sort((a, b) => (b.sortAt || 0) - (a.sortAt || 0))
+  return trips.slice(0, 20)
+}
+
+export function renderCompletedTripItemHtml(trip, td) {
+  const pickup = escapeHtml(trip.pickup || '—')
+  const dropoff = escapeHtml(trip.dropoff || '—')
+  const when = escapeHtml(formatActiveTripWhen(trip.whenIso || trip.completedAt))
+  const price = trip.priceLabel ? escapeHtml(trip.priceLabel) : ''
+  const name = String(trip.passengerName || '').trim()
+  const ref = String(trip.bookingReference || '').trim()
+  return `<article class="rounded-xl border border-gray-100/80 bg-white/80 px-3 py-2.5 dark:border-slate-700/40 dark:bg-slate-900/40">
+    <div class="flex items-start justify-between gap-2">
+      <p class="min-w-0 break-words text-sm font-semibold leading-snug text-gray-900 dark:text-slate-50">${pickup} <span class="font-normal text-gray-400">→</span> ${dropoff}</p>
+      ${price ? `<p class="shrink-0 text-xs font-bold tabular-nums text-amber-700 dark:text-amber-300">${price}</p>` : ''}
+    </div>
+    <div class="mt-1 space-y-0.5 text-[11px] text-gray-500 dark:text-slate-400">
+      ${name ? `<p class="font-medium text-gray-700 dark:text-slate-300">${escapeHtml(name)}</p>` : ''}
+      <p>${when}</p>
+      ${ref ? `<p>${escapeHtml(td.refLabel || 'Reference')}: ${escapeHtml(ref)}</p>` : ''}
+    </div>
   </article>`
 }
 

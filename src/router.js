@@ -12,6 +12,7 @@ import { mountTerms, mountPrivacy, mountCompanyTerms, mountContact } from './pag
 import { mountTaxiDirectory } from './pages/taxiDirectory.js'
 import { mountRescuePassengerConfirm } from './pages/rescuePassengerConfirm.js'
 import { mountTripLive } from './pages/tripLive.js'
+import { mountFindBooking } from './pages/findBooking.js'
 import { resolveBookSlugForRouter } from './lib/tenant.js'
 import { ensureGenericSiteManifest, primeBookingPwaManifest } from './lib/companyPwa.js'
 import { getLocale, syncDocumentLang } from './lib/locale.js'
@@ -92,6 +93,10 @@ function route() {
       return
     }
     mountNotFound(root)
+    return
+  }
+  if (path === '/find-booking' || path === '/find-booking/') {
+    mountFindBooking(root)
     return
   }
   if (path.startsWith('/trip/')) {

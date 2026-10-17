@@ -127,51 +127,67 @@ export async function mountRescuePassengerConfirm(root, token) {
 
   root.querySelector('#pc-confirm')?.addEventListener('click', async () => {
     setBusy(true)
-    const result = await passengerRescueConfirm(safeToken)
-    if (!result?.ok) {
-      setBusy(false)
+    try {
+      const result = await passengerRescueConfirm(safeToken)
+      if (!result?.ok) {
+        if (msgEl) {
+          msgEl.textContent =
+            result?.code === 'ALREADY_CONFIRMED'
+              ? 'Already confirmed.'
+              : result?.code === 'ALREADY_CANCELLED'
+                ? 'Already cancelled.'
+                : result?.code === 'EXPIRED'
+                  ? 'This taxi offer has expired.'
+                  : 'Could not confirm this ride.'
+          msgEl.classList.remove('hidden')
+        }
+        if (
+          result?.code === 'ALREADY_CONFIRMED' ||
+          result?.code === 'ALREADY_CANCELLED' ||
+          result?.code === 'EXPIRED'
+        ) {
+          setTimeout(() => mountRescuePassengerConfirm(root, safeToken), 800)
+        }
+        return
+      }
+      mountRescuePassengerConfirm(root, safeToken)
+    } catch {
       if (msgEl) {
-        msgEl.textContent =
-          result?.code === 'ALREADY_CONFIRMED'
-            ? 'Already confirmed.'
-            : result?.code === 'ALREADY_CANCELLED'
-              ? 'Already cancelled.'
-              : result?.code === 'EXPIRED'
-                ? 'This taxi offer has expired.'
-                : 'Could not confirm this ride.'
+        msgEl.textContent = 'Could not confirm this ride.'
         msgEl.classList.remove('hidden')
       }
-      if (
-        result?.code === 'ALREADY_CONFIRMED' ||
-        result?.code === 'ALREADY_CANCELLED' ||
-        result?.code === 'EXPIRED'
-      ) {
-        setTimeout(() => mountRescuePassengerConfirm(root, safeToken), 800)
-      }
-      return
+    } finally {
+      setBusy(false)
     }
-    mountRescuePassengerConfirm(root, safeToken)
   })
 
   root.querySelector('#pc-cancel')?.addEventListener('click', async () => {
     setBusy(true)
-    const result = await passengerRescueCancel(safeToken)
-    if (!result?.ok) {
-      setBusy(false)
+    try {
+      const result = await passengerRescueCancel(safeToken)
+      if (!result?.ok) {
+        if (msgEl) {
+          msgEl.textContent =
+            result?.code === 'ALREADY_CANCELLED'
+              ? 'Already cancelled.'
+              : result?.code === 'ALREADY_CONFIRMED'
+                ? 'Already confirmed.'
+                : 'Could not cancel this ride.'
+          msgEl.classList.remove('hidden')
+        }
+        if (result?.code === 'ALREADY_CONFIRMED' || result?.code === 'ALREADY_CANCELLED') {
+          setTimeout(() => mountRescuePassengerConfirm(root, safeToken), 800)
+        }
+        return
+      }
+      mountRescuePassengerConfirm(root, safeToken)
+    } catch {
       if (msgEl) {
-        msgEl.textContent =
-          result?.code === 'ALREADY_CANCELLED'
-            ? 'Already cancelled.'
-            : result?.code === 'ALREADY_CONFIRMED'
-              ? 'Already confirmed.'
-              : 'Could not cancel this ride.'
+        msgEl.textContent = 'Could not cancel this ride.'
         msgEl.classList.remove('hidden')
       }
-      if (result?.code === 'ALREADY_CONFIRMED' || result?.code === 'ALREADY_CANCELLED') {
-        setTimeout(() => mountRescuePassengerConfirm(root, safeToken), 800)
-      }
-      return
+    } finally {
+      setBusy(false)
     }
-    mountRescuePassengerConfirm(root, safeToken)
   })
 }

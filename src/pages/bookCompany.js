@@ -8,7 +8,13 @@ import { resolveBookingVehicleTypes } from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
-import { tBooking, tPwa } from '../i18n.js'
+import { tBooking, tPwa, tPassengerRecovery } from '../i18n.js'
+import {
+  passengerActiveTripBannerHtml,
+  savePassengerActiveTrip,
+  validateStoredPassengerTrip,
+  readPassengerActiveTrip,
+} from '../lib/passengerActiveTrip.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 import { getDemoBookingCompany, isDemoBookingSlug } from '../lib/demoBookingCompany.js'
@@ -1040,6 +1046,13 @@ export async function mountBookCompany(root, slug) {
           </div>
         </div>
 
+        <div id="bk-active-trip-slot"></div>
+        <p class="text-center text-xs text-slate-500 dark:text-slate-400">
+          <a href="/find-booking" class="font-semibold text-amber-800 underline-offset-2 hover:underline dark:text-amber-300">${escapeHtml(
+            tPassengerRecovery(getLocale()).findBooking || 'Find my booking'
+          )}</a>
+        </p>
+
         <div class="relative overflow-hidden rounded-3xl border border-slate-200/90 bg-white p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.45)] dark:ring-white/[0.06] sm:p-6">
           <div class="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-amber-400/10 blur-3xl"></div>
           <button type="button" id="book-qr-hint" class="absolute right-4 top-4 z-10 flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-400/20 text-amber-700 shadow-md ring-1 ring-amber-400/40 transition hover:bg-amber-400/30 dark:bg-amber-400/15 dark:text-amber-300 dark:shadow-lg dark:shadow-black/20 dark:ring-amber-400/30 dark:hover:bg-amber-400/25 dark:hover:text-amber-200" title="${escapeHtml(tb.qrTitle)}" aria-label="${escapeHtml(tb.qrTitle)}">
@@ -1277,6 +1290,25 @@ export async function mountBookCompany(root, slug) {
     syncPublicThemeClass()
     mountBookCompany(root, slug)
   })
+
+  // Same-device active trip recovery (no auto-redirect)
+  void (async () => {
+    const slot = root.querySelector('#bk-active-trip-slot')
+    if (!slot) return
+    const stored = readPassengerActiveTrip()
+    if (!stored) return
+    const validated = await validateStoredPassengerTrip(stored)
+    if (!validated.active || !validated.token) return
+    if (!root.contains(slot)) return
+    const pr = tPassengerRecovery(getLocale())
+    slot.innerHTML = passengerActiveTripBannerHtml({
+      escapeHtml,
+      token: validated.token,
+      title: pr.activeTitle || 'Your active trip',
+      viewLabel: pr.viewTrip || 'View trip',
+      showFind: false,
+    })
+  })()
 
   let selectedCar = defaultSelectedCar
   let rideMode = 'now'
@@ -2821,6 +2853,12 @@ Estimate price: ${estimatePrice}${refLine}`
         const prior = await activateInflight
         const tok = String(prior?.trip_token || prior?.passenger_trip_token || '').trim()
         if (tok) {
+          savePassengerActiveTrip({
+            token: tok,
+            bookingReference: prior?.booking_reference || frozenBookingReference || null,
+            companySlug: company.slug || slug || null,
+            companyName: company.name || null,
+          })
           window.location.assign(`/trip/${encodeURIComponent(tok)}`)
           return
         }
@@ -2868,6 +2906,14 @@ Estimate price: ${estimatePrice}${refLine}`
       activateInflight = null
       const tripToken = String(actData?.trip_token || actData?.passenger_trip_token || '').trim()
       const tripUrl = String(actData?.trip_url || '').trim()
+      if (tripToken) {
+        savePassengerActiveTrip({
+          token: tripToken,
+          bookingReference: actData?.booking_reference || frozenBookingReference || null,
+          companySlug: company.slug || slug || null,
+          companyName: company.name || null,
+        })
+      }
       if (tripUrl && tripUrl.includes('/trip/')) {
         window.location.assign(tripUrl)
         return
