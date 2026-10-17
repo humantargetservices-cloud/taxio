@@ -77,6 +77,9 @@ const dashState = {
   drawerOpen: false,
   qrOpen: false,
   activeTripsExpanded: false,
+  /** @type {null | { gmapsHref: string, wazeHref: string }} */
+  navSheet: null,
+  softNotice: null,
 }
 
 /** Invalidates overlapping mounts (tab switches / concurrent loads). */
@@ -305,6 +308,42 @@ function renderQrSheet(td, bookPublicUrl, bookingQrSrc, open) {
         </div>
         <button type="button" data-setup-action="qr" class="w-full min-h-[44px] rounded-xl border border-amber-200/80 bg-gradient-to-r from-amber-50 to-amber-100/60 px-4 py-2.5 text-sm font-semibold text-amber-950 transition-all duration-200 hover:border-amber-300 hover:from-amber-100 active:scale-[0.98] dark:border-amber-500/25 dark:from-amber-950/40 dark:to-amber-900/20 dark:text-amber-200 dark:hover:border-amber-400/35 ${DASH_FOCUS}">${td.setupBtnQr}</button>
         <p id="dash-copy-feedback" class="hidden text-xs font-medium text-emerald-600 dark:text-emerald-400">${td.copied}</p>
+      </div>
+    </div>
+  </div>`
+}
+
+function renderNavSheet(td, sheet) {
+  const open = !!(sheet && (sheet.gmapsHref || sheet.wazeHref))
+  const title = td.activeTripsNavigateTitle || td.activeTripsNavigate || 'Navigate to pickup'
+  const cancel = td.activeTripsNavCancel || 'Cancel'
+  const option =
+    'flex min-h-[48px] w-full items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
+  return `<div id="dash-nav-sheet" class="fixed inset-0 z-[70] ${open ? '' : 'pointer-events-none hidden'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(
+    title
+  )}">
+    <div id="dash-nav-backdrop" class="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"></div>
+    <div class="absolute bottom-0 left-0 right-0 mx-auto max-w-lg rounded-t-2xl border border-gray-200/80 bg-white p-4 shadow-[0_-8px_32px_rgba(15,23,42,0.14)] dark:border-slate-700/60 dark:bg-slate-900 sm:p-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div class="mx-auto mb-3 h-1 w-10 rounded-full bg-gray-200 dark:bg-slate-700" aria-hidden="true"></div>
+      <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(title)}</h2>
+      <div class="mt-3 space-y-2">
+        ${
+          sheet?.gmapsHref
+            ? `<a href="${escapeHtml(sheet.gmapsHref)}" target="_blank" rel="noopener noreferrer" data-nav-choice class="${option}">${icon.mapPin(
+                'h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400'
+              )}<span>${escapeHtml(td.activeTripsGoogleMaps || 'Google Maps')}</span></a>`
+            : ''
+        }
+        ${
+          sheet?.wazeHref
+            ? `<a href="${escapeHtml(sheet.wazeHref)}" target="_blank" rel="noopener noreferrer" data-nav-choice class="${option}">${icon.crosshair(
+                'h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-400'
+              )}<span>${escapeHtml(td.activeTripsWaze || 'Waze')}</span></a>`
+            : ''
+        }
+        <button type="button" id="dash-nav-cancel" class="flex min-h-[44px] w-full items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">${escapeHtml(
+          cancel
+        )}</button>
       </div>
     </div>
   </div>`
@@ -1029,6 +1068,14 @@ export async function mountDashboardCompany(root, opts = {}) {
 
   if (gen !== dashMountGen) return
 
+  const softNotice = dashState.softNotice
+  dashState.softNotice = null
+  const softNoticeHtml = softNotice
+    ? `<p class="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-300">${escapeHtml(
+        softNotice
+      )}</p>`
+    : ''
+
   root.innerHTML = `
     <div class="${DASH_SHELL}" data-dash-root="1">
       ${renderDrawer(td, t, company.name, avail, dashState.drawerOpen)}
@@ -1058,6 +1105,7 @@ export async function mountDashboardCompany(root, opts = {}) {
 
       <main class="mx-auto max-w-6xl px-3 py-4 ${showPwaCard ? 'pb-[calc(4.25rem+env(safe-area-inset-bottom,0px)+9.5rem)]' : 'pb-[calc(4.25rem+env(safe-area-inset-bottom,0px)+0.5rem)]'} sm:px-4 sm:py-6 sm:pb-6">
         <p id="dash-msg" class="mb-4 hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"></p>
+        ${softNoticeHtml}
         ${bodyHtml}
       </main>
 
@@ -1070,6 +1118,7 @@ export async function mountDashboardCompany(root, opts = {}) {
       </footer>
 
       ${renderQrSheet(td, bookPublicUrl, bookingQrSrc, dashState.qrOpen)}
+      ${renderNavSheet(td, dashState.navSheet)}
       ${renderMobileBottomNav(td, t)}
       ${showPwaCard ? renderDashboardPwaCard(td, tpwa) : ''}
       <div id="dash-modal-root"></div>
@@ -1329,10 +1378,37 @@ export async function mountDashboardCompany(root, opts = {}) {
     remountLocalUi()
   })
 
+  const closeNavSheet = () => {
+    if (!dashState.navSheet) return
+    dashState.navSheet = null
+    remountLocalUi()
+  }
+
+  root.querySelectorAll('[data-open-nav]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dashState.navSheet = {
+        gmapsHref: btn.getAttribute('data-gmaps') || '',
+        wazeHref: btn.getAttribute('data-waze') || '',
+      }
+      remountLocalUi()
+    })
+  })
+
+  root.querySelector('#dash-nav-backdrop')?.addEventListener('click', closeNavSheet)
+  root.querySelector('#dash-nav-cancel')?.addEventListener('click', closeNavSheet)
+  root.querySelectorAll('[data-nav-choice]').forEach((a) => {
+    a.addEventListener('click', () => {
+      dashState.navSheet = null
+      remountLocalUi()
+    })
+  })
+
   function showDashTripError(text) {
     const msg = root.querySelector('#dash-msg')
     if (!msg) return
     msg.textContent = text
+    msg.className =
+      'mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300'
     msg.classList.remove('hidden')
   }
 
@@ -1372,18 +1448,23 @@ export async function mountDashboardCompany(root, opts = {}) {
       btn.textContent = td.activeTripsOnWayBusy || 'Updating…'
       try {
         const geo = await onceGeolocation()
+        const geoOk = Number.isFinite(geo.lat) && Number.isFinite(geo.lng)
         const result = await markDriverOnTheWay({
           companyId: company.id,
           bookingRequestId: bookingRequestId || undefined,
           rescueRequestId: rescueRequestId || undefined,
-          driverLat: geo.lat,
-          driverLng: geo.lng,
+          driverLat: geoOk ? geo.lat : null,
+          driverLng: geoOk ? geo.lng : null,
         })
         if (!result?.ok) {
           showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
           btn.disabled = false
           btn.textContent = label
           return
+        }
+        if (!geoOk) {
+          dashState.softNotice =
+            td.activeTripsOnWayNoEta || 'On the way. ETA unavailable.'
         }
         mountDashboardCompany(root)
       } catch {

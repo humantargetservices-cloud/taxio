@@ -7,6 +7,7 @@
  */
 import { formatDateTime } from './format.js'
 import { escapeHtml } from './html.js'
+import { icon } from './icons.js'
 import { tripPriceLabelFromBooking, cleanTripPriceDisplay } from './rescuePrice.js'
 import { fetchRescueWinnerDetails } from './rescue.js'
 
@@ -232,6 +233,10 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
       passengerPhone: String(b.customer_phone || '').trim() || null,
       driverPickupStatus:
         pickupStatus === 'ON_THE_WAY' || pickupStatus === 'ARRIVED' ? pickupStatus : null,
+      driverEtaMinutes: (() => {
+        const n = Number(b.driver_eta_minutes)
+        return Number.isFinite(n) && n >= 0 ? Math.round(n) : null
+      })(),
       needsPii: false,
       sortAt: new Date(b.ride_datetime || b.created_at || 0).getTime() || 0,
     })
@@ -292,6 +297,7 @@ export function deriveActiveTrips({ companyId, bookings, opportunities }) {
         pickupLat: null,
         pickupLng: null,
         driverPickupStatus: null,
+        driverEtaMinutes: null,
         needsPii: true,
       })
     }
@@ -340,6 +346,10 @@ export async function enrichActiveTripsWithWinnerDetails(trips) {
           .trim()
           .toUpperCase()
         t.driverPickupStatus = ps === 'ON_THE_WAY' || ps === 'ARRIVED' ? ps : null
+        {
+          const n = Number(b.driver_eta_minutes)
+          t.driverEtaMinutes = Number.isFinite(n) && n >= 0 ? Math.round(n) : null
+        }
         if (b.customer_name) t.passengerName = String(b.customer_name).trim() || null
         if (b.customer_phone) t.passengerPhone = String(b.customer_phone).trim() || null
         if (body.passenger_confirm_status === 'CANCELLED_BY_PASSENGER') {
@@ -361,6 +371,15 @@ export async function enrichActiveTripsWithWinnerDetails(trips) {
     })
   )
   return list.filter((t) => t.phase !== 'drop')
+}
+
+function activeTripDetailRow(label, valueHtml) {
+  return `<div class="min-w-0">
+    <p class="text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-slate-500">${escapeHtml(
+      label
+    )}</p>
+    <p class="mt-0.5 break-words text-sm font-semibold leading-snug text-gray-900 dark:text-slate-50">${valueHtml}</p>
+  </div>`
 }
 
 /**
@@ -394,18 +413,34 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
     badge = td.activeTripsArrived || 'Arrived'
   }
 
-  const metaRow = `<div class="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-    <p class="text-xs ${price ? 'text-gray-500 dark:text-slate-400' : 'text-gray-500 dark:text-slate-400'}">${when}</p>
-    ${price ? `<p class="text-sm font-bold tabular-nums text-amber-700 dark:text-amber-300">${price}</p>` : ''}
+  const header = `<div class="flex items-start justify-between gap-3">
+    <p class="inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClass}">${escapeHtml(
+      badge
+    )}</p>
+    ${price ? `<p class="shrink-0 text-sm font-bold tabular-nums text-amber-700 dark:text-amber-300">${price}</p>` : ''}
+  </div>`
+
+  const details = `<div class="mt-2.5 space-y-2">
+    ${activeTripDetailRow(td.activeTripsPickupLabel || 'Pickup', pickup)}
+    ${activeTripDetailRow(td.activeTripsDestinationLabel || 'Destination', dropoff)}
+    ${activeTripDetailRow(td.activeTripsTimeLabel || 'Time', when)}
   </div>`
 
   let foot = ''
   if (phase === 'waiting') {
-    foot = `<p class="mt-1.5 text-xs leading-snug text-amber-800/90 dark:text-amber-200/90">${escapeHtml(
+    foot = `<p class="mt-2 text-xs leading-snug text-amber-800/90 dark:text-amber-200/90">${escapeHtml(
       td.activeTripsWaitingHint || 'Waiting for passenger confirmation'
     )}</p>`
   } else if (phase === 'confirmed') {
     const name = String(trip.passengerName || '').trim()
+    const showName = name && name !== 'Booking request'
+    const passengerBlock = showName
+      ? `<div class="mt-2">${activeTripDetailRow(
+          td.activeTripsPassengerLabel || 'Passenger',
+          escapeHtml(name)
+        )}</div>`
+      : ''
+
     const waTemplate =
       pickupProgress === 'ON_THE_WAY' || pickupProgress === 'ARRIVED'
         ? td.waPassengerOnWayMessage || td.waPassengerConfirmedMessage
@@ -419,10 +454,6 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
       tripDatetime: formatDateTime(trip.whenIso),
       messageTemplate: waTemplate,
     })
-    const nameHtml =
-      name && name !== 'Booking request'
-        ? `<p class="mt-1.5 text-sm font-medium text-gray-800 dark:text-slate-200">${escapeHtml(name)}</p>`
-        : ''
     const bookingAttr = trip.bookingId
       ? ` data-complete-booking="${escapeHtml(String(trip.bookingId))}"`
       : ''
@@ -443,61 +474,89 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
         ? `https://waze.com/ul?ll=${trip.pickupLat}%2C${trip.pickupLng}&navigate=yes`
         : `https://waze.com/ul?q=${navEncoded}&navigate=yes`
       : ''
-    const btnBase =
-      'inline-flex min-h-[40px] flex-1 items-center justify-center rounded-xl px-3 py-2 text-xs font-bold sm:flex-none'
+
+    const btn =
+      'inline-flex min-h-[42px] w-full items-center justify-center rounded-xl px-2.5 py-2 text-xs font-bold leading-tight'
+    const btnPrimarySky = `${btn} bg-sky-600 text-white hover:bg-sky-500`
+    const btnPrimaryViolet = `${btn} bg-violet-600 text-white hover:bg-violet-500`
+    const btnPrimaryComplete = `${btn} bg-emerald-600 text-white hover:bg-emerald-500`
+    const btnOutline = `${btn} border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700`
+    const btnWa = `${btn} bg-emerald-600 text-white hover:bg-emerald-500`
+    const btnCall = btnOutline
+
     const navigateBtn = navDest
-      ? `<details class="relative flex-1 sm:flex-none">
-          <summary class="${btnBase} cursor-pointer list-none border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 [&::-webkit-details-marker]:hidden">${escapeHtml(
-            td.activeTripsNavigate || 'Navigate to pickup'
-          )}</summary>
-          <div class="absolute left-0 z-20 mt-1 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-600 dark:bg-slate-900">
-            <a href="${escapeHtml(gmapsHref)}" target="_blank" rel="noopener noreferrer" class="block px-3 py-2.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800">${escapeHtml(
-              td.activeTripsGoogleMaps || 'Google Maps'
-            )}</a>
-            <a href="${escapeHtml(wazeHref)}" target="_blank" rel="noopener noreferrer" class="block border-t border-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800">${escapeHtml(
-              td.activeTripsWaze || 'Waze'
-            )}</a>
-          </div>
-        </details>`
+      ? `<button type="button" data-open-nav data-gmaps="${escapeHtml(gmapsHref)}" data-waze="${escapeHtml(
+          wazeHref
+        )}" class="${btnOutline}">${escapeHtml(td.activeTripsNavigate || 'Navigate')}</button>`
       : ''
-    const onWayBtn = `<button type="button"${progressAttrs} data-mark-on-way class="${btnBase} bg-sky-600 text-white hover:bg-sky-500">${escapeHtml(
+    const onWayBtn = `<button type="button"${progressAttrs} data-mark-on-way class="${btnPrimarySky}">${escapeHtml(
       td.activeTripsOnWay || "I'm on my way"
     )}</button>`
-    const arrivedBtn = `<button type="button"${progressAttrs} data-mark-arrived class="${btnBase} bg-violet-600 text-white hover:bg-violet-500">${escapeHtml(
+    const arrivedBtn = `<button type="button"${progressAttrs} data-mark-arrived class="${btnPrimaryViolet}">${escapeHtml(
       td.activeTripsIveArrived || "I've arrived"
     )}</button>`
-    const completeBtn = `<button type="button"${progressAttrs} data-complete-trip class="${btnBase} border border-emerald-600/40 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20">${escapeHtml(
+    const completeBtn = `<button type="button"${progressAttrs} data-complete-trip class="${btnPrimaryComplete}">${escapeHtml(
       td.activeTripsComplete || 'Complete trip'
     )}</button>`
     const waBtn = waHref
-      ? `<a href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer" class="${btnBase} bg-emerald-600 text-white hover:bg-emerald-500">${escapeHtml(
+      ? `<a href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer" class="${btnWa}">${escapeHtml(
           td.wa || 'WhatsApp'
         )}</a>`
       : ''
     const callBtn = telHref
-      ? `<a href="${escapeHtml(telHref)}" class="${btnBase} border border-gray-200 bg-white text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700">${escapeHtml(
-          td.call || 'Call'
-        )}</a>`
+      ? `<a href="${escapeHtml(telHref)}" class="${btnCall}">${escapeHtml(td.call || 'Call')}</a>`
       : phone
-        ? `<span class="text-xs text-gray-500">${escapeHtml(phone)}</span>`
+        ? `<span class="flex min-h-[42px] items-center justify-center text-xs text-gray-500">${escapeHtml(
+            phone
+          )}</span>`
         : ''
 
-    let actionBits = []
-    if (!pickupProgress) {
-      actionBits = [navigateBtn, onWayBtn, waBtn, callBtn]
-    } else if (pickupProgress === 'ON_THE_WAY') {
-      actionBits = [navigateBtn, arrivedBtn, waBtn, callBtn]
-    } else {
-      actionBits = [waBtn, callBtn, completeBtn]
+    const secondary =
+      waBtn || callBtn
+        ? `<div class="grid grid-cols-2 gap-2">${waBtn || '<span></span>'}${callBtn || '<span></span>'}</div>`
+        : ''
+
+    let etaLine = ''
+    if (pickupProgress === 'ON_THE_WAY' && Number.isFinite(Number(trip.driverEtaMinutes))) {
+      const etaText = (td.activeTripsEtaApprox || 'Approx. {eta} min to pickup').replace(
+        '{eta}',
+        String(Math.round(Number(trip.driverEtaMinutes)))
+      )
+      etaLine = `<p class="mt-2 flex items-center gap-1.5 text-xs font-medium text-sky-700 dark:text-sky-300">${icon.mapPin(
+        'h-3.5 w-3.5 shrink-0'
+      )}<span>${escapeHtml(etaText)}</span></p>`
     }
-    const actions = `<div class="mt-2 flex flex-wrap gap-2">${actionBits.filter(Boolean).join('')}</div>`
-    foot = `${nameHtml}${actions}`
+
+    let arrivedHint = ''
+    if (pickupProgress === 'ARRIVED') {
+      arrivedHint = `<p class="mt-2 text-xs leading-snug text-violet-800/90 dark:text-violet-200/90">${escapeHtml(
+        td.activeTripsArrivedHint || 'Driver has arrived at pickup.'
+      )}</p>`
+    }
+
+    let actions = ''
+    if (!pickupProgress) {
+      const primary = navigateBtn
+        ? `<div class="grid grid-cols-2 gap-2">${navigateBtn}${onWayBtn}</div>`
+        : onWayBtn
+      actions = `<div class="mt-3 space-y-2">${primary}${secondary}</div>`
+    } else if (pickupProgress === 'ON_THE_WAY') {
+      const primary = navigateBtn
+        ? `<div class="grid grid-cols-2 gap-2">${navigateBtn}${arrivedBtn}</div>`
+        : arrivedBtn
+      actions = `<div class="mt-3 space-y-2">${primary}${secondary}</div>`
+    } else {
+      actions = `<div class="mt-3 space-y-2">${completeBtn}${secondary}</div>`
+    }
+
+    foot = `${passengerBlock}${etaLine}${arrivedHint}${actions}`
   }
 
-  return `<article class="rounded-xl border border-gray-100/90 bg-gradient-to-b from-white to-gray-50/60 px-3.5 py-3 dark:border-slate-700/50 dark:from-slate-900/50 dark:to-slate-950/40" data-active-trip="${escapeHtml(trip.id)}">
-    <p class="inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClass}">${escapeHtml(badge)}</p>
-    <p class="mt-1.5 text-sm font-semibold leading-snug text-gray-900 dark:text-slate-50">${pickup} <span class="font-normal text-gray-400 dark:text-slate-500">→</span> ${dropoff}</p>
-    ${metaRow}
+  return `<article class="rounded-xl border border-gray-100/90 bg-white px-3.5 py-3 dark:border-slate-700/50 dark:bg-slate-900/60" data-active-trip="${escapeHtml(
+    trip.id
+  )}">
+    ${header}
+    ${details}
     ${foot}
   </article>`
 }

@@ -6,6 +6,7 @@ import { apiUrl } from '../lib/api.js'
 import { passengerRescueConfirm, passengerRescueCancel } from '../lib/rescue.js'
 import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
+import { icon } from '../lib/icons.js'
 import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { cleanTripPriceDisplay } from '../lib/rescuePrice.js'
 import { tTripLive } from '../i18n.js'
@@ -40,6 +41,20 @@ function priceLabel(trip) {
   return cleanTripPriceDisplay(raw) || raw
 }
 
+function tripDetailBlock(label, valueHtml) {
+  return `<div class="min-w-0">
+    <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">${escapeHtml(label)}</p>
+    <p class="mt-0.5 break-words text-sm font-semibold leading-snug text-slate-900">${valueHtml}</p>
+  </div>`
+}
+
+function tripMetaRow(label, valueHtml) {
+  return `<div class="flex items-baseline justify-between gap-3 py-1.5 text-sm">
+    <span class="shrink-0 text-slate-500">${escapeHtml(label)}</span>
+    <span class="min-w-0 text-right font-semibold text-slate-900">${valueHtml}</span>
+  </div>`
+}
+
 function tripSummaryHtml(trip, tl) {
   if (!trip) return ''
   const when = formatDateTime(trip.ride_datetime) || '—'
@@ -48,34 +63,34 @@ function tripSummaryHtml(trip, tl) {
       ? tl.hourlyDestination || 'Hourly'
       : trip.dropoff || '—'
   const ref = String(trip.booking_reference || '').trim()
-  return `<div class="mt-4 rounded-xl border border-gray-100 bg-slate-50 px-4 py-3">
-    <p class="text-sm font-semibold text-gray-900">${escapeHtml(trip.pickup || '—')} → ${escapeHtml(
-      destination
-    )}</p>
-    <p class="mt-1 text-sm font-semibold text-amber-700">${escapeHtml(
-      tl.estimatedPrice || 'Estimated price'
-    )}: ${escapeHtml(priceLabel(trip))}</p>
-    <p class="mt-1 text-xs text-gray-500">${escapeHtml(tl.when || 'When')}: ${escapeHtml(when)}</p>
-    <p class="mt-1 text-xs text-gray-500">${escapeHtml(tl.vehicle || 'Vehicle')}: ${escapeHtml(
-      trip.vehicle || '—'
-    )}</p>
-    ${
-      ref
-        ? `<div class="mt-2 flex items-center gap-2 text-xs text-gray-600">
-      <span>${escapeHtml(tl.refLabel || 'Ref')}: <span class="font-semibold text-gray-800" data-booking-ref>${escapeHtml(
-          ref
-        )}</span></span>
-      <button type="button" data-copy-ref class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="${escapeHtml(
-        tl.copyRef || 'Copy reference'
-      )}" title="${escapeHtml(tl.copyRef || 'Copy reference')}">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5" aria-hidden="true"><path d="M8 2a1 1 0 0 0-1 1v1H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a1 1 0 0 0 1-1V6.414A2 2 0 0 0 14.414 5L12 2.586A2 2 0 0 0 10.586 2H8zm4 4V3.414L14.586 6H13a1 1 0 0 1-1-1zM5 6h3v1a1 1 0 0 0 1 1h4v7H5V6z"/></svg>
-      </button>
-      <span data-copy-feedback class="hidden text-[11px] font-semibold text-emerald-700">${escapeHtml(
-        tl.copied || 'Copied'
-      )}</span>
-    </div>`
-        : ''
-    }
+  return `<div class="mt-4 rounded-xl border border-slate-100 bg-slate-50/80 px-3.5 py-3">
+    <div class="space-y-2.5">
+      ${tripDetailBlock(tl.labelPickup || 'Pickup', escapeHtml(trip.pickup || '—'))}
+      ${tripDetailBlock(tl.labelDestination || 'Destination', escapeHtml(destination))}
+    </div>
+    <div class="mt-3 border-t border-slate-200/80 pt-1.5">
+      ${tripMetaRow(tl.estimatedPrice || 'Estimated price', `<span class="tabular-nums text-amber-700">${escapeHtml(priceLabel(trip))}</span>`)}
+      ${tripMetaRow(tl.when || 'When', escapeHtml(when))}
+      ${tripMetaRow(tl.vehicle || 'Vehicle', escapeHtml(trip.vehicle || '—'))}
+      ${
+        ref
+          ? `<div class="flex items-center justify-between gap-2 py-1.5 text-sm">
+        <span class="shrink-0 text-slate-500">${escapeHtml(tl.refLabel || 'Reference')}</span>
+        <span class="inline-flex min-w-0 items-center gap-1.5">
+          <span class="truncate font-semibold text-slate-900" data-booking-ref>${escapeHtml(ref)}</span>
+          <button type="button" data-copy-ref class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="${escapeHtml(
+            tl.copyRef || 'Copy reference'
+          )}" title="${escapeHtml(tl.copyRef || 'Copy reference')}">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5" aria-hidden="true"><path d="M8 2a1 1 0 0 0-1 1v1H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a1 1 0 0 0 1-1V6.414A2 2 0 0 0 14.414 5L12 2.586A2 2 0 0 0 10.586 2H8zm4 4V3.414L14.586 6H13a1 1 0 0 1-1-1zM5 6h3v1a1 1 0 0 0 1 1h4v7H5V6z"/></svg>
+          </button>
+          <span data-copy-feedback class="hidden text-[11px] font-semibold text-emerald-700">${escapeHtml(
+            tl.copied || 'Copied'
+          )}</span>
+        </span>
+      </div>`
+          : ''
+      }
+    </div>
   </div>`
 }
 
@@ -123,57 +138,93 @@ function contactButtonsHtml(contacts, companyName, trip, tl) {
     destination,
     tripDatetime: when,
   })
-  const parts = []
+  const secondaryBtn =
+    'flex min-h-[44px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50'
+  let waHtml = ''
   if (waDigits.length >= 8 && waDigits.length <= 15) {
-    parts.push(
-      `<a href="https://wa.me/${escapeHtml(waDigits)}?text=${encodeURIComponent(
-        prefill
-      )}" target="_blank" rel="noopener noreferrer" class="flex min-h-[48px] w-full items-center justify-center rounded-xl bg-[#25D366] px-3 py-2.5 text-sm font-bold text-white hover:bg-[#1ebe5d]">${escapeHtml(
-        tl.whatsapp || 'WhatsApp'
-      )}</a>`
-    )
+    waHtml = `<a href="https://wa.me/${escapeHtml(waDigits)}?text=${encodeURIComponent(
+      prefill
+    )}" target="_blank" rel="noopener noreferrer" class="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-3 py-2.5 text-sm font-bold text-white hover:bg-[#1ebe5d]">${icon.whatsapp(
+      'h-4 w-4'
+    )}<span>${escapeHtml(tl.whatsapp || 'WhatsApp')}</span></a>`
   }
+  const secondary = []
   if (phone) {
-    parts.push(
-      `<a href="tel:${escapeHtml(phone)}" class="flex min-h-[48px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50">${escapeHtml(
-        tl.call || 'Call'
-      )}</a>`
+    secondary.push(
+      `<a href="tel:${escapeHtml(phone)}" class="${secondaryBtn}">${escapeHtml(tl.call || 'Call')}</a>`
     )
   }
   if (email) {
     const mailto = `mailto:${email}?subject=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(
       mailBody
     )}`
-    parts.push(
-      `<a href="${escapeHtml(mailto)}" class="flex min-h-[48px] w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50">${escapeHtml(
-        tl.email || 'Email'
-      )}</a>`
+    secondary.push(
+      `<a href="${escapeHtml(mailto)}" class="${secondaryBtn}">${escapeHtml(tl.email || 'Email')}</a>`
     )
   }
-  if (!parts.length) return ''
+  if (!waHtml && !secondary.length) return ''
   const heading = fillTpl(tl.contactHeading || 'Contact {company_name}', { company_name: name })
+  const secondaryRow =
+    secondary.length === 2
+      ? `<div class="mt-2 grid grid-cols-2 gap-2">${secondary.join('')}</div>`
+      : secondary.length === 1
+        ? `<div class="mt-2">${secondary[0]}</div>`
+        : ''
   return `<div class="mt-5">
     <p class="mb-2 text-sm font-bold text-slate-800">${escapeHtml(heading)}</p>
-    <div class="grid gap-2">${parts.join('')}</div>
+    ${waHtml}
+    ${secondaryRow}
   </div>`
+}
+
+function progressStepNode(kind, label) {
+  // kind: done | current | todo
+  let circle = ''
+  if (kind === 'done') {
+    circle = `<span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white">${icon.check(
+      'h-3.5 w-3.5'
+    )}</span>`
+  } else if (kind === 'current') {
+    circle = `<span class="relative flex h-6 w-6 items-center justify-center rounded-full bg-sky-500 text-white">
+      <span class="absolute inset-0 animate-pulse rounded-full bg-sky-400/50" aria-hidden="true"></span>
+      <span class="relative h-2 w-2 rounded-full bg-white"></span>
+    </span>`
+  } else {
+    circle = `<span class="flex h-6 w-6 rounded-full border-2 border-slate-300 bg-white"></span>`
+  }
+  const labelClass =
+    kind === 'todo' ? 'text-slate-400' : kind === 'current' ? 'text-sky-700' : 'text-emerald-700'
+  return `<div class="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+    ${circle}
+    <span class="max-w-full truncate text-center text-[10px] font-semibold leading-tight ${labelClass}">${escapeHtml(
+      label
+    )}</span>
+  </div>`
+}
+
+function progressConnector(filled) {
+  return `<div class="mb-5 h-0.5 w-6 shrink-0 self-start rounded-full sm:w-10 ${
+    filled ? 'bg-emerald-400' : 'bg-slate-200'
+  }" aria-hidden="true"></div>`
 }
 
 function pickupProgressRailHtml(status, tl) {
   const s = String(status || '').toUpperCase()
   const step = s === 'ARRIVED' ? 2 : s === 'ON_THE_WAY' ? 1 : 0
-  const taxiLeft = step === 0 ? '8%' : step === 1 ? '48%' : '88%'
-  const pulse = step < 2 ? 'animate-pulse' : ''
-  return `<div class="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-3 py-3" aria-hidden="true">
-    <div class="relative mx-auto h-10 max-w-xs">
-      <div class="absolute left-3 right-3 top-1/2 h-1 -translate-y-1/2 rounded-full bg-slate-200"></div>
-      <div class="absolute left-3 top-1/2 h-1 -translate-y-1/2 rounded-full bg-emerald-400 transition-all duration-500" style="width:calc(${taxiLeft} - 0.75rem)"></div>
-      <div class="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-lg ${pulse}" style="left:${taxiLeft}">🚕</div>
-      <span class="absolute left-0 top-7 text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(
-        tl.progressConfirmed || 'Confirmed'
-      )}</span>
-      <span class="absolute right-0 top-7 text-[10px] font-semibold uppercase tracking-wide text-slate-500">${escapeHtml(
-        tl.progressPickup || 'Pickup'
-      )}</span>
+  const kinds = [
+    step > 0 ? 'done' : 'current',
+    step === 0 ? 'todo' : step === 1 ? 'current' : 'done',
+    step === 2 ? 'current' : 'todo',
+  ]
+  return `<div class="mt-4 rounded-xl border border-slate-100 bg-slate-50/80 px-2.5 py-3" role="list" aria-label="${escapeHtml(
+    tl.progressLabel || 'Trip progress'
+  )}">
+    <div class="flex items-start justify-between gap-0.5">
+      ${progressStepNode(kinds[0], tl.progressConfirmed || 'Confirmed')}
+      ${progressConnector(step > 0)}
+      ${progressStepNode(kinds[1], tl.progressOnTheWay || 'On the way')}
+      ${progressConnector(step > 1)}
+      ${progressStepNode(kinds[2], tl.progressArrived || tl.progressPickup || 'Arrived')}
     </div>
   </div>`
 }
@@ -192,22 +243,24 @@ function confirmedCard(company, trip, contacts, tl) {
 
   if (status === 'ON_THE_WAY') {
     badge = tl.driverOnWayBadge || 'DRIVER ON THE WAY'
-    heading = tl.driverOnWayHeading || 'Your driver is on the way.'
+    heading = tl.driverOnWayHeading || 'Your taxi is on the way'
     sub = hasEta
       ? fillTpl(tl.driverEtaApprox || 'Approx. {eta} min to pickup', { eta: String(Math.round(eta)) })
-      : tl.driverOnWaySub || 'Your driver is on the way.'
+      : tl.driverOnWaySub || ''
     badgeClass = 'text-sky-700'
   } else if (status === 'ARRIVED') {
     badge = tl.driverArrivedBadge || 'DRIVER ARRIVED'
     heading = tl.driverArrivedHeading || 'Your driver has arrived at the pickup location.'
-    sub = tl.driverArrivedSub || 'Your driver has arrived at the pickup location.'
+    sub = ''
     badgeClass = 'text-violet-700'
   }
 
+  const subHtml = sub ? `<p class="mt-2 text-sm text-gray-600">${escapeHtml(sub)}</p>` : ''
+
   return card(`
       <p class="text-xs font-bold uppercase tracking-wide ${badgeClass}">${escapeHtml(badge)}</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(heading)}</h1>
-      <p class="mt-2 text-sm text-gray-600">${escapeHtml(sub)}</p>
+      <h1 class="mt-2 text-xl font-bold leading-snug text-gray-900">${escapeHtml(heading)}</h1>
+      ${subHtml}
       ${pickupProgressRailHtml(status, tl)}
       ${summary}
       ${contactButtonsHtml(contacts, company, trip, tl)}
