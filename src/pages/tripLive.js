@@ -283,13 +283,58 @@ function renderState(data) {
   const company = data?.headline_company || data?.company_a_name || tl.fallbackCompany || 'your taxi company'
   const summary = tripSummaryHtml(trip, tl)
 
-  if (state === 'INVALID' || state === 'EXPIRED') {
+  if (state === 'INVALID') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-slate-500">TAXIO</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(tl.linkUnavailableTitle || 'Link unavailable')}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
         tl.linkUnavailableBody || 'This trip link is invalid or no longer available.'
       )}</p>
+    `)
+  }
+
+  if (state === 'LOAD_ERROR') {
+    return card(`
+      <p class="text-xs font-bold uppercase tracking-wide text-amber-700">TAXIO</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        tl.loadErrorTitle || 'Could not load trip'
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.loadErrorBody || 'Check your connection and try again.'
+      )}</p>
+    `)
+  }
+
+  if (state === 'EXPIRED') {
+    return card(`
+      <p class="text-xs font-bold uppercase tracking-wide text-slate-500">${escapeHtml(
+        tl.expiredBadge || 'Expired'
+      )}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        tl.tripExpiredTitle || 'This trip is no longer active.'
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.tripExpiredBody || 'The trip link is still valid, but this booking has ended.'
+      )}</p>
+      ${summary}
+    `)
+  }
+
+  if (state === 'COMPLETED') {
+    return card(`
+      <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">${escapeHtml(
+        tl.completedBadge || 'TRIP COMPLETED'
+      )}</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
+        fillTpl(tl.completedHeading || 'Your trip with {company_name} is complete', {
+          company_name: company,
+        })
+      )}</h1>
+      <p class="mt-2 text-sm text-gray-600">${escapeHtml(
+        tl.completedBody || 'Thank you for riding with TAXIO.'
+      )}</p>
+      ${summary}
+      ${contactButtonsHtml(data.contacts, company, trip, tl)}
     `)
   }
 
@@ -418,7 +463,12 @@ function renderState(data) {
 
 export async function mountTripLive(root, secureToken) {
   document.title = 'TAXIO · Your trip'
-  const token = String(secureToken || '').trim()
+  // Strip accidental query/hash fragments if a caller passed a raw path segment
+  const token = String(secureToken || '')
+    .trim()
+    .split('?')[0]
+    .split('#')[0]
+    .trim()
   const tl = tTripLive(getLocale())
   if (token.length < 20) {
     root.innerHTML = shell(
@@ -533,14 +583,25 @@ export async function mountTripLive(root, secureToken) {
     const pickupStatus = String(data?.trip?.driver_pickup_status || '').toUpperCase()
     const eta = data?.trip?.driver_eta_minutes
     const progressKey = `${state}:${pickupStatus}:${eta ?? ''}`
-    const terminal = ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED'].includes(
-      state
-    )
-    // Keep polling after confirm until driver arrived (pickup progress updates)
-    const confirmedIdle =
-      (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') && pickupStatus === 'ARRIVED'
-    if (terminal || confirmedIdle) stopPoll()
-    else if (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') startPoll()
+    const terminal = [
+      'CANCELLED',
+      'NO_TAXI_AVAILABLE',
+      'INVALID',
+      'EXPIRED',
+      'OFFER_EXPIRED',
+      'COMPLETED',
+    ].includes(state)
+    // Keep polling through ON_THE_WAY / ARRIVED until COMPLETED
+    if (terminal) stopPoll()
+    else if (
+      state === 'COMPANY_A_ACCEPTED' ||
+      state === 'CONFIRMED' ||
+      state === 'REQUESTING_COMPANY_A' ||
+      state === 'SEARCHING_RESCUE' ||
+      state === 'RESCUE_WINNER_FOUND'
+    ) {
+      startPoll()
+    }
 
     if (
       progressKey === lastState &&
@@ -556,11 +617,18 @@ export async function mountTripLive(root, secureToken) {
 
   const refresh = async () => {
     try {
-      const { body } = await fetchTripStatus(token)
-      paint(body?.state ? body : { state: 'INVALID' })
+      const { status, body } = await fetchTripStatus(token)
+      if (body?.state) {
+        paint(body)
+        return
+      }
+      // Missing state (e.g. HTML error page) — never invent INVALID for a known prior trip
+      if (!lastState) {
+        paint({ state: status === 404 ? 'INVALID' : 'LOAD_ERROR' })
+      }
     } catch {
       if (!lastState) {
-        paint({ state: 'INVALID' })
+        paint({ state: 'LOAD_ERROR' })
       }
     }
   }
@@ -575,13 +643,10 @@ export async function mountTripLive(root, secureToken) {
   const startPoll = () => {
     if (pollTimer) return
     const state = String(latest?.state || '')
-    const pickupStatus = String(latest?.trip?.driver_pickup_status || '').toUpperCase()
-    if (['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED'].includes(state)) {
-      return
-    }
     if (
-      (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') &&
-      pickupStatus === 'ARRIVED'
+      ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED', 'COMPLETED'].includes(
+        state
+      )
     ) {
       return
     }

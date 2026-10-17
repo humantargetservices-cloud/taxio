@@ -382,19 +382,8 @@ function activeTripDetailRow(label, valueHtml) {
   </div>`
 }
 
-/**
- * Compact HTML for one active trip row (no outer card).
- * @param {object} trip
- * @param {object} td dashboard i18n
- * @param {{ companyName?: string }} opts
- */
-export function renderActiveTripItemHtml(trip, td, opts = {}) {
+function tripBadgeMeta(trip, td) {
   const phase = trip.phase
-  const pickup = escapeHtml(trip.pickup || '—')
-  const dropoff = escapeHtml(trip.dropoff || '—')
-  const when = escapeHtml(formatActiveTripWhen(trip.whenIso))
-  const price = trip.priceLabel ? escapeHtml(trip.priceLabel) : ''
-
   const pickupProgress = String(trip.driverPickupStatus || '').toUpperCase()
   let badgeClass =
     'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300'
@@ -412,6 +401,155 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
     badgeClass = 'bg-violet-100 text-violet-900 dark:bg-violet-500/15 dark:text-violet-300'
     badge = td.activeTripsArrived || 'Arrived'
   }
+  return { badge, badgeClass, pickupProgress }
+}
+
+/** Action controls for Current Trip sheet (and shared hierarchy). */
+export function renderActiveTripActionsHtml(trip, td, opts = {}) {
+  if (trip.phase !== 'confirmed') return ''
+  const pickupProgress = String(trip.driverPickupStatus || '').toUpperCase()
+  const name = String(trip.passengerName || '').trim()
+  const waTemplate =
+    pickupProgress === 'ON_THE_WAY' || pickupProgress === 'ARRIVED'
+      ? td.waPassengerOnWayMessage || td.waPassengerConfirmedMessage
+      : td.waPassengerConfirmedMessage
+  const { phone, waHref, telHref } = passengerContactLinks(trip.passengerPhone, {
+    companyName: opts.companyName,
+    pickup: trip.pickup,
+    dropoff: trip.dropoff,
+    passengerName: name,
+    bookingReference: trip.bookingReference,
+    tripDatetime: formatDateTime(trip.whenIso),
+    messageTemplate: waTemplate,
+  })
+  const bookingAttr = trip.bookingId
+    ? ` data-complete-booking="${escapeHtml(String(trip.bookingId))}"`
+    : ''
+  const rescueAttr = trip.rescueRequestId
+    ? ` data-complete-rescue="${escapeHtml(String(trip.rescueRequestId))}"`
+    : ''
+  const progressAttrs = `${bookingAttr}${rescueAttr}`
+  const navDest =
+    Number.isFinite(trip.pickupLat) && Number.isFinite(trip.pickupLng)
+      ? `${trip.pickupLat},${trip.pickupLng}`
+      : String(trip.pickupAddress || trip.pickup || '').trim()
+  const navEncoded = encodeURIComponent(navDest || '')
+  const gmapsHref = navDest
+    ? `https://www.google.com/maps/dir/?api=1&destination=${navEncoded}&travelmode=driving`
+    : ''
+  const wazeHref = navDest
+    ? Number.isFinite(trip.pickupLat) && Number.isFinite(trip.pickupLng)
+      ? `https://waze.com/ul?ll=${trip.pickupLat}%2C${trip.pickupLng}&navigate=yes`
+      : `https://waze.com/ul?q=${navEncoded}&navigate=yes`
+    : ''
+
+  const btn =
+    'inline-flex min-h-[44px] w-full items-center justify-center rounded-xl px-2.5 py-2.5 text-xs font-bold leading-tight'
+  const btnPrimarySky = `${btn} bg-sky-600 text-white hover:bg-sky-500`
+  const btnPrimaryViolet = `${btn} bg-violet-600 text-white hover:bg-violet-500`
+  const btnPrimaryComplete = `${btn} bg-emerald-600 text-white hover:bg-emerald-500`
+  const btnOutline = `${btn} border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700`
+  const btnWa = `${btn} bg-emerald-600 text-white hover:bg-emerald-500`
+  const btnCall = btnOutline
+  const btnEta = `${btn} border border-sky-300/80 bg-sky-50 text-sky-900 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200`
+
+  const navigateBtn = navDest
+    ? `<button type="button" data-open-nav data-gmaps="${escapeHtml(gmapsHref)}" data-waze="${escapeHtml(
+        wazeHref
+      )}" class="${btnOutline}">${escapeHtml(td.activeTripsNavigate || 'Navigate')}</button>`
+    : ''
+  const onWayBtn = `<button type="button"${progressAttrs} data-mark-on-way class="${btnPrimarySky}">${escapeHtml(
+    td.activeTripsOnWay || "I'm on my way"
+  )}</button>`
+  const arrivedBtn = `<button type="button"${progressAttrs} data-mark-arrived class="${btnPrimaryViolet}">${escapeHtml(
+    td.activeTripsIveArrived || "I've arrived"
+  )}</button>`
+  const completeBtn = `<button type="button"${progressAttrs} data-complete-trip class="${btnPrimaryComplete}">${escapeHtml(
+    td.activeTripsComplete || 'Complete trip'
+  )}</button>`
+  const waBtn = waHref
+    ? `<a href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer" class="${btnWa}">${escapeHtml(
+        td.wa || 'WhatsApp'
+      )}</a>`
+    : ''
+  const callBtn = telHref
+    ? `<a href="${escapeHtml(telHref)}" class="${btnCall}">${escapeHtml(td.call || 'Call')}</a>`
+    : phone
+      ? `<span class="flex min-h-[44px] items-center justify-center text-xs text-gray-500">${escapeHtml(
+          phone
+        )}</span>`
+      : ''
+
+  const secondary =
+    waBtn || callBtn
+      ? `<div class="grid grid-cols-2 gap-2">${waBtn || '<span></span>'}${callBtn || '<span></span>'}</div>`
+      : ''
+
+  let etaLine = ''
+  let etaAction = ''
+  if (pickupProgress === 'ON_THE_WAY') {
+    if (Number.isFinite(Number(trip.driverEtaMinutes))) {
+      const etaText = (td.activeTripsEtaApprox || 'Approx. {eta} min to pickup').replace(
+        '{eta}',
+        String(Math.round(Number(trip.driverEtaMinutes)))
+      )
+      etaLine = `<p class="flex items-center gap-1.5 text-xs font-medium text-sky-700 dark:text-sky-300">${icon.mapPin(
+        'h-3.5 w-3.5 shrink-0'
+      )}<span>${escapeHtml(etaText)}</span></p>`
+      etaAction = `<button type="button"${progressAttrs} data-update-eta class="${btnEta}">${escapeHtml(
+        td.activeTripsUpdateEta || 'Update ETA'
+      )}</button>`
+    } else {
+      etaLine = `<p class="text-xs font-medium text-slate-500 dark:text-slate-400">${escapeHtml(
+        td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
+      )}</p>`
+      etaAction = `<button type="button"${progressAttrs} data-update-eta class="${btnEta}">${escapeHtml(
+        td.activeTripsAddEta || 'Add ETA'
+      )}</button>`
+    }
+  }
+
+  let arrivedHint = ''
+  if (pickupProgress === 'ARRIVED') {
+    arrivedHint = `<p class="text-xs leading-snug text-violet-800/90 dark:text-violet-200/90">${escapeHtml(
+      td.activeTripsArrivedHint || 'Driver has arrived at pickup.'
+    )}</p>`
+  }
+
+  let primary = ''
+  if (!pickupProgress) {
+    primary = navigateBtn
+      ? `<div class="grid grid-cols-2 gap-2">${navigateBtn}${onWayBtn}</div>`
+      : onWayBtn
+  } else if (pickupProgress === 'ON_THE_WAY') {
+    primary = navigateBtn
+      ? `<div class="grid grid-cols-2 gap-2">${navigateBtn}${arrivedBtn}</div>`
+      : arrivedBtn
+  } else {
+    primary = completeBtn
+  }
+
+  return `<div class="space-y-2.5">
+    ${etaLine}
+    ${arrivedHint}
+    ${primary}
+    ${etaAction}
+    ${secondary}
+  </div>`
+}
+
+/**
+ * Compact Active Trip list card — opens Current Trip sheet for controls.
+ * @param {object} trip
+ * @param {object} td dashboard i18n
+ * @param {{ companyName?: string }} opts
+ */
+export function renderActiveTripItemHtml(trip, td, opts = {}) {
+  const pickup = escapeHtml(trip.pickup || '—')
+  const dropoff = escapeHtml(trip.dropoff || '—')
+  const when = escapeHtml(formatActiveTripWhen(trip.whenIso))
+  const price = trip.priceLabel ? escapeHtml(trip.priceLabel) : ''
+  const { badge, badgeClass } = tripBadgeMeta(trip, td)
 
   const header = `<div class="flex items-start justify-between gap-3">
     <p class="inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClass}">${escapeHtml(
@@ -420,18 +558,18 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
     ${price ? `<p class="shrink-0 text-sm font-bold tabular-nums text-amber-700 dark:text-amber-300">${price}</p>` : ''}
   </div>`
 
-  const details = `<div class="mt-2.5 space-y-2">
+  const details = `<div class="mt-2 space-y-1.5">
     ${activeTripDetailRow(td.activeTripsPickupLabel || 'Pickup', pickup)}
     ${activeTripDetailRow(td.activeTripsDestinationLabel || 'Destination', dropoff)}
     ${activeTripDetailRow(td.activeTripsTimeLabel || 'Time', when)}
   </div>`
 
   let foot = ''
-  if (phase === 'waiting') {
+  if (trip.phase === 'waiting') {
     foot = `<p class="mt-2 text-xs leading-snug text-amber-800/90 dark:text-amber-200/90">${escapeHtml(
       td.activeTripsWaitingHint || 'Waiting for passenger confirmation'
     )}</p>`
-  } else if (phase === 'confirmed') {
+  } else if (trip.phase === 'confirmed') {
     const name = String(trip.passengerName || '').trim()
     const showName = name && name !== 'Booking request'
     const passengerBlock = showName
@@ -440,116 +578,12 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
           escapeHtml(name)
         )}</div>`
       : ''
-
-    const waTemplate =
-      pickupProgress === 'ON_THE_WAY' || pickupProgress === 'ARRIVED'
-        ? td.waPassengerOnWayMessage || td.waPassengerConfirmedMessage
-        : td.waPassengerConfirmedMessage
-    const { phone, waHref, telHref } = passengerContactLinks(trip.passengerPhone, {
-      companyName: opts.companyName,
-      pickup: trip.pickup,
-      dropoff: trip.dropoff,
-      passengerName: name,
-      bookingReference: trip.bookingReference,
-      tripDatetime: formatDateTime(trip.whenIso),
-      messageTemplate: waTemplate,
-    })
-    const bookingAttr = trip.bookingId
-      ? ` data-complete-booking="${escapeHtml(String(trip.bookingId))}"`
-      : ''
-    const rescueAttr = trip.rescueRequestId
-      ? ` data-complete-rescue="${escapeHtml(String(trip.rescueRequestId))}"`
-      : ''
-    const progressAttrs = `${bookingAttr}${rescueAttr}`
-    const navDest =
-      Number.isFinite(trip.pickupLat) && Number.isFinite(trip.pickupLng)
-        ? `${trip.pickupLat},${trip.pickupLng}`
-        : String(trip.pickupAddress || trip.pickup || '').trim()
-    const navEncoded = encodeURIComponent(navDest || '')
-    const gmapsHref = navDest
-      ? `https://www.google.com/maps/dir/?api=1&destination=${navEncoded}&travelmode=driving`
-      : ''
-    const wazeHref = navDest
-      ? Number.isFinite(trip.pickupLat) && Number.isFinite(trip.pickupLng)
-        ? `https://waze.com/ul?ll=${trip.pickupLat}%2C${trip.pickupLng}&navigate=yes`
-        : `https://waze.com/ul?q=${navEncoded}&navigate=yes`
-      : ''
-
-    const btn =
-      'inline-flex min-h-[42px] w-full items-center justify-center rounded-xl px-2.5 py-2 text-xs font-bold leading-tight'
-    const btnPrimarySky = `${btn} bg-sky-600 text-white hover:bg-sky-500`
-    const btnPrimaryViolet = `${btn} bg-violet-600 text-white hover:bg-violet-500`
-    const btnPrimaryComplete = `${btn} bg-emerald-600 text-white hover:bg-emerald-500`
-    const btnOutline = `${btn} border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700`
-    const btnWa = `${btn} bg-emerald-600 text-white hover:bg-emerald-500`
-    const btnCall = btnOutline
-
-    const navigateBtn = navDest
-      ? `<button type="button" data-open-nav data-gmaps="${escapeHtml(gmapsHref)}" data-waze="${escapeHtml(
-          wazeHref
-        )}" class="${btnOutline}">${escapeHtml(td.activeTripsNavigate || 'Navigate')}</button>`
-      : ''
-    const onWayBtn = `<button type="button"${progressAttrs} data-mark-on-way class="${btnPrimarySky}">${escapeHtml(
-      td.activeTripsOnWay || "I'm on my way"
+    const openBtn = `<button type="button" data-open-trip="${escapeHtml(
+      String(trip.id)
+    )}" class="mt-3 inline-flex min-h-[40px] w-full items-center justify-center rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-950 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/20">${escapeHtml(
+      td.activeTripsOpenTrip || 'Open trip'
     )}</button>`
-    const arrivedBtn = `<button type="button"${progressAttrs} data-mark-arrived class="${btnPrimaryViolet}">${escapeHtml(
-      td.activeTripsIveArrived || "I've arrived"
-    )}</button>`
-    const completeBtn = `<button type="button"${progressAttrs} data-complete-trip class="${btnPrimaryComplete}">${escapeHtml(
-      td.activeTripsComplete || 'Complete trip'
-    )}</button>`
-    const waBtn = waHref
-      ? `<a href="${escapeHtml(waHref)}" target="_blank" rel="noopener noreferrer" class="${btnWa}">${escapeHtml(
-          td.wa || 'WhatsApp'
-        )}</a>`
-      : ''
-    const callBtn = telHref
-      ? `<a href="${escapeHtml(telHref)}" class="${btnCall}">${escapeHtml(td.call || 'Call')}</a>`
-      : phone
-        ? `<span class="flex min-h-[42px] items-center justify-center text-xs text-gray-500">${escapeHtml(
-            phone
-          )}</span>`
-        : ''
-
-    const secondary =
-      waBtn || callBtn
-        ? `<div class="grid grid-cols-2 gap-2">${waBtn || '<span></span>'}${callBtn || '<span></span>'}</div>`
-        : ''
-
-    let etaLine = ''
-    if (pickupProgress === 'ON_THE_WAY' && Number.isFinite(Number(trip.driverEtaMinutes))) {
-      const etaText = (td.activeTripsEtaApprox || 'Approx. {eta} min to pickup').replace(
-        '{eta}',
-        String(Math.round(Number(trip.driverEtaMinutes)))
-      )
-      etaLine = `<p class="mt-2 flex items-center gap-1.5 text-xs font-medium text-sky-700 dark:text-sky-300">${icon.mapPin(
-        'h-3.5 w-3.5 shrink-0'
-      )}<span>${escapeHtml(etaText)}</span></p>`
-    }
-
-    let arrivedHint = ''
-    if (pickupProgress === 'ARRIVED') {
-      arrivedHint = `<p class="mt-2 text-xs leading-snug text-violet-800/90 dark:text-violet-200/90">${escapeHtml(
-        td.activeTripsArrivedHint || 'Driver has arrived at pickup.'
-      )}</p>`
-    }
-
-    let actions = ''
-    if (!pickupProgress) {
-      const primary = navigateBtn
-        ? `<div class="grid grid-cols-2 gap-2">${navigateBtn}${onWayBtn}</div>`
-        : onWayBtn
-      actions = `<div class="mt-3 space-y-2">${primary}${secondary}</div>`
-    } else if (pickupProgress === 'ON_THE_WAY') {
-      const primary = navigateBtn
-        ? `<div class="grid grid-cols-2 gap-2">${navigateBtn}${arrivedBtn}</div>`
-        : arrivedBtn
-      actions = `<div class="mt-3 space-y-2">${primary}${secondary}</div>`
-    } else {
-      actions = `<div class="mt-3 space-y-2">${completeBtn}${secondary}</div>`
-    }
-
-    foot = `${passengerBlock}${etaLine}${arrivedHint}${actions}`
+    foot = `${passengerBlock}${openBtn}`
   }
 
   return `<article class="rounded-xl border border-gray-100/90 bg-white px-3.5 py-3 dark:border-slate-700/50 dark:bg-slate-900/60" data-active-trip="${escapeHtml(
@@ -559,4 +593,38 @@ export function renderActiveTripItemHtml(trip, td, opts = {}) {
     ${details}
     ${foot}
   </article>`
+}
+
+/**
+ * Inner content for Current Trip bottom sheet.
+ * @param {object} trip
+ * @param {object} td
+ * @param {{ companyName?: string }} opts
+ */
+export function renderCurrentTripSheetBodyHtml(trip, td, opts = {}) {
+  const pickup = escapeHtml(trip.pickup || '—')
+  const dropoff = escapeHtml(trip.dropoff || '—')
+  const when = escapeHtml(formatActiveTripWhen(trip.whenIso))
+  const price = trip.priceLabel ? escapeHtml(trip.priceLabel) : ''
+  const { badge, badgeClass } = tripBadgeMeta(trip, td)
+  const name = String(trip.passengerName || '').trim()
+  const showName = name && name !== 'Booking request'
+
+  return `<div class="flex items-start justify-between gap-3">
+      <p class="inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${badgeClass}">${escapeHtml(
+        badge
+      )}</p>
+      ${price ? `<p class="shrink-0 text-base font-bold tabular-nums text-amber-700 dark:text-amber-300">${price}</p>` : ''}
+    </div>
+    <div class="mt-3 space-y-2.5">
+      ${activeTripDetailRow(td.activeTripsPickupLabel || 'Pickup', pickup)}
+      ${activeTripDetailRow(td.activeTripsDestinationLabel || 'Destination', dropoff)}
+      ${activeTripDetailRow(td.activeTripsTimeLabel || 'Time', when)}
+      ${
+        showName
+          ? activeTripDetailRow(td.activeTripsPassengerLabel || 'Passenger', escapeHtml(name))
+          : ''
+      }
+    </div>
+    <div class="mt-4">${renderActiveTripActionsHtml(trip, td, opts)}</div>`
 }

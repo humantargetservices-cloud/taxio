@@ -261,13 +261,44 @@ export default async function handler(req, res) {
         })
       }
 
-      let etaMinutes = null
+      const rpcAction = action === 'mark_on_way' ? 'ON_THE_WAY' : 'ARRIVED'
+
+      // Authoritative status first — never block ON_THE_WAY on geolocation / Maps ETA.
+      const { data, error } = await userSb.rpc('taxio_company_set_pickup_progress', {
+        p_company_id: companyId,
+        p_action: rpcAction,
+        p_booking_request_id: bookingRequestId || null,
+        p_rescue_request_id: rescueRequestId || null,
+        p_eta_minutes: null,
+      })
+      if (error) {
+        console.error(`[rescue:${action}]`, error.message)
+        // Column/RPC missing until migration applied
+        if (/taxio_company_set_pickup_progress|driver_pickup_status|schema cache|function/i.test(error.message || '')) {
+          return json(res, 503, {
+            ok: false,
+            code: 'PICKUP_PROGRESS_NOT_READY',
+            error: 'Pickup progress is not ready on this environment yet.',
+          })
+        }
+        return json(res, 500, { ok: false, code: 'RPC_ERROR', error: error.message })
+      }
+      let result = data && typeof data === 'object' ? data : { ok: false, code: 'EMPTY' }
+      if (!result.ok) {
+        const http = result.code === 'FORBIDDEN' || result.code === 'NOT_AUTHENTICATED'
+          ? 403
+          : result.code === 'NOT_FOUND'
+            ? 404
+            : 409
+        return json(res, http, result)
+      }
+
+      // Best-effort ETA enhancement after status is already ON_THE_WAY (coords never stored).
       if (action === 'mark_on_way') {
         const driverLoc = validateLatLng({
           lat: body.driver_lat ?? body.driverLat,
           lng: body.driver_lng ?? body.driverLng,
         })
-        // Optional one-shot ETA — never persist driver coordinates
         if (driverLoc) {
           try {
             const svc = makeSupabaseServiceClient()
@@ -288,7 +319,22 @@ export default async function handler(req, res) {
                 .maybeSingle()
               const pickup = validateLatLng({ lat: b?.pickup_lat, lng: b?.pickup_lng })
               if (pickup) {
-                etaMinutes = await fetchDrivingEtaMinutes(driverLoc, pickup)
+                const etaMinutes = await fetchDrivingEtaMinutes(driverLoc, pickup)
+                if (Number.isFinite(etaMinutes) && etaMinutes >= 0) {
+                  const { data: etaData, error: etaRpcErr } = await userSb.rpc(
+                    'taxio_company_set_pickup_progress',
+                    {
+                      p_company_id: companyId,
+                      p_action: 'ON_THE_WAY',
+                      p_booking_request_id: bookingRequestId || null,
+                      p_rescue_request_id: rescueRequestId || null,
+                      p_eta_minutes: Math.round(etaMinutes),
+                    }
+                  )
+                  if (!etaRpcErr && etaData && typeof etaData === 'object' && etaData.ok) {
+                    result = etaData
+                  }
+                }
               }
             }
           } catch (etaErr) {
@@ -297,35 +343,7 @@ export default async function handler(req, res) {
         }
       }
 
-      const rpcAction = action === 'mark_on_way' ? 'ON_THE_WAY' : 'ARRIVED'
-      const { data, error } = await userSb.rpc('taxio_company_set_pickup_progress', {
-        p_company_id: companyId,
-        p_action: rpcAction,
-        p_booking_request_id: bookingRequestId || null,
-        p_rescue_request_id: rescueRequestId || null,
-        p_eta_minutes: etaMinutes,
-      })
-      if (error) {
-        console.error(`[rescue:${action}]`, error.message)
-        // Column/RPC missing until migration applied
-        if (/taxio_company_set_pickup_progress|driver_pickup_status|schema cache|function/i.test(error.message || '')) {
-          return json(res, 503, {
-            ok: false,
-            code: 'PICKUP_PROGRESS_NOT_READY',
-            error: 'Pickup progress is not ready on this environment yet.',
-          })
-        }
-        return json(res, 500, { ok: false, code: 'RPC_ERROR', error: error.message })
-      }
-      const result = data && typeof data === 'object' ? data : { ok: false, code: 'EMPTY' }
-      const http = result.ok
-        ? 200
-        : result.code === 'FORBIDDEN' || result.code === 'NOT_AUTHENTICATED'
-          ? 403
-          : result.code === 'NOT_FOUND'
-            ? 404
-            : 409
-      return json(res, http, result)
+      return json(res, 200, result)
     }
 
     return json(res, 400, {

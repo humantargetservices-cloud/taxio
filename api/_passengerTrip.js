@@ -75,12 +75,14 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
         : null,
     driver_on_way_at: booking.driver_on_way_at || null,
     driver_arrived_at: booking.driver_arrived_at || null,
+    completed_at: booking.completed_at || null,
   }
 
   const companyAName = companyA?.name || 'your taxi company'
   const pcs = String(rescue?.passenger_confirm_status || '')
   const rescueStatus = String(rescue?.status || '')
   const bookingStatus = String(booking.status || '')
+  const isCompleted = !!booking.completed_at
 
   const base = {
     ok: true,
@@ -89,7 +91,7 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     company_a_name: companyAName,
   }
 
-  // Terminal passenger cancel (Rescue path)
+  // Terminal passenger cancel (Rescue path) — token remains valid
   if (pcs === 'CANCELLED_BY_PASSENGER') {
     return {
       ...base,
@@ -101,20 +103,24 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     }
   }
 
-  // Passenger confirm window expired (offer still opens; no Confirm/Cancel)
-  if (pcs === 'EXPIRED' || (rescueStatus === 'ACCEPTED' && pcs === 'WAITING_PASSENGER_CONFIRMATION' && isPassengerConfirmPastDeadline(rescue))) {
+  // Completed trip — token remains valid (never INVALID)
+  if (isCompleted) {
+    const rescueConfirmed = pcs === 'CONFIRMED' && rescueStatus === 'ACCEPTED'
     return {
       ...base,
-      state: 'OFFER_EXPIRED',
-      headline_company: winnerCompany?.name || companyAName,
-      contacts: null,
+      state: 'COMPLETED',
+      headline_company: rescueConfirmed
+        ? winnerCompany?.name || companyAName
+        : companyAName,
+      contacts: rescueConfirmed
+        ? publicCompanyContacts(winnerCompany)
+        : publicCompanyContacts(companyA),
       confirm_token: null,
       actions: { confirm: false, cancel: false },
-      passenger_confirm_deadline_at: rescue?.passenger_confirm_deadline_at || null,
     }
   }
 
-  // Rescue confirmed
+  // Rescue confirmed (active trip) — must win over any older EXPIRED rescue edge cases
   if (pcs === 'CONFIRMED' && rescueStatus === 'ACCEPTED') {
     return {
       ...base,
@@ -123,6 +129,36 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
       contacts: publicCompanyContacts(winnerCompany),
       confirm_token: null,
       actions: { confirm: false, cancel: false },
+    }
+  }
+
+  // Company A accepted — authoritative live trip; ignore leftover expired rescue rows
+  if (bookingStatus === 'accepted') {
+    return {
+      ...base,
+      state: 'COMPANY_A_ACCEPTED',
+      headline_company: companyAName,
+      contacts: publicCompanyContacts(companyA),
+      confirm_token: null,
+      actions: { confirm: false, cancel: false },
+    }
+  }
+
+  // Passenger confirm window expired (offer still opens; no Confirm/Cancel)
+  if (
+    pcs === 'EXPIRED' ||
+    (rescueStatus === 'ACCEPTED' &&
+      pcs === 'WAITING_PASSENGER_CONFIRMATION' &&
+      isPassengerConfirmPastDeadline(rescue))
+  ) {
+    return {
+      ...base,
+      state: 'OFFER_EXPIRED',
+      headline_company: winnerCompany?.name || companyAName,
+      contacts: null,
+      confirm_token: null,
+      actions: { confirm: false, cancel: false },
+      passenger_confirm_deadline_at: rescue?.passenger_confirm_deadline_at || null,
     }
   }
 
@@ -139,6 +175,18 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     }
   }
 
+  // Edge: accepted rescue without pcs yet
+  if (bookingStatus === 'rejected' && rescueStatus === 'ACCEPTED') {
+    return {
+      ...base,
+      state: 'RESCUE_WINNER_FOUND',
+      headline_company: winnerCompany?.name || 'another taxi company',
+      contacts: null,
+      confirm_token: rescue?.passenger_confirm_token || null,
+      actions: { confirm: true, cancel: true },
+    }
+  }
+
   // Rescue search in progress
   if (rescueStatus === 'OPEN') {
     return {
@@ -146,30 +194,6 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
       state: 'SEARCHING_RESCUE',
       headline_company: companyAName,
       contacts: null,
-      confirm_token: null,
-      actions: { confirm: false, cancel: false },
-    }
-  }
-
-  // Rescue expired with no winner
-  if (rescueStatus === 'EXPIRED' || (bookingStatus === 'rejected' && !rescue)) {
-    return {
-      ...base,
-      state: 'NO_TAXI_AVAILABLE',
-      headline_company: companyAName,
-      contacts: null,
-      confirm_token: null,
-      actions: { confirm: false, cancel: false },
-    }
-  }
-
-  // Company A accepted (no Rescue confirm required)
-  if (bookingStatus === 'accepted') {
-    return {
-      ...base,
-      state: 'COMPANY_A_ACCEPTED',
-      headline_company: companyAName,
-      contacts: publicCompanyContacts(companyA),
       confirm_token: null,
       actions: { confirm: false, cancel: false },
     }
@@ -203,18 +227,19 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     }
   }
 
-  if (bookingStatus === 'rejected' && rescueStatus === 'ACCEPTED') {
-    // Edge: accepted rescue without pcs yet
+  // Rescue expired with no winner / rejected with nothing left
+  if (rescueStatus === 'EXPIRED' || (bookingStatus === 'rejected' && !rescue)) {
     return {
       ...base,
-      state: 'RESCUE_WINNER_FOUND',
-      headline_company: winnerCompany?.name || 'another taxi company',
+      state: 'NO_TAXI_AVAILABLE',
+      headline_company: companyAName,
       contacts: null,
-      confirm_token: rescue?.passenger_confirm_token || null,
-      actions: { confirm: true, cancel: true },
+      confirm_token: null,
+      actions: { confirm: false, cancel: false },
     }
   }
 
+  // Known token, terminal/unknown lifecycle — still valid link, not INVALID
   return {
     ...base,
     state: 'EXPIRED',

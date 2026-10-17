@@ -95,7 +95,11 @@ function route() {
     return
   }
   if (path.startsWith('/trip/')) {
-    const tripToken = decodeURIComponent(path.slice('/trip/'.length).split('/')[0] || '').trim()
+    const tripToken = decodeURIComponent(path.slice('/trip/'.length).split('/')[0] || '')
+      .trim()
+      .split('?')[0]
+      .split('#')[0]
+      .trim()
     if (tripToken) {
       mountTripLive(root, tripToken).catch((err) => {
         console.error(err)

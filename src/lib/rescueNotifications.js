@@ -221,7 +221,14 @@ function bindHandlers(ctx) {
         return
       }
       if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
+      // Open Current Trip sheet once after Company A accept
+      try {
+        sessionStorage.setItem('taxio_auto_open_trip', `booking:${bookingId}`)
+      } catch {
+        /* ignore */
+      }
       void refreshNotifications()
+      activeTripsRefreshHandler?.()
     })
   })
 

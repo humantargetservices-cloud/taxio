@@ -30,6 +30,7 @@ import {
   deriveActiveTrips,
   enrichActiveTripsWithWinnerDetails,
   renderActiveTripItemHtml,
+  renderCurrentTripSheetBodyHtml,
 } from '../lib/activeTrips.js'
 import { signOutEverywhere } from '../lib/auth.js'
 import { formatDateTime } from '../lib/format.js'
@@ -80,6 +81,8 @@ const dashState = {
   /** @type {null | { gmapsHref: string, wazeHref: string }} */
   navSheet: null,
   softNotice: null,
+  /** @type {string | null} open Current Trip sheet trip id */
+  tripSheetId: null,
 }
 
 /** Invalidates overlapping mounts (tab switches / concurrent loads). */
@@ -345,6 +348,105 @@ function renderNavSheet(td, sheet) {
           cancel
         )}</button>
       </div>
+    </div>
+  </div>`
+}
+
+const TRIP_SHEET_CLOSED_KEY = 'taxio_trip_sheet_closed'
+const TRIP_SHEET_AUTO_KEY = 'taxio_auto_open_trip'
+const TRIP_SHEET_AUTO_DONE_KEY = 'taxio_trip_sheet_auto_done'
+
+function readTripSheetIdSet(storageKey) {
+  try {
+    const raw = sessionStorage.getItem(storageKey)
+    const arr = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(arr) ? arr.map(String) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeTripSheetIdSet(storageKey, set) {
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify([...set]))
+  } catch {
+    /* ignore */
+  }
+}
+
+function markTripSheetClosed(tripId) {
+  const id = String(tripId || '').trim()
+  if (!id) return
+  const closed = readTripSheetIdSet(TRIP_SHEET_CLOSED_KEY)
+  closed.add(id)
+  writeTripSheetIdSet(TRIP_SHEET_CLOSED_KEY, closed)
+}
+
+function queueAutoOpenTrip(tripId) {
+  const id = String(tripId || '').trim()
+  if (!id) return
+  try {
+    sessionStorage.setItem(TRIP_SHEET_AUTO_KEY, id)
+  } catch {
+    /* ignore */
+  }
+}
+
+function resolveAutoOpenTripId(activeTrips) {
+  const trips = Array.isArray(activeTrips) ? activeTrips : []
+  const closed = readTripSheetIdSet(TRIP_SHEET_CLOSED_KEY)
+  const done = readTripSheetIdSet(TRIP_SHEET_AUTO_DONE_KEY)
+
+  let queued = ''
+  try {
+    queued = String(sessionStorage.getItem(TRIP_SHEET_AUTO_KEY) || '').trim()
+  } catch {
+    queued = ''
+  }
+  if (queued) {
+    try {
+      sessionStorage.removeItem(TRIP_SHEET_AUTO_KEY)
+    } catch {
+      /* ignore */
+    }
+    if (!closed.has(queued) && trips.some((t) => t.id === queued && t.phase === 'confirmed')) {
+      done.add(queued)
+      writeTripSheetIdSet(TRIP_SHEET_AUTO_DONE_KEY, done)
+      return queued
+    }
+  }
+
+  // Rescue confirmed: open once for winner when PII unlocks
+  for (const t of trips) {
+    if (t.phase !== 'confirmed' || t.kind !== 'rescue_confirmed') continue
+    if (closed.has(t.id) || done.has(t.id)) continue
+    if (t.needsPii) continue
+    done.add(t.id)
+    writeTripSheetIdSet(TRIP_SHEET_AUTO_DONE_KEY, done)
+    return t.id
+  }
+  return null
+}
+
+function renderCurrentTripSheet(td, trip, companyName) {
+  const open = !!trip
+  const title = td.activeTripsCurrentTripTitle || 'Current trip'
+  const body = trip
+    ? renderCurrentTripSheetBodyHtml(trip, td, { companyName })
+    : ''
+  return `<div id="dash-trip-sheet" class="fixed inset-0 z-[65] ${open ? '' : 'pointer-events-none hidden'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(
+    title
+  )}">
+    <div id="dash-trip-backdrop" class="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"></div>
+    <div class="absolute bottom-0 left-0 right-0 mx-auto max-h-[88vh] max-w-lg overflow-y-auto rounded-t-2xl border border-gray-200/80 bg-white p-4 shadow-[0_-8px_32px_rgba(15,23,42,0.14)] dark:border-slate-700/60 dark:bg-slate-900 sm:p-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div class="mx-auto mb-3 h-1 w-10 rounded-full bg-gray-200 dark:bg-slate-700" aria-hidden="true"></div>
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(title)}</h2>
+        <button type="button" id="dash-trip-close" class="${DASH_ICON_BTN} h-9 w-9" aria-label="${escapeHtml(
+          td.activeTripsCloseSheet || 'Close'
+        )}">${icon.x('h-4 w-4')}</button>
+      </div>
+      ${body}
     </div>
   </div>`
 }
@@ -743,6 +845,19 @@ export async function mountDashboardCompany(root, opts = {}) {
 
   // Rescue notifications run AFTER paint — never block dashboard load
   if (dashState.tab === 'rescue') dashState.tab = 'overview'
+
+  // Auto-open Current Trip once (accept / rescue confirm); never reopen after manual close
+  if (!dashState.tripSheetId) {
+    const autoId = resolveAutoOpenTripId(activeTrips)
+    if (autoId) dashState.tripSheetId = autoId
+  }
+  if (
+    dashState.tripSheetId &&
+    !activeTrips.some((t) => t.id === dashState.tripSheetId && t.phase === 'confirmed')
+  ) {
+    dashState.tripSheetId = null
+  }
+
   const dashLang = getLocale()
   const td = tDashboard(dashLang)
   const tpwa = buildPwaPromptStrings(tPwa(dashLang), 'operator', company.name)
@@ -1118,6 +1233,11 @@ export async function mountDashboardCompany(root, opts = {}) {
       </footer>
 
       ${renderQrSheet(td, bookPublicUrl, bookingQrSrc, dashState.qrOpen)}
+      ${renderCurrentTripSheet(
+        td,
+        activeTrips.find((x) => x.id === dashState.tripSheetId) || null,
+        company.name
+      )}
       ${renderNavSheet(td, dashState.navSheet)}
       ${renderMobileBottomNav(td, t)}
       ${showPwaCard ? renderDashboardPwaCard(td, tpwa) : ''}
@@ -1384,6 +1504,25 @@ export async function mountDashboardCompany(root, opts = {}) {
     remountLocalUi()
   }
 
+  const closeTripSheet = ({ rememberClose = true } = {}) => {
+    if (!dashState.tripSheetId) return
+    if (rememberClose) markTripSheetClosed(dashState.tripSheetId)
+    dashState.tripSheetId = null
+    remountLocalUi()
+  }
+
+  root.querySelectorAll('[data-open-trip]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-open-trip') || ''
+      if (!id) return
+      dashState.tripSheetId = id
+      remountLocalUi()
+    })
+  })
+
+  root.querySelector('#dash-trip-backdrop')?.addEventListener('click', () => closeTripSheet())
+  root.querySelector('#dash-trip-close')?.addEventListener('click', () => closeTripSheet())
+
   root.querySelectorAll('[data-open-nav]').forEach((btn) => {
     btn.addEventListener('click', () => {
       dashState.navSheet = {
@@ -1419,17 +1558,42 @@ export async function mountDashboardCompany(root, opts = {}) {
     }
   }
 
-  async function onceGeolocation() {
+  async function queryGeoPermission() {
+    try {
+      if (!navigator?.permissions?.query) return null
+      const status = await navigator.permissions.query({ name: 'geolocation' })
+      return status?.state || null
+    } catch {
+      return null
+    }
+  }
+
+  async function onceGeolocation({ timeoutMs = 6000, requirePrompt = false } = {}) {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       return { lat: null, lng: null }
     }
+    if (!requirePrompt) {
+      const perm = await queryGeoPermission()
+      if (perm && perm !== 'granted') return { lat: null, lng: null }
+    }
     try {
       const pos = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 12000,
-          maximumAge: 0,
-        })
+        const timer = setTimeout(() => reject(new Error('geo_timeout')), timeoutMs)
+        navigator.geolocation.getCurrentPosition(
+          (p) => {
+            clearTimeout(timer)
+            resolve(p)
+          },
+          (err) => {
+            clearTimeout(timer)
+            reject(err)
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: timeoutMs,
+            maximumAge: 0,
+          }
+        )
       })
       return {
         lat: Number(pos.coords.latitude),
@@ -1440,6 +1604,20 @@ export async function mountDashboardCompany(root, opts = {}) {
     }
   }
 
+  async function enhanceEtaInBackground({ bookingRequestId, rescueRequestId, requirePrompt = false }) {
+    const geo = await onceGeolocation({ timeoutMs: 6000, requirePrompt })
+    const geoOk = Number.isFinite(geo.lat) && Number.isFinite(geo.lng)
+    if (!geoOk) return { ok: false, geoOk: false }
+    const result = await markDriverOnTheWay({
+      companyId: company.id,
+      bookingRequestId: bookingRequestId || undefined,
+      rescueRequestId: rescueRequestId || undefined,
+      driverLat: geo.lat,
+      driverLng: geo.lng,
+    })
+    return { ok: !!result?.ok, geoOk: true, result }
+  }
+
   root.querySelectorAll('[data-mark-on-way]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
@@ -1447,14 +1625,11 @@ export async function mountDashboardCompany(root, opts = {}) {
       const label = btn.textContent
       btn.textContent = td.activeTripsOnWayBusy || 'Updating…'
       try {
-        const geo = await onceGeolocation()
-        const geoOk = Number.isFinite(geo.lat) && Number.isFinite(geo.lng)
+        // 1) Authoritative ON_THE_WAY immediately — never wait on GPS
         const result = await markDriverOnTheWay({
           companyId: company.id,
           bookingRequestId: bookingRequestId || undefined,
           rescueRequestId: rescueRequestId || undefined,
-          driverLat: geoOk ? geo.lat : null,
-          driverLng: geoOk ? geo.lng : null,
         })
         if (!result?.ok) {
           showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
@@ -1462,13 +1637,55 @@ export async function mountDashboardCompany(root, opts = {}) {
           btn.textContent = label
           return
         }
-        if (!geoOk) {
-          dashState.softNotice =
-            td.activeTripsOnWayNoEta || 'On the way. ETA unavailable.'
+        const perm = await queryGeoPermission()
+        if (perm !== 'granted') {
+          dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
         }
         mountDashboardCompany(root)
+        // 2) Best-effort ETA only if permission already granted (no forced prompt)
+        if (perm === 'granted') {
+          void enhanceEtaInBackground({
+            bookingRequestId,
+            rescueRequestId,
+            requirePrompt: false,
+          }).then((enh) => {
+            if (enh?.ok && enh.geoOk) mountDashboardCompany(root)
+            else {
+              dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
+              remountLocalUi()
+            }
+          })
+        }
       } catch {
         showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
+        btn.disabled = false
+        btn.textContent = label
+      }
+    })
+  })
+
+  root.querySelectorAll('[data-update-eta]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
+      btn.disabled = true
+      const label = btn.textContent
+      btn.textContent = td.activeTripsOnWayBusy || 'Updating…'
+      try {
+        const enh = await enhanceEtaInBackground({
+          bookingRequestId,
+          rescueRequestId,
+          requirePrompt: true,
+        })
+        if (enh?.ok && enh.geoOk) {
+          dashState.softNotice = null
+          mountDashboardCompany(root)
+          return
+        }
+        dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
+        btn.disabled = false
+        btn.textContent = label
+        remountLocalUi()
+      } catch {
         btn.disabled = false
         btn.textContent = label
       }
@@ -1514,6 +1731,10 @@ export async function mountDashboardCompany(root, opts = {}) {
           showDashTripError(td.activeTripsCompleteError || 'Could not complete this trip. Try again.')
           btn.disabled = false
           return
+        }
+        if (dashState.tripSheetId) {
+          markTripSheetClosed(dashState.tripSheetId)
+          dashState.tripSheetId = null
         }
         mountDashboardCompany(root)
       } catch {
