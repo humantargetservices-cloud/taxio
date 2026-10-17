@@ -12,6 +12,7 @@ import {
   notifyPendingRescuePassengerWhatsApps,
   notifyRescuePassengerConfirmWhatsApp,
 } from './_rescuePassengerNotify.js'
+import { notifyBookingConfirmedWhatsApp } from './_bookingConfirmedNotify.js'
 import { fetchDrivingEtaMinutes, validateLatLng } from './_drivingEta.js'
 
 function makeUserClient(token) {
@@ -143,6 +144,70 @@ export default async function handler(req, res) {
           ? 403
           : 409
       return json(res, http, result)
+    }
+
+    // Company A authoritative accept (normal booking — not Rescue winner)
+    if (action === 'accept_booking') {
+      const bookingRequestId = String(body.bookingRequestId || body.booking_request_id || '').trim()
+      if (!bookingRequestId || !companyId) {
+        return json(res, 400, {
+          error: 'bookingRequestId and companyId are required.',
+          code: 'INVALID_INPUT',
+        })
+      }
+
+      const { data: updated, error: updErr } = await userSb
+        .from('booking_requests')
+        .update({ status: 'accepted', decision_deadline_at: null })
+        .eq('id', bookingRequestId)
+        .eq('company_id', companyId)
+        .eq('status', 'new')
+        .select('id')
+        .maybeSingle()
+
+      if (updErr) {
+        console.error('[rescue:accept_booking]', updErr.message)
+        return json(res, 500, { ok: false, code: 'RPC_ERROR', error: updErr.message })
+      }
+      if (!updated?.id) {
+        return json(res, 409, {
+          ok: false,
+          code: 'NO_LONGER_AVAILABLE',
+          error: 'Booking is no longer available to accept.',
+        })
+      }
+
+      // Soft-fail WhatsApp — acceptance already committed
+      let passenger_whatsapp = null
+      try {
+        const admin = makeSupabaseServiceClient()
+        passenger_whatsapp = await notifyBookingConfirmedWhatsApp(admin, {
+          bookingRequestId: updated.id,
+          dryRun: false,
+          req,
+        })
+        if (!passenger_whatsapp?.ok && passenger_whatsapp?.code !== 'ALREADY_SENT') {
+          console.warn('[rescue:accept_booking:whatsapp]', {
+            code: passenger_whatsapp?.code || 'UNKNOWN',
+            error: passenger_whatsapp?.error || null,
+          })
+        }
+      } catch (notifyErr) {
+        console.error('[rescue:accept_booking:notify]', notifyErr?.message || notifyErr)
+        passenger_whatsapp = { ok: false, code: 'NOTIFY_ERROR' }
+      }
+
+      return json(res, 200, {
+        ok: true,
+        booking_request_id: updated.id,
+        passenger_whatsapp: passenger_whatsapp
+          ? {
+              ok: passenger_whatsapp.ok === true,
+              code: passenger_whatsapp.code || null,
+              messageId: passenger_whatsapp.messageId || null,
+            }
+          : null,
+      })
     }
 
     if (action === 'accept') {
@@ -348,7 +413,7 @@ export default async function handler(req, res) {
 
     return json(res, 400, {
       error:
-        "action must be 'activate', 'decline', 'accept', 'tick', 'winner_details', 'complete_trip', 'mark_on_way', 'mark_arrived', or passenger_*",
+        "action must be 'activate', 'decline', 'accept_booking', 'accept', 'tick', 'winner_details', 'complete_trip', 'mark_on_way', 'mark_arrived', or passenger_*",
       code: 'INVALID_INPUT',
     })
   } catch (err) {

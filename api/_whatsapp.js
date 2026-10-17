@@ -5,6 +5,10 @@
  *   - taxio_rescue_offer_staging     → first offer (View Booking → /trip/:token)
  *   - taxio_rescue_reminder_staging  → 20-minute reminder (View Booking → /trip/:token)
  *
+ * Company A booking confirmed (staging — requires Meta template + DB send-once marker):
+ *   - taxio_booking_confirmed_staging  → View trip → /trip/:token
+ *   Env: WHATSAPP_BOOKING_CONFIRMED_TEMPLATE_NAME
+ *
  * Legacy (kept for reference / old messages only — NOT used for new sends):
  *   - taxio_rescue_confirmation_staging (Confirm/Cancel quick replies)
  */
@@ -39,12 +43,23 @@ export function rescueReminderTemplateName() {
   return String(process.env.WHATSAPP_RESCUE_REMINDER_TEMPLATE_NAME || '').trim()
 }
 
+export function bookingConfirmedTemplateName() {
+  return (
+    String(process.env.WHATSAPP_BOOKING_CONFIRMED_TEMPLATE_NAME || '').trim() ||
+    'taxio_booking_confirmed_staging'
+  )
+}
+
 export function rescueOfferTemplateConfigured() {
   return Boolean(rescueOfferTemplateName())
 }
 
 export function rescueReminderTemplateConfigured() {
   return Boolean(rescueReminderTemplateName())
+}
+
+export function bookingConfirmedTemplateConfigured() {
+  return Boolean(String(process.env.WHATSAPP_BOOKING_CONFIRMED_TEMPLATE_NAME || '').trim())
 }
 
 function templateLang() {
@@ -295,6 +310,97 @@ async function sendCloudTemplate({ toPhone, templateName, components, bodyParamC
     console.error('[whatsapp] template send error', e?.message || e)
     return { ok: false, error: e?.message || 'FETCH_FAILED' }
   }
+}
+
+/**
+ * Company A booking confirmed (taxio_booking_confirmed_staging):
+ * Body {{1}} = company name, {{2}} = booking reference
+ * URL button → /trip/{{1}} suffix = passenger_trip_token
+ */
+export function buildBookingConfirmedTemplateComponents({
+  companyName,
+  bookingReference,
+  tripToken,
+}) {
+  const company = String(companyName || '').trim().slice(0, 60)
+  const ref = String(bookingReference || '').trim().slice(0, 60)
+  const token = String(tripToken || '').trim()
+  return {
+    bodyParameters: [
+      { type: 'text', text: company },
+      { type: 'text', text: ref },
+    ],
+    urlParameter: token,
+    components: [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: company },
+          { type: 'text', text: ref },
+        ],
+      },
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: '0',
+        parameters: [{ type: 'text', text: token }],
+      },
+    ],
+  }
+}
+
+/**
+ * Company A accept → passenger WhatsApp (View trip). Send-once guarded by DB marker.
+ */
+export async function sendBookingConfirmedTemplate({
+  toPhone,
+  companyName,
+  bookingReference,
+  tripToken,
+  dryRun = false,
+}) {
+  const token = String(tripToken || '').trim()
+  if (token.length < 20) return { ok: false, skipped: true, error: 'INVALID_TRIP_TOKEN' }
+  const company = String(companyName || '').trim()
+  const ref = String(bookingReference || '').trim()
+  if (!company || !ref) {
+    return { ok: false, skipped: true, error: 'MISSING_TEMPLATE_FIELDS' }
+  }
+
+  if (!bookingConfirmedTemplateConfigured() && !dryRun) {
+    return {
+      ok: false,
+      skipped: true,
+      error: 'TEMPLATE_NOT_CONFIGURED',
+      metaTemplateSetupRequired: true,
+      expectedTemplate: 'taxio_booking_confirmed_staging',
+    }
+  }
+
+  const built = buildBookingConfirmedTemplateComponents({
+    companyName: company,
+    bookingReference: ref,
+    tripToken: token,
+  })
+  const result = await sendCloudTemplate({
+    toPhone,
+    templateName: bookingConfirmedTemplateName(),
+    components: built.components,
+    bodyParamCount: built.bodyParameters.length,
+    dryRun,
+  })
+  if (dryRun && result.ok) {
+    return {
+      ...result,
+      bodyParameters: built.bodyParameters,
+      urlParameter: built.urlParameter,
+      companyName: company,
+      bookingReference: ref,
+      tripToken: token,
+      expectedTemplate: 'taxio_booking_confirmed_staging',
+    }
+  }
+  return result
 }
 
 /**

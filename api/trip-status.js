@@ -2,6 +2,9 @@
  * Passenger live trip status (Batch 1).
  * GET/POST with opaque passenger_trip_token — no auth.
  * Mapping only; Confirm/Cancel still use existing /api/rescue passenger_* RPCs.
+ *
+ * INVALID = unknown/malformed token only (404).
+ * LOAD_ERROR = server/DB/env/internal failures (5xx) — never masquerade as INVALID.
  */
 import { json, makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'
 import {
@@ -27,13 +30,22 @@ function readConfirmToken(req, body) {
   return String(body?.confirm_token || q.confirm_token || '').trim()
 }
 
+function loadError(res, status, code, error) {
+  return json(res, status, {
+    ok: false,
+    state: 'LOAD_ERROR',
+    code: code || 'SERVER_ERROR',
+    error: error || 'Trip status temporarily unavailable.',
+  })
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return json(res, 405, { error: 'Method not allowed' })
   }
 
   const envErr = validateSupabaseServiceEnv()
-  if (envErr) return json(res, 503, { ok: false, state: 'INVALID', error: envErr })
+  if (envErr) return loadError(res, 503, 'ENV_ERROR', envErr)
 
   try {
     const body =
@@ -48,15 +60,33 @@ export default async function handler(req, res) {
     const confirmToken = readConfirmToken(req, body)
 
     if (!tripToken && confirmToken) {
-      tripToken = (await resolveTripTokenFromConfirmToken(supabase, confirmToken)) || ''
+      try {
+        tripToken = (await resolveTripTokenFromConfirmToken(supabase, confirmToken)) || ''
+      } catch (resolveErr) {
+        console.error('[trip-status:resolve]', resolveErr?.message || resolveErr)
+        return loadError(res, 500, 'SERVER_ERROR', 'Could not resolve trip token.')
+      }
     }
 
     if (!tripToken || tripToken.length < 20) {
       return json(res, 404, { ok: false, state: 'INVALID', code: 'INVALID' })
     }
 
-    const loaded = await loadTripByPassengerToken(supabase, tripToken)
-    if (!loaded.booking) {
+    let loaded
+    try {
+      loaded = await loadTripByPassengerToken(supabase, tripToken)
+    } catch (loadErr) {
+      console.error('[trip-status:load]', loadErr?.message || loadErr)
+      return loadError(res, 500, 'DB_ERROR', 'Could not load trip.')
+    }
+
+    // DB query error (not "row missing") — technical failure
+    if (loaded?.error && !loaded.booking) {
+      console.error('[trip-status:load-error]', loaded.error?.message || loaded.error)
+      return loadError(res, 500, 'DB_ERROR', 'Could not load trip.')
+    }
+
+    if (!loaded?.booking) {
       return json(res, 404, { ok: false, state: 'INVALID', code: 'INVALID' })
     }
 
@@ -77,6 +107,6 @@ export default async function handler(req, res) {
     })
   } catch (err) {
     console.error('[trip-status]', err?.message || err)
-    return json(res, 500, { ok: false, state: 'INVALID', code: 'SERVER_ERROR' })
+    return loadError(res, 500, 'SERVER_ERROR', 'Trip status temporarily unavailable.')
   }
 }

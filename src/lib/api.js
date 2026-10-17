@@ -192,7 +192,9 @@ export async function createBookingRequest(row, fetchOpts = {}) {
     })
     const body = await response.json().catch(() => ({}))
     if (!response.ok) {
-      return { error: new Error(body.error || `Booking request failed (${response.status}).`) }
+      const err = new Error(body.error || `Booking request failed (${response.status}).`)
+      if (body.code) err.code = body.code
+      return { error: err }
     }
     return { error: null, data: body.data || null }
   } catch (err) {
@@ -548,21 +550,54 @@ export async function updateBookingRequestStatus(companyId, bookingId, status) {
   if (!BOOKING_STATUSES.includes(status)) {
     return { error: new Error('Invalid booking status.') }
   }
-  // ACCEPT may only claim still-pending bookings; clears Company A decision deadline.
+  // ACCEPT goes through authoritative /api/rescue accept_booking (server-side WhatsApp).
   // Blocks late accept after Rescue auto-activation (status already rejected / no longer new).
   if (status === 'accepted') {
-    const { data, error } = await supabase
-      .from('booking_requests')
-      .update({ status, decision_deadline_at: null })
-      .eq('id', bookingId)
-      .eq('company_id', companyId)
-      .eq('status', 'new')
-      .select('id')
-    if (error) return { error }
-    if (!data?.length) {
-      return { error: new Error('Booking is no longer available to accept.') }
+    try {
+      const { data: sessData } = await supabase.auth.getSession()
+      let accessToken = sessData?.session?.access_token
+      if (!accessToken) {
+        return { error: new Error('Your session has expired. Please sign in again.') }
+      }
+      const doPost = async (token) => {
+        const res = await fetch(apiUrl('/api/rescue'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            action: 'accept_booking',
+            companyId,
+            bookingRequestId: bookingId,
+          }),
+        })
+        const body = await res.json().catch(() => ({}))
+        return { res, body }
+      }
+      let { res, body } = await doPost(accessToken)
+      if (res.status === 401) {
+        const { data: refreshed } = await supabase.auth.refreshSession()
+        accessToken = refreshed?.session?.access_token
+        if (!accessToken) {
+          return { error: new Error('Your session has expired. Please sign in again.') }
+        }
+        ;({ res, body } = await doPost(accessToken))
+      }
+      if (!res.ok || body?.ok !== true) {
+        return {
+          error: new Error(
+            body?.error ||
+              (body?.code === 'NO_LONGER_AVAILABLE'
+                ? 'Booking is no longer available to accept.'
+                : 'Could not accept this trip.')
+          ),
+        }
+      }
+      return { error: null, data: body }
+    } catch (err) {
+      return { error: new Error(err?.message || 'Could not accept this trip.') }
     }
-    return { error: null }
   }
   const patch = { status }
   if (status === 'rejected') patch.decision_deadline_at = null

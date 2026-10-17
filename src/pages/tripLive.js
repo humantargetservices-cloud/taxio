@@ -241,18 +241,22 @@ function confirmedCard(company, trip, contacts, tl) {
   })
   let sub = tl.confirmedTaxiSub || tl.confirmedSub || 'Your taxi is confirmed.'
   let badgeClass = 'text-emerald-700'
+  let etaExtra = ''
 
   if (status === 'ON_THE_WAY') {
     badge = tl.driverOnWayBadge || 'DRIVER ON THE WAY'
     heading = tl.driverOnWayHeading || 'Your taxi is on the way'
-    sub = hasEta
-      ? fillTpl(tl.driverEtaApprox || 'Approx. {eta} min to pickup', { eta: String(Math.round(eta)) })
-      : tl.driverOnWaySub || ''
+    sub = tl.driverOnWaySub || 'Your driver is on the way to the pickup location.'
     badgeClass = 'text-sky-700'
+    if (hasEta) {
+      etaExtra = `<p class="mt-1 text-sm font-medium text-sky-800">${escapeHtml(
+        fillTpl(tl.driverEtaApprox || 'Approx. {eta} min to pickup', { eta: String(Math.round(eta)) })
+      )}</p>`
+    }
   } else if (status === 'ARRIVED') {
     badge = tl.driverArrivedBadge || 'DRIVER ARRIVED'
-    heading = tl.driverArrivedHeading || 'Your driver has arrived at the pickup location.'
-    sub = ''
+    heading = tl.driverArrivedHeading || 'Your driver has arrived'
+    sub = tl.driverArrivedSub || 'Your driver has arrived at the pickup location.'
     badgeClass = 'text-violet-700'
   }
 
@@ -262,10 +266,32 @@ function confirmedCard(company, trip, contacts, tl) {
       <p class="text-xs font-bold uppercase tracking-wide ${badgeClass}">${escapeHtml(badge)}</p>
       <h1 class="mt-2 text-xl font-bold leading-snug text-gray-900">${escapeHtml(heading)}</h1>
       ${subHtml}
+      ${etaExtra}
       ${pickupProgressRailHtml(status, tl)}
       ${summary}
       ${contactButtonsHtml(contacts, company, trip, tl)}
     `)
+}
+
+function softRefreshBannerHtml(tl) {
+  return `<p class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-900" data-soft-refresh>${escapeHtml(
+    tl.loadErrorSoft || 'Unable to refresh right now. Retrying…'
+  )}</p>`
+}
+
+function isBusinessTripState(state) {
+  return [
+    'REQUESTING_COMPANY_A',
+    'COMPANY_A_ACCEPTED',
+    'SEARCHING_RESCUE',
+    'RESCUE_WINNER_FOUND',
+    'CONFIRMED',
+    'COMPLETED',
+    'CANCELLED',
+    'OFFER_EXPIRED',
+    'NO_TAXI_AVAILABLE',
+    'EXPIRED',
+  ].includes(String(state || ''))
 }
 
 async function fetchTripStatus(token) {
@@ -298,11 +324,15 @@ function renderState(data) {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-amber-700">TAXIO</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
-        tl.loadErrorTitle || 'Could not load trip'
+        tl.loadErrorTitle || 'Trip status temporarily unavailable'
       )}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
-        tl.loadErrorBody || 'Check your connection and try again.'
+        tl.loadErrorBody ||
+          'We couldn’t refresh your trip status. Your booking has not been lost.'
       )}</p>
+      <button type="button" id="trip-retry" class="mt-5 flex min-h-[48px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800">${escapeHtml(
+        tl.loadErrorRetry || 'Try again'
+      )}</button>
     `)
   }
 
@@ -342,13 +372,13 @@ function renderState(data) {
   if (state === 'OFFER_EXPIRED') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-slate-500">${escapeHtml(
-        tl.expiredBadge || 'Expired'
+        tl.offerExpiredBadge || tl.expiredBadge || 'OFFER EXPIRED'
       )}</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
-        tl.offerExpiredTitle || 'This taxi offer has expired.'
+        tl.offerExpiredTitle || 'This taxi offer has expired'
       )}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
-        tl.offerExpiredBody || 'The confirmation window ended. No further action is needed on this page.'
+        tl.offerExpiredBody || 'The taxi offer was not confirmed within the allowed time.'
       )}</p>
       ${summary}
     `)
@@ -357,13 +387,15 @@ function renderState(data) {
   if (state === 'REQUESTING_COMPANY_A') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-amber-700">${escapeHtml(
-        tl.waitingBadge || 'Waiting'
+        tl.waitingBadge || 'REQUEST SENT'
       )}</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
-        fillTpl(tl.waitingHeading || 'Waiting for {company_name}', { company_name: company })
+        fillTpl(tl.waitingHeading || 'Your booking was sent to {company_name}', {
+          company_name: company,
+        })
       )}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
-        tl.waitingBody || 'Please wait while we confirm your taxi.'
+        tl.waitingBody || 'Waiting for the taxi company to respond.'
       )}</p>
       ${summary}
       <p class="mt-4 text-center text-xs font-medium text-slate-500">${escapeHtml(
@@ -377,15 +409,19 @@ function renderState(data) {
   }
 
   if (state === 'SEARCHING_RESCUE') {
+    const originalName = String(data?.company_a_name || '').trim()
+    const unavailableHeading = originalName
+      ? fillTpl(tl.unavailableHeading || '{company_name} is unavailable', {
+          company_name: originalName,
+        })
+      : tl.unavailableHeadingFallback || 'Your selected taxi company is unavailable'
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-amber-700">${escapeHtml(
-        tl.findingBadge || 'Finding a taxi'
+        tl.findingBadge || 'FINDING ANOTHER TAXI'
       )}</p>
-      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
-        fillTpl(tl.unavailableHeading || '{company_name} is unavailable', { company_name: company })
-      )}</h1>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(unavailableHeading)}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
-        tl.findingBody || 'We’re finding another available taxi for you…'
+        tl.findingBody || 'TAXIO is checking other taxi companies for your trip.'
       )}</p>
       ${summary}
       <p class="mt-4 text-center text-xs font-medium text-slate-500">${escapeHtml(
@@ -397,24 +433,21 @@ function renderState(data) {
   if (state === 'RESCUE_WINNER_FOUND') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-amber-700">${escapeHtml(
-        tl.taxiFoundBadge || 'Taxi found'
+        tl.taxiFoundBadge || 'TAXI FOUND'
       )}</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
         fillTpl(tl.taxiFoundHeading || '{company_name} can take your trip', { company_name: company })
       )}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
-        tl.taxiFoundBody || 'Same trip. Same estimated price.'
-      )}</p>
-      <p class="mt-1 text-sm font-medium text-amber-800">${escapeHtml(
-        tl.confirmWithin || 'Please confirm within 30 minutes.'
+        tl.taxiFoundBody || tl.confirmWithin || 'Please confirm your booking within 30 minutes.'
       )}</p>
       ${summary}
       <div class="mt-5 grid gap-2">
         <button type="button" id="trip-confirm" class="min-h-[48px] w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500">${escapeHtml(
-          tl.confirmTrip || 'CONFIRM TRIP'
+          tl.confirmTrip || 'Confirm booking'
         )}</button>
         <button type="button" id="trip-cancel" class="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800 hover:bg-slate-50">${escapeHtml(
-          tl.cancelTrip || 'CANCEL'
+          tl.cancelTrip || 'Cancel'
         )}</button>
       </div>
       <p id="trip-msg" class="mt-3 hidden text-center text-sm font-medium text-red-600"></p>
@@ -428,13 +461,13 @@ function renderState(data) {
   if (state === 'CANCELLED') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-slate-500">${escapeHtml(
-        tl.cancelledBadge || 'Cancelled'
+        tl.cancelledBadge || 'BOOKING CANCELLED'
       )}</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
-        tl.cancelledTitle || 'Trip cancelled'
+        tl.cancelledTitle || 'Your booking has been cancelled'
       )}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
-        tl.cancelledBody || 'This reassignment was cancelled. No further action is needed.'
+        tl.cancelledBody || 'This trip is no longer active.'
       )}</p>
       ${summary}
     `)
@@ -443,13 +476,14 @@ function renderState(data) {
   if (state === 'NO_TAXI_AVAILABLE') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-slate-500">${escapeHtml(
-        tl.unavailableBadge || 'Unavailable'
+        tl.unavailableBadge || 'NO TAXI AVAILABLE'
       )}</p>
       <h1 class="mt-2 text-xl font-bold text-gray-900">${escapeHtml(
-        tl.noTaxiTitle || 'No taxi is currently available for this trip.'
+        tl.noTaxiTitle || 'We couldn’t find an available taxi'
       )}</h1>
       <p class="mt-2 text-sm text-gray-600">${escapeHtml(
-        tl.noTaxiBody || 'Please try booking again later.'
+        tl.noTaxiBody ||
+          'Unfortunately, no participating taxi company was available for this trip.'
       )}</p>
       ${summary}
     `)
@@ -518,6 +552,9 @@ export async function mountTripLive(root, secureToken) {
 
   const bindActions = () => {
     bindCopyRef()
+    root.querySelector('#trip-retry')?.addEventListener('click', () => {
+      void refresh({ force: true })
+    })
     const msgEl = root.querySelector('#trip-msg')
     const setBusy = (v) => {
       busy = v
@@ -594,73 +631,12 @@ export async function mountTripLive(root, secureToken) {
     })
   }
 
-  const paint = (data) => {
-    latest = data
-    const state = String(data?.state || 'INVALID')
-    syncPassengerActiveTripFromStatus(token, data)
-    const pickupStatus = String(data?.trip?.driver_pickup_status || '').toUpperCase()
-    const eta = data?.trip?.driver_eta_minutes
-    const progressKey = `${state}:${pickupStatus}:${eta ?? ''}`
-    const terminal = [
-      'CANCELLED',
-      'NO_TAXI_AVAILABLE',
-      'INVALID',
-      'EXPIRED',
-      'OFFER_EXPIRED',
-      'COMPLETED',
-    ].includes(state)
-    // Keep polling through ON_THE_WAY / ARRIVED until COMPLETED
-    if (terminal) stopPoll()
-    else if (
-      state === 'COMPANY_A_ACCEPTED' ||
-      state === 'CONFIRMED' ||
-      state === 'REQUESTING_COMPANY_A' ||
-      state === 'SEARCHING_RESCUE' ||
-      state === 'RESCUE_WINNER_FOUND'
-    ) {
-      startPoll()
-    }
-
-    if (
-      progressKey === lastState &&
-      root.querySelector('#trip-confirm, #trip-cancel, a[href^="tel:"], a[href^="https://wa.me"]')
-    ) {
-      if (state === 'RESCUE_WINNER_FOUND') return
-      if (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') return
-    }
-    lastState = progressKey
-    root.innerHTML = shell(renderState(data))
-    bindActions()
-  }
-
-  const refresh = async () => {
-    try {
-      const { status, body } = await fetchTripStatus(token)
-      if (body?.state) {
-        paint(body)
-        return
-      }
-      // Missing state (e.g. HTML error page) — never invent INVALID for a known prior trip
-      if (!lastState) {
-        paint({ state: status === 404 ? 'INVALID' : 'LOAD_ERROR' })
-      }
-    } catch {
-      if (!lastState) {
-        paint({ state: 'LOAD_ERROR' })
-      }
-    }
-  }
-
-  root.innerHTML = shell(
-    card(
-      `<p class="text-center text-sm text-gray-500">${escapeHtml(tl.loading || 'Loading your trip…')}</p>`
-    )
-  )
-  await refresh()
+  let lastGood = null
+  let softRefreshFail = false
 
   const startPoll = () => {
     if (pollTimer) return
-    const state = String(latest?.state || '')
+    const state = String(latest?.state || (softRefreshFail ? 'LOAD_ERROR' : ''))
     if (
       ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED', 'COMPLETED'].includes(
         state
@@ -674,6 +650,99 @@ export async function mountTripLive(root, secureToken) {
     }, Number(latest?.poll_ms) || POLL_MS)
   }
 
+  const paint = (data, opts = {}) => {
+    const state = String(data?.state || 'INVALID')
+
+    // Transient technical failure after a valid load: keep last good UI
+    if (state === 'LOAD_ERROR' && lastGood && isBusinessTripState(lastGood.state) && !opts.forceError) {
+      softRefreshFail = true
+      latest = lastGood
+      const softKey = 'soft-refresh'
+      if (softKey === lastState && root.querySelector('[data-soft-refresh]')) {
+        startPoll()
+        return
+      }
+      lastState = softKey
+      root.innerHTML = shell(`${softRefreshBannerHtml(tl)}${renderState(lastGood)}`)
+      bindActions()
+      startPoll()
+      return
+    }
+
+    softRefreshFail = false
+    latest = data
+    if (isBusinessTripState(state)) {
+      lastGood = data
+      syncPassengerActiveTripFromStatus(token, data)
+    } else if (state !== 'INVALID' && state !== 'LOAD_ERROR') {
+      syncPassengerActiveTripFromStatus(token, data)
+    }
+
+    const pickupStatus = String(data?.trip?.driver_pickup_status || '').toUpperCase()
+    const eta = data?.trip?.driver_eta_minutes
+    const progressKey = `${state}:${pickupStatus}:${eta ?? ''}`
+    const terminal = [
+      'CANCELLED',
+      'NO_TAXI_AVAILABLE',
+      'INVALID',
+      'EXPIRED',
+      'OFFER_EXPIRED',
+      'COMPLETED',
+    ].includes(state)
+    // Keep polling through ON_THE_WAY / ARRIVED until COMPLETED; also poll LOAD_ERROR for recovery
+    if (terminal) stopPoll()
+    else if (
+      state === 'COMPANY_A_ACCEPTED' ||
+      state === 'CONFIRMED' ||
+      state === 'REQUESTING_COMPANY_A' ||
+      state === 'SEARCHING_RESCUE' ||
+      state === 'RESCUE_WINNER_FOUND' ||
+      state === 'LOAD_ERROR'
+    ) {
+      startPoll()
+    }
+
+    if (
+      progressKey === lastState &&
+      root.querySelector('#trip-confirm, #trip-cancel, #trip-retry, a[href^="tel:"], a[href^="https://wa.me"]')
+    ) {
+      if (state === 'RESCUE_WINNER_FOUND') return
+      if (state === 'COMPANY_A_ACCEPTED' || state === 'CONFIRMED') return
+      if (state === 'LOAD_ERROR') return
+    }
+    lastState = progressKey
+    root.innerHTML = shell(renderState(data))
+    bindActions()
+  }
+
+  const refresh = async (opts = {}) => {
+    try {
+      const { status, body } = await fetchTripStatus(token)
+      if (body?.state === 'LOAD_ERROR') {
+        paint({ state: 'LOAD_ERROR' }, { forceError: !lastGood })
+        return
+      }
+      if (body?.state) {
+        paint(body)
+        return
+      }
+      // Missing state (e.g. HTML error page) — never invent INVALID for a known prior trip
+      if (status === 404 && !lastGood) {
+        paint({ state: 'INVALID' })
+        return
+      }
+      paint({ state: 'LOAD_ERROR' }, { forceError: !lastGood })
+    } catch {
+      paint({ state: 'LOAD_ERROR' }, { forceError: !lastGood })
+    }
+  }
+
+  root.innerHTML = shell(
+    card(
+      `<p class="text-center text-sm text-gray-500">${escapeHtml(tl.loading || 'Loading your trip…')}</p>`
+    )
+  )
+  await refresh()
   startPoll()
 
   const onVis = () => {

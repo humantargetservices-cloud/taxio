@@ -7,6 +7,7 @@ import { tDashboard } from '../i18n.js'
 import { escapeHtml } from './html.js'
 import { getLocale } from './locale.js'
 import { listBookingRequestsForCompany, updateBookingRequestStatus } from './api.js'
+import { acceptCompanyBooking } from './rescue.js'
 import {
   ORIGINAL_COMPANY_DECISION_SECONDS,
   RESCUE_OPPORTUNITY_SECONDS,
@@ -204,13 +205,21 @@ function bindHandlers(ctx) {
       btn.disabled = true
       const msg = portal.querySelector('#rescue-a-msg')
       try {
-        const { error } = await updateBookingRequestStatus(companyId, bookingId, 'accepted')
-        if (error) {
-          const gone = /no longer available/i.test(error.message || '')
+        // Authoritative server accept + soft booking-confirmed WhatsApp (send-once)
+        const result = await acceptCompanyBooking({
+          bookingRequestId: bookingId,
+          companyId,
+        })
+        if (!result.ok) {
+          const gone =
+            result.body?.code === 'NO_LONGER_AVAILABLE' ||
+            /no longer available/i.test(String(result.body?.error || ''))
           if (msg) {
             msg.textContent = gone
-              ? copy.bookingAcceptGone || error.message
-              : copy.bookingAcceptError || error.message
+              ? copy.bookingAcceptGone || result.body?.error
+              : result.body?.code === 'SESSION_EXPIRED'
+                ? result.body?.error || 'Your session has expired. Please sign in again.'
+                : copy.bookingAcceptError || result.body?.error || 'Could not accept.'
             msg.classList.remove('hidden')
           }
           if (gone) {

@@ -2859,6 +2859,7 @@ Estimate price: ${estimatePrice}${refLine}`
             companySlug: company.slug || slug || null,
             companyName: company.name || null,
           })
+          // Same-origin relative path only (token already returned by activate)
           window.location.assign(`/trip/${encodeURIComponent(tok)}`)
           return
         }
@@ -2905,7 +2906,6 @@ Estimate price: ${estimatePrice}${refLine}`
       const actData = await activateInflight
       activateInflight = null
       const tripToken = String(actData?.trip_token || actData?.passenger_trip_token || '').trim()
-      const tripUrl = String(actData?.trip_url || '').trim()
       if (tripToken) {
         savePassengerActiveTrip({
           token: tripToken,
@@ -2913,12 +2913,8 @@ Estimate price: ${estimatePrice}${refLine}`
           companySlug: company.slug || slug || null,
           companyName: company.name || null,
         })
-      }
-      if (tripUrl && tripUrl.includes('/trip/')) {
-        window.location.assign(tripUrl)
-        return
-      }
-      if (tripToken) {
+        // Same-origin relative redirect only — do not use absolute trip_url for browser nav
+        // (API origin fallback can point at taxio.be). trip_url still returned for WhatsApp/external.
         window.location.assign(`/trip/${encodeURIComponent(tripToken)}`)
         return
       }

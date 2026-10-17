@@ -195,6 +195,18 @@ export async function acceptRescueRequest({ rescueRequestId, companyId }) {
   return rescueAuthedPost({ action: 'accept', rescueRequestId, companyId })
 }
 
+/**
+ * Company A authoritative accept (normal booking).
+ * Server updates status then soft-sends booking-confirmed WhatsApp (send-once).
+ */
+export async function acceptCompanyBooking({ bookingRequestId, companyId }) {
+  return rescueAuthedPost({
+    action: 'accept_booking',
+    bookingRequestId,
+    companyId,
+  })
+}
+
 /** Winner PII unlock details (only after passenger CONFIRMED). Soft-fails. */
 export async function fetchRescueWinnerDetails({ rescueRequestId }) {
   try {
