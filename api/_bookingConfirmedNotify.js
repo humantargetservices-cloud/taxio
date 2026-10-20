@@ -17,13 +17,10 @@ import { tripUrlForToken } from './_passengerTrip.js'
 
 const SEND_ONCE_COLUMN = 'booking_confirmed_whatsapp_sent_at'
 
+/** Only treat errors that name the send-once column as migration gaps (audit B07). */
 function isMissingColumnError(err) {
   const m = String(err?.message || err || '')
-  return (
-    /booking_confirmed_whatsapp_sent_at/i.test(m) ||
-    /schema cache/i.test(m) ||
-    /column/i.test(m)
-  )
+  return /booking_confirmed_whatsapp_sent_at/i.test(m)
 }
 
 /**

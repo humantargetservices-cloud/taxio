@@ -11,12 +11,57 @@ export function mintPassengerTripToken() {
   return randomBytes(TOKEN_BYTES).toString('base64url')
 }
 
+/**
+ * Light cleanup for opaque trip tokens (path/query). Does not widen acceptance
+ * of alternate credential types and does not rewrite arbitrary URLs into tokens.
+ */
+export function normalizePassengerTripTokenInput(raw) {
+  let t = String(raw || '').trim()
+  if (!t) return ''
+  t = t.replace(/^['"]+|['"]+$/g, '').trim()
+  try {
+    t = decodeURIComponent(t)
+  } catch {
+    /* keep undecoded */
+  }
+  return String(t || '')
+    .trim()
+    .split('?')[0]
+    .split('#')[0]
+    .trim()
+}
+
+/**
+ * Meta URL button dynamic suffix — opaque passenger_trip_token only.
+ * Never a full URL; never an unresolved {{1}} placeholder.
+ */
+export function whatsappTripUrlButtonParameter(tripToken) {
+  const t = String(tripToken || '').trim()
+  if (!t) return ''
+  if (/^https?:\/\//i.test(t) || t.includes('/')) return ''
+  if (isUnresolvedWhatsappUrlPlaceholder(t)) return ''
+  return t
+}
+
+/**
+ * True when the value is a literal unreplaced template placeholder (e.g. "{{1}}").
+ * Screenshot evidence: /trip/%7B%7B1%7D%7D  (%7B = "{").
+ */
+export function isUnresolvedWhatsappUrlPlaceholder(token) {
+  const t = String(token || '').trim()
+  if (!t) return true
+  if (/^\{\{?\d+\}\}?$/.test(t)) return true
+  if (/%7b/i.test(t) && /%7d/i.test(t)) return true
+  return false
+}
+
 export function tripUrlForToken(req, token) {
   const fromEnv = String(process.env.PUBLIC_APP_ORIGIN || '')
     .trim()
     .replace(/\/$/, '')
   const origin = fromEnv || getOriginFromReq(req)
-  return `${origin}/trip/${encodeURIComponent(token)}`
+  const t = normalizePassengerTripTokenInput(token) || String(token || '').trim()
+  return `${origin}/trip/${encodeURIComponent(t)}`
 }
 
 function cleanPrice(amount) {
@@ -250,34 +295,10 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
   }
 }
 
-/**
- * Load booking + companies + latest rescue by passenger trip token (service role).
- */
-export async function loadTripByPassengerToken(supabase, tripToken) {
-  const token = String(tripToken || '').trim()
-  if (token.length < 20) return { booking: null }
+const TRIP_SELECT_WITH_PICKUP =
+  'id, company_id, status, booking_reference, pickup_address, dropoff_address, ride_datetime, car_type, service_type, estimated_price_eur, price_currency, decision_deadline_at, passenger_trip_token, created_at, completed_at, driver_pickup_status, driver_on_way_at, driver_arrived_at, driver_eta_minutes, driver_eta_updated_at, pickup_lat, pickup_lng'
 
-  let { data: booking, error } = await supabase
-    .from('booking_requests')
-    .select(
-      'id, company_id, status, booking_reference, pickup_address, dropoff_address, ride_datetime, car_type, service_type, estimated_price_eur, price_currency, decision_deadline_at, passenger_trip_token, created_at, completed_at, driver_pickup_status, driver_on_way_at, driver_arrived_at, driver_eta_minutes, driver_eta_updated_at, pickup_lat, pickup_lng'
-    )
-    .eq('passenger_trip_token', token)
-    .maybeSingle()
-
-  // Before migration 15: fall back without pickup-progress columns
-  if (error && /driver_pickup_status|pickup_lat|schema cache|column/i.test(error.message || '')) {
-    ;({ data: booking, error } = await supabase
-      .from('booking_requests')
-      .select(
-        'id, company_id, status, booking_reference, pickup_address, dropoff_address, ride_datetime, car_type, service_type, estimated_price_eur, price_currency, decision_deadline_at, passenger_trip_token, created_at, completed_at'
-      )
-      .eq('passenger_trip_token', token)
-      .maybeSingle())
-  }
-
-  if (error || !booking) return { booking: null, error }
-
+async function attachTripCompanies(supabase, booking) {
   const { data: companyA } = await supabase
     .from('companies')
     .select('id, name, phone, email, status')
@@ -307,9 +328,33 @@ export async function loadTripByPassengerToken(supabase, tripToken) {
   return { booking, companyA, winnerCompany, rescue }
 }
 
-/** Resolve trip token from Rescue passenger_confirm_token (compat redirect). */
+/**
+ * Load booking + companies + latest rescue by passenger trip token (service role).
+ * Always selects driver pickup columns — never silently strips them (audit B08).
+ */
+export async function loadTripByPassengerToken(supabase, tripToken) {
+  const token = normalizePassengerTripTokenInput(tripToken)
+  if (token.length < 20) return { booking: null }
+
+  const { data: booking, error } = await supabase
+    .from('booking_requests')
+    .select(TRIP_SELECT_WITH_PICKUP)
+    .eq('passenger_trip_token', token)
+    .maybeSingle()
+
+  // Schema/DB errors must surface as LOAD_ERROR — do not return a trip without pickup fields.
+  if (error) return { booking: null, error }
+  if (!booking) return { booking: null }
+
+  return attachTripCompanies(supabase, booking)
+}
+
+/**
+ * Resolve trip token from Rescue passenger_confirm_token.
+ * Only for explicit ?confirm_token= / legacy /rescue/confirm redirect — not /trip/:path.
+ */
 export async function resolveTripTokenFromConfirmToken(supabase, confirmToken) {
-  const token = String(confirmToken || '').trim()
+  const token = normalizePassengerTripTokenInput(confirmToken)
   if (token.length < 20) return null
 
   const { data: rescue } = await supabase

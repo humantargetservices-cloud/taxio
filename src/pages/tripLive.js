@@ -12,6 +12,10 @@ import { cleanTripPriceDisplay } from '../lib/rescuePrice.js'
 import { tTripLive } from '../i18n.js'
 import { getLocale } from '../lib/locale.js'
 import { syncPassengerActiveTripFromStatus } from '../lib/passengerActiveTrip.js'
+import {
+  isUnresolvedWhatsappUrlPlaceholder,
+  normalizePassengerTripTokenInput,
+} from '../lib/passengerTripToken.js'
 
 const POLL_MS = 4000
 
@@ -498,14 +502,10 @@ function renderState(data) {
 
 export async function mountTripLive(root, secureToken) {
   document.title = 'TAXIO · Your trip'
-  // Strip accidental query/hash fragments if a caller passed a raw path segment
-  const token = String(secureToken || '')
-    .trim()
-    .split('?')[0]
-    .split('#')[0]
-    .trim()
+  const token = normalizePassengerTripTokenInput(secureToken)
   const tl = tTripLive(getLocale())
-  if (token.length < 20) {
+  // Unsubstituted Meta {{1}} / short garbage — never query another booking.
+  if (token.length < 20 || isUnresolvedWhatsappUrlPlaceholder(token)) {
     root.innerHTML = shell(
       card(
         `<p class="text-center text-sm font-semibold text-red-600">${escapeHtml(
@@ -680,7 +680,8 @@ export async function mountTripLive(root, secureToken) {
 
     const pickupStatus = String(data?.trip?.driver_pickup_status || '').toUpperCase()
     const eta = data?.trip?.driver_eta_minutes
-    const progressKey = `${state}:${pickupStatus}:${eta ?? ''}`
+    // Include completed_at so completion always re-paints; pickup status must force re-render
+    const progressKey = `${state}:${pickupStatus}:${eta ?? ''}:${data?.trip?.driver_arrived_at || ''}:${data?.trip?.completed_at || ''}`
     const terminal = [
       'CANCELLED',
       'NO_TAXI_AVAILABLE',
@@ -702,6 +703,7 @@ export async function mountTripLive(root, secureToken) {
       startPoll()
     }
 
+    // Skip DOM rebuild only when nothing visible changed (pickup progress included in progressKey)
     if (
       progressKey === lastState &&
       root.querySelector('#trip-confirm, #trip-cancel, #trip-retry, a[href^="tel:"], a[href^="https://wa.me"]')

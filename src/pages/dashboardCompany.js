@@ -1707,7 +1707,11 @@ export async function mountDashboardCompany(root, opts = {}) {
           ),
         ])
         if (!result?.ok) {
-          showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
+          const code = String(result?.body?.code || '').trim()
+          showDashTripError(
+            (td.activeTripsOnWayError || 'Could not update trip status. Try again.') +
+              (code ? ` (${code})` : '')
+          )
           resetBtn()
           return
         }
@@ -1783,7 +1787,11 @@ export async function mountDashboardCompany(root, opts = {}) {
           rescueRequestId: rescueRequestId || undefined,
         })
         if (!result?.ok) {
-          showDashTripError(td.activeTripsArrivedError || 'Could not mark arrival. Try again.')
+          const code = String(result?.body?.code || '').trim()
+          showDashTripError(
+            (td.activeTripsArrivedError || 'Could not mark arrival. Try again.') +
+              (code ? ` (${code})` : '')
+          )
           btn.disabled = false
           return
         }

@@ -17,6 +17,7 @@ import { resolveBookSlugForRouter } from './lib/tenant.js'
 import { ensureGenericSiteManifest, primeBookingPwaManifest } from './lib/companyPwa.js'
 import { getLocale, syncDocumentLang } from './lib/locale.js'
 import { taxioLogoImg } from './lib/taxioLogo.js'
+import { normalizePassengerTripTokenInput } from './lib/passengerTripToken.js'
 
 function mountNotFound(root) {
   root.innerHTML = `
@@ -100,11 +101,10 @@ function route() {
     return
   }
   if (path.startsWith('/trip/')) {
-    const tripToken = decodeURIComponent(path.slice('/trip/'.length).split('/')[0] || '')
-      .trim()
-      .split('?')[0]
-      .split('#')[0]
-      .trim()
+    const rawSeg = path.slice('/trip/'.length).split('/')[0] || ''
+    const tripToken = normalizePassengerTripTokenInput(rawSeg)
+    // Pass segment through; tripLive rejects short / Meta {{1}} placeholders without
+    // falling back to another booking.
     if (tripToken) {
       mountTripLive(root, tripToken).catch((err) => {
         console.error(err)

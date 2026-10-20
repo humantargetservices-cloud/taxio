@@ -11,7 +11,14 @@
  *
  * Legacy (kept for reference / old messages only — NOT used for new sends):
  *   - taxio_rescue_confirmation_staging (Confirm/Cancel quick replies)
+ *
+ * URL button {{1}} must be the opaque passenger_trip_token only (never a full URL).
+ * Meta template base URL must be https://<env-host>/trip/
  */
+import {
+  isUnresolvedWhatsappUrlPlaceholder,
+  whatsappTripUrlButtonParameter,
+} from './_passengerTrip.js'
 
 function digitsOnly(phone) {
   return String(phone || '').replace(/\D/g, '')
@@ -105,7 +112,7 @@ export function buildRescueOfferTemplateComponents({
 }) {
   const original = String(originalCompanyName || '').trim().slice(0, 60)
   const winner = String(winnerCompanyName || '').trim().slice(0, 60)
-  const token = String(tripToken || '').trim()
+  const token = whatsappTripUrlButtonParameter(tripToken)
   return {
     bodyParameters: [
       { type: 'text', text: original },
@@ -137,7 +144,7 @@ export function buildRescueOfferTemplateComponents({
  */
 export function buildRescueReminderTemplateComponents({ winnerCompanyName, tripToken }) {
   const winner = String(winnerCompanyName || '').trim().slice(0, 60)
-  const token = String(tripToken || '').trim()
+  const token = whatsappTripUrlButtonParameter(tripToken)
   return {
     bodyParameters: [{ type: 'text', text: winner }],
     urlParameter: token,
@@ -241,13 +248,27 @@ async function sendCloudTemplate({ toPhone, templateName, components, bodyParamC
   const accessToken = String(process.env.WHATSAPP_CLOUD_TOKEN || '').trim()
 
   try {
+    const urlBtn = Array.isArray(components)
+      ? components.find((c) => c?.type === 'button' && c?.sub_type === 'url')
+      : null
+    const urlSuffix = urlBtn?.parameters?.[0]?.text || null
     console.info('[whatsapp] template send attempt', {
       phone_number_id: phoneNumberId,
       template: name,
       language: templateLang(),
       to_len: String(to).length,
       body_param_count: bodyParamCount,
+      url_button_suffix_len: urlSuffix ? String(urlSuffix).length : 0,
+      url_button_looks_like_placeholder: isUnresolvedWhatsappUrlPlaceholder(urlSuffix || ''),
     })
+    if (urlSuffix && isUnresolvedWhatsappUrlPlaceholder(urlSuffix)) {
+      return {
+        ok: false,
+        skipped: true,
+        error: 'UNRESOLVED_URL_PLACEHOLDER',
+        metaTemplateSetupRequired: true,
+      }
+    }
     const res = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: {
@@ -324,7 +345,7 @@ export function buildBookingConfirmedTemplateComponents({
 }) {
   const company = String(companyName || '').trim().slice(0, 60)
   const ref = String(bookingReference || '').trim().slice(0, 60)
-  const token = String(tripToken || '').trim()
+  const token = whatsappTripUrlButtonParameter(tripToken)
   return {
     bodyParameters: [
       { type: 'text', text: company },
@@ -359,8 +380,17 @@ export async function sendBookingConfirmedTemplate({
   tripToken,
   dryRun = false,
 }) {
-  const token = String(tripToken || '').trim()
+  const token = whatsappTripUrlButtonParameter(tripToken)
   if (token.length < 20) return { ok: false, skipped: true, error: 'INVALID_TRIP_TOKEN' }
+  if (isUnresolvedWhatsappUrlPlaceholder(token)) {
+    return {
+      ok: false,
+      skipped: true,
+      error: 'UNRESOLVED_URL_PLACEHOLDER',
+      metaTemplateSetupRequired: true,
+      hint: 'Meta URL button must be Dynamic; code must send passenger_trip_token, not {{1}}.',
+    }
+  }
   const company = String(companyName || '').trim()
   const ref = String(bookingReference || '').trim()
   if (!company || !ref) {
@@ -413,8 +443,16 @@ export async function sendRescueOfferTemplate({
   tripToken,
   dryRun = false,
 }) {
-  const token = String(tripToken || '').trim()
+  const token = whatsappTripUrlButtonParameter(tripToken)
   if (token.length < 20) return { ok: false, skipped: true, error: 'INVALID_TRIP_TOKEN' }
+  if (isUnresolvedWhatsappUrlPlaceholder(token)) {
+    return {
+      ok: false,
+      skipped: true,
+      error: 'UNRESOLVED_URL_PLACEHOLDER',
+      metaTemplateSetupRequired: true,
+    }
+  }
   const original = String(originalCompanyName || '').trim()
   const winner = String(winnerCompanyName || '').trim()
   if (!original || !winner) {
@@ -465,8 +503,16 @@ export async function sendRescueReminderTemplate({
   tripToken,
   dryRun = false,
 }) {
-  const token = String(tripToken || '').trim()
+  const token = whatsappTripUrlButtonParameter(tripToken)
   if (token.length < 20) return { ok: false, skipped: true, error: 'INVALID_TRIP_TOKEN' }
+  if (isUnresolvedWhatsappUrlPlaceholder(token)) {
+    return {
+      ok: false,
+      skipped: true,
+      error: 'UNRESOLVED_URL_PLACEHOLDER',
+      metaTemplateSetupRequired: true,
+    }
+  }
   const winner = String(winnerCompanyName || '').trim()
   if (!winner) return { ok: false, skipped: true, error: 'MISSING_WINNER_NAME' }
 

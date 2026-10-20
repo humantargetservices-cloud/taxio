@@ -8,26 +8,28 @@
  */
 import { json, makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'
 import {
+  isUnresolvedWhatsappUrlPlaceholder,
   loadTripByPassengerToken,
   mapPassengerTripState,
+  normalizePassengerTripTokenInput,
   resolveTripTokenFromConfirmToken,
 } from './_passengerTrip.js'
 
 function readToken(req, body) {
   const q = req.query || {}
-  return String(
+  return normalizePassengerTripTokenInput(
     body?.token ||
       body?.trip_token ||
       body?.passenger_trip_token ||
       q.token ||
       q.trip_token ||
       ''
-  ).trim()
+  )
 }
 
 function readConfirmToken(req, body) {
   const q = req.query || {}
-  return String(body?.confirm_token || q.confirm_token || '').trim()
+  return normalizePassengerTripTokenInput(body?.confirm_token || q.confirm_token || '')
 }
 
 function loadError(res, status, code, error) {
@@ -68,7 +70,12 @@ export default async function handler(req, res) {
       }
     }
 
-    if (!tripToken || tripToken.length < 20) {
+    // Opaque passenger_trip_token only — never phone/company/latest-activity fallback.
+    if (
+      !tripToken ||
+      tripToken.length < 20 ||
+      isUnresolvedWhatsappUrlPlaceholder(tripToken)
+    ) {
       return json(res, 404, { ok: false, state: 'INVALID', code: 'INVALID' })
     }
 

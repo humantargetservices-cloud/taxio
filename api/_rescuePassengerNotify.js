@@ -13,6 +13,8 @@ import {
   rescueReminderTemplateConfigured,
 } from './_whatsapp.js'
 
+import { normalizePassengerTripTokenInput } from './_passengerTrip.js'
+
 function publicAppOrigin() {
   return String(process.env.PUBLIC_APP_ORIGIN || '')
     .trim()
@@ -22,7 +24,7 @@ function publicAppOrigin() {
 /** Authoritative passenger trip page URL (Confirm/Cancel live here). */
 export function rescuePassengerTripUrl(tripToken) {
   const origin = publicAppOrigin()
-  const t = String(tripToken || '').trim()
+  const t = normalizePassengerTripTokenInput(tripToken)
   if (!origin || !t) return null
   return `${origin}/trip/${encodeURIComponent(t)}`
 }
