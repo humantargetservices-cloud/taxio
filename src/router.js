@@ -8,16 +8,16 @@ import { mountPendingApproval } from './pages/pendingApproval.js'
 import { mountDashboardCompany } from './pages/dashboardCompany.js'
 import { mountChangePasswordCompany } from './pages/changePasswordCompany.js'
 import { mountOnboardingCompany } from './pages/onboardingCompany.js'
-import { mountBookCompany } from './pages/bookCompany.js'
-import { mountCompanyAnalyticsRedirect } from './pages/companyAnalyticsRedirect.js'
-import { mountAdminLogin } from './pages/adminLogin.js'
-import { mountAdminDashboard } from './pages/adminDashboard.js'
 import { mountTerms, mountPrivacy, mountCompanyTerms, mountContact } from './pages/legal.js'
 import { mountTaxiDirectory } from './pages/taxiDirectory.js'
+import { mountRescuePassengerConfirm } from './pages/rescuePassengerConfirm.js'
+import { mountTripLive } from './pages/tripLive.js'
+import { mountFindBooking } from './pages/findBooking.js'
 import { resolveBookSlugForRouter } from './lib/tenant.js'
 import { ensureGenericSiteManifest, primeBookingPwaManifest } from './lib/companyPwa.js'
 import { getLocale, syncDocumentLang } from './lib/locale.js'
 import { taxioLogoImg } from './lib/taxioLogo.js'
+import { normalizePassengerTripTokenInput } from './lib/passengerTripToken.js'
 
 function mountNotFound(root) {
   root.innerHTML = `
@@ -26,6 +26,37 @@ function mountNotFound(root) {
       <p class="text-gray-600 mb-6">Page not found.</p>
       <a href="/" class="text-yellow-600 font-semibold hover:underline">Back home</a>
     </div>`
+}
+
+/** Brief shell while a route chunk downloads (admin / booking). */
+function mountChunkLoading(root) {
+  root.innerHTML = `
+    <div class="flex min-h-screen flex-col items-center justify-center bg-[#eef0f3] px-4 dark:bg-slate-950">
+      <div class="h-10 w-10 animate-pulse rounded-full border-2 border-gray-300 border-t-yellow-500 dark:border-slate-600 dark:border-t-amber-400"></div>
+    </div>`
+}
+
+/**
+ * Lazy-load a page module, then run its mount. Failures → not-found.
+ * @param {HTMLElement} root
+ * @param {() => Promise<Record<string, unknown>>} importer
+ * @param {string} exportName
+ * @param  {...unknown} args
+ */
+function loadRouteChunk(root, importer, exportName, ...args) {
+  mountChunkLoading(root)
+  return importer()
+    .then((mod) => {
+      const fn = mod?.[exportName]
+      if (typeof fn !== 'function') {
+        throw new Error(`Route export missing: ${exportName}`)
+      }
+      return fn(root, ...args)
+    })
+    .catch((err) => {
+      console.error(err)
+      mountNotFound(root)
+    })
 }
 
 function route() {
@@ -45,10 +76,7 @@ function route() {
 
   if (path === '/' || path === '') {
     if (bookSlug) {
-      mountBookCompany(root, bookSlug).catch((err) => {
-        console.error(err)
-        mountNotFound(root)
-      })
+      loadRouteChunk(root, () => import('./pages/bookCompany.js'), 'mountBookCompany', bookSlug)
     } else {
       mountLanding(root)
     }
@@ -57,10 +85,55 @@ function route() {
   if (path.startsWith('/r/')) {
     const redirectSlug = decodeURIComponent(path.slice(3).split('/')[0] || '').trim()
     if (redirectSlug) {
-      mountCompanyAnalyticsRedirect(root, redirectSlug).catch((err) => {
+      loadRouteChunk(
+        root,
+        () => import('./pages/companyAnalyticsRedirect.js'),
+        'mountCompanyAnalyticsRedirect',
+        redirectSlug
+      )
+      return
+    }
+    mountNotFound(root)
+    return
+  }
+  if (path === '/find-booking' || path === '/find-booking/') {
+    mountFindBooking(root)
+    return
+  }
+  if (path.startsWith('/trip/')) {
+    const rawSeg = path.slice('/trip/'.length).split('/')[0] || ''
+    const tripToken = normalizePassengerTripTokenInput(rawSeg)
+    // Pass segment through; tripLive rejects short / Meta {{1}} placeholders without
+    // falling back to another booking.
+    if (tripToken) {
+      mountTripLive(root, tripToken).catch((err) => {
         console.error(err)
         mountNotFound(root)
       })
+      return
+    }
+    mountNotFound(root)
+    return
+  }
+  if (path.startsWith('/rescue/confirm/')) {
+    const token = decodeURIComponent(path.slice('/rescue/confirm/'.length).split('/')[0] || '').trim()
+    if (token) {
+      // Prefer live trip page when passenger_trip_token exists; else legacy confirm UI.
+      fetch(`/api/trip-status?confirm_token=${encodeURIComponent(token)}`)
+        .then((r) => r.json().catch(() => ({})))
+        .then((body) => {
+          const tripTok = String(body?.trip_token || '').trim()
+          if (tripTok.length >= 20) {
+            window.history.replaceState({}, '', `/trip/${encodeURIComponent(tripTok)}`)
+            return mountTripLive(root, tripTok)
+          }
+          return mountRescuePassengerConfirm(root, token)
+        })
+        .catch(() => mountRescuePassengerConfirm(root, token))
+        .catch((err) => {
+          console.error(err)
+          mountNotFound(root)
+        })
       return
     }
     mountNotFound(root)
@@ -139,21 +212,15 @@ function route() {
     return
   }
   if (path === '/admin/login') {
-    mountAdminLogin(root)
+    loadRouteChunk(root, () => import('./pages/adminLogin.js'), 'mountAdminLogin')
     return
   }
   if (path === '/admin/dashboard') {
-    mountAdminDashboard(root).catch((err) => {
-      console.error(err)
-      mountNotFound(root)
-    })
+    loadRouteChunk(root, () => import('./pages/adminDashboard.js'), 'mountAdminDashboard')
     return
   }
   if (bookSlug) {
-    mountBookCompany(root, bookSlug).catch((err) => {
-      console.error(err)
-      mountNotFound(root)
-    })
+    loadRouteChunk(root, () => import('./pages/bookCompany.js'), 'mountBookCompany', bookSlug)
     return
   }
 

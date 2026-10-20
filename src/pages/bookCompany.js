@@ -1,13 +1,20 @@
 import {
   fetchApprovedCompanyBySlug,
-  createQuickBookingLog,
+  createDraftBookingLog,
+  activateDraftBookingLog,
 } from '../lib/api.js'
 import { TERMS_VERSION_BOOKING_RIDER } from '../lib/legalVersions.js'
 import { resolveBookingVehicleTypes } from '../lib/bookingCarTypes.js'
 import { escapeHtml } from '../lib/html.js'
 import { icon } from '../lib/icons.js'
 import { estimateTrip } from '../lib/tripEstimate.js'
-import { tBooking, tPwa } from '../i18n.js'
+import { tBooking, tPwa, tPassengerRecovery } from '../i18n.js'
+import {
+  passengerActiveTripBannerHtml,
+  savePassengerActiveTrip,
+  validateStoredPassengerTrip,
+  readPassengerActiveTrip,
+} from '../lib/passengerActiveTrip.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
 import { getDemoBookingCompany, isDemoBookingSlug } from '../lib/demoBookingCompany.js'
@@ -25,6 +32,14 @@ import {
   parseBookingAnalyticsSource,
   trackCompanyAnalyticsEvent,
 } from '../lib/companyAnalytics.js'
+import {
+  defaultFutureBelgiumDatetimeLocal,
+  isDatetimeLocalInPast,
+  toBelgiumDatetimeLocalValue,
+} from '../lib/belgiumTime.js'
+import intlTelInput from 'intl-tel-input/intlTelInputWithUtils'
+import 'intl-tel-input/styles'
+
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim()
 const TURNSTILE_FRONT_ENABLED =
@@ -97,6 +112,7 @@ function commitBookingFieldPlace({ inputEl, state, formattedAddress, lat, lng, p
   try {
     inputEl.value = addr
     state.committed = addr
+    state.verifiedAddress = addr
     state.placeId = placeId != null && String(placeId).length ? String(placeId) : null
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       state.lat = lat
@@ -115,6 +131,30 @@ function commitBookingFieldPlace({ inputEl, state, formattedAddress, lat, lng, p
 }
 
 /**
+ * Typed-address verify: store Google lat/lng + normalized address internally.
+ * Never changes the passenger's visible input text.
+ */
+function verifyBookingFieldInternally({
+  inputEl,
+  state,
+  displayText,
+  verifiedAddress,
+  lat,
+  lng,
+  placeId,
+}) {
+  const display = String(displayText || inputEl?.value || '').trim()
+  if (!display || !state) return false
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false
+  state.committed = display
+  state.verifiedAddress = String(verifiedAddress || '').trim() || display
+  state.placeId = placeId != null && String(placeId).length ? String(placeId) : null
+  state.lat = lat
+  state.lng = lng
+  return true
+}
+
+/**
  * One booking address field: own DOM suggestion panel + AutocompleteService + PlacesService.getDetails.
  * No shared Google `.pac-container` (root cause of pickup/drop-off cross-talk).
  */
@@ -123,6 +163,7 @@ function attachBookingAddressController({ inputEl, panelEl, state, onUpdate, pow
     return { detach: () => {} }
   }
   if (state.committed === undefined) state.committed = null
+  if (state.verifiedAddress === undefined) state.verifiedAddress = null
   if (state.lat === undefined) state.lat = null
   if (state.lng === undefined) state.lng = null
   if (state.placeId === undefined) state.placeId = null
@@ -180,17 +221,24 @@ function attachBookingAddressController({ inputEl, panelEl, state, onUpdate, pow
       hidePanel()
       return
     }
-    acService.getPlacePredictions({ input: q }, (predictions, status) => {
-      if (
-        status !== google.maps.places.PlacesServiceStatus.OK ||
-        !predictions ||
-        predictions.length === 0
-      ) {
-        hidePanel()
-        return
+    acService.getPlacePredictions(
+      {
+        input: q,
+        // Belgium-beta: hard country restriction (not merely a region bias)
+        componentRestrictions: { country: 'be' },
+      },
+      (predictions, status) => {
+        if (
+          status !== google.maps.places.PlacesServiceStatus.OK ||
+          !predictions ||
+          predictions.length === 0
+        ) {
+          hidePanel()
+          return
+        }
+        showPredictions(predictions)
       }
-      showPredictions(predictions)
-    })
+    )
   }
 
   function applyPlaceDetails(place) {
@@ -236,6 +284,7 @@ function attachBookingAddressController({ inputEl, panelEl, state, onUpdate, pow
     const c = state.committed
     if (typeof c === 'string' && c.length > 0 && v !== c) {
       state.committed = null
+      state.verifiedAddress = null
       state.lat = null
       state.lng = null
       state.placeId = null
@@ -362,6 +411,399 @@ function reverseGeocodeLatLng(lat, lng) {
   })
 }
 
+/** Session geocode cache — same typed text reuses one Google Geocoder result. */
+const typedAddressGeocodeCache = new Map()
+
+const BROAD_GEOCODE_TYPES = new Set([
+  'country',
+  'continent',
+  'administrative_area_level_1',
+  'administrative_area_level_2',
+  'administrative_area_level_3',
+  'locality',
+  'political',
+  'colloquial_area',
+])
+
+/** Street-type / connector words — not enough alone to resolve an address. */
+const ADDRESS_FILLER_TOKENS = new Set([
+  'rue',
+  'avenue',
+  'av',
+  'ave',
+  'straat',
+  'str',
+  'road',
+  'rd',
+  'street',
+  'st',
+  'boulevard',
+  'bd',
+  'blvd',
+  'laan',
+  'weg',
+  'place',
+  'plein',
+  'chemin',
+  'allee',
+  'allée',
+  'chaussee',
+  'chaussée',
+  'route',
+  'dreve',
+  'drève',
+  'impasse',
+  'square',
+  'quai',
+  'de',
+  'la',
+  'le',
+  'les',
+  'du',
+  'des',
+  'van',
+  'der',
+  'den',
+  'het',
+  'of',
+  'the',
+  'a',
+  'an',
+  'and',
+  'et',
+  'en',
+  'sur',
+  'sous',
+])
+
+/** City/country-only queries must not resolve to a street guess. */
+const BROAD_PLACE_ONLY_TOKENS = new Set([
+  'belgium',
+  'belgie',
+  'belgië',
+  'belgique',
+  'brussels',
+  'bruxelles',
+  'brussel',
+  'antwerp',
+  'antwerpen',
+  'anvers',
+  'ghent',
+  'gent',
+  'gand',
+  'brugge',
+  'bruges',
+  'leuven',
+  'louvain',
+  'liege',
+  'liège',
+  'luik',
+  'namur',
+  'namen',
+  'mons',
+  'bergen',
+  'charleroi',
+  'mechelen',
+  'malines',
+  'aarschot',
+])
+
+/** Multilingual BE city aliases — typed city need not match Google's language exactly. */
+const CITY_ALIAS_GROUPS = [
+  ['brussels', 'bruxelles', 'brussel'],
+  ['antwerp', 'antwerpen', 'anvers'],
+  ['ghent', 'gent', 'gand'],
+  ['brugge', 'bruges'],
+  ['leuven', 'louvain'],
+  ['liege', 'luik'],
+  ['namur', 'namen'],
+  ['mons', 'bergen'],
+  ['mechelen', 'malines'],
+]
+
+function normalizeAddressMatchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function addressMatchTokens(value) {
+  return normalizeAddressMatchText(value).split(/\s+/).filter(Boolean)
+}
+
+function geocodeHasComponent(result, type) {
+  return (result?.address_components || []).some((c) => (c.types || []).includes(type))
+}
+
+function geocodeComponentName(result, type, preferShort = false) {
+  const comp = (result?.address_components || []).find((c) => (c.types || []).includes(type))
+  if (!comp) return ''
+  if (preferShort) return String(comp.short_name || comp.long_name || '').trim()
+  return String(comp.long_name || comp.short_name || '').trim()
+}
+
+function tokenMatchesHaystack(token, haystack) {
+  if (!token || !haystack) return false
+  if (haystack.includes(token)) return true
+  for (const group of CITY_ALIAS_GROUPS) {
+    if (!group.includes(token)) continue
+    if (group.some((alias) => haystack.includes(alias))) return true
+  }
+  return false
+}
+
+/** Belgian postal codes are 4 digits — exclude them when detecting typed street numbers. */
+function typedStreetNumberCandidates(tokens) {
+  const nums = tokens.filter((t) => /^\d+[a-z]?$/.test(t))
+  const nonPostal = nums.filter((t) => !/^\d{4}$/.test(t))
+  return nonPostal.length ? nonPostal : []
+}
+
+/**
+ * Obviously incomplete typed text — never geocode / never estimate from these alone.
+ * Examples: "rue de", "avenue", "straat", "Bruss", "Belgium"
+ */
+function isTypedAddressIncomplete(query) {
+  const q = String(query || '').trim()
+  if (q.length < 8) return true
+  const tokens = addressMatchTokens(q)
+  if (tokens.length < 2) return true
+
+  const meaningful = tokens.filter((t) => !ADDRESS_FILLER_TOKENS.has(t) && !/^\d+[a-z]?$/.test(t))
+  if (meaningful.length === 0) return true
+  if (meaningful.every((t) => BROAD_PLACE_ONLY_TOKENS.has(t))) return true
+
+  // Need at least one substantial non-city street/name token (e.g. "Loi" / "Leuvensesteenweg").
+  const hasStreetName = meaningful.some((t) => t.length >= 3 && !BROAD_PLACE_ONLY_TOKENS.has(t))
+  if (!hasStreetName) return true
+  return false
+}
+
+function geocodeIsInBelgium(result) {
+  const short = String(geocodeComponentName(result, 'country', true) || '')
+    .trim()
+    .toUpperCase()
+  if (short === 'BE') return true
+  const long = normalizeAddressMatchText(geocodeComponentName(result, 'country'))
+  return long === 'belgium' || long === 'belgie' || long === 'belgique'
+}
+
+/**
+ * Accept precise Belgian street-level results that practically match typed text.
+ * Tolerates punctuation, casing, accents, and common address token order.
+ * Still rejects wrong street numbers and non-Belgium results.
+ */
+function isUsableStreetGeocodeResult(result, typedQuery) {
+  if (!result?.geometry?.location) return false
+  if (!geocodeIsInBelgium(result)) return false
+
+  const formatted = String(result.formatted_address || '').trim()
+  if (formatted.length < 5) return false
+
+  const types = Array.isArray(result.types) ? result.types : []
+  if (types.length && types.every((t) => BROAD_GEOCODE_TYPES.has(t))) return false
+
+  const preciseType = types.some((t) =>
+    ['street_address', 'premise', 'subpremise', 'establishment', 'point_of_interest', 'intersection'].includes(
+      t
+    )
+  )
+  const hasRoute = geocodeHasComponent(result, 'route')
+  const hasStreetNumber = geocodeHasComponent(result, 'street_number')
+  const hasLocality =
+    geocodeHasComponent(result, 'locality') ||
+    geocodeHasComponent(result, 'postal_town') ||
+    geocodeHasComponent(result, 'sublocality') ||
+    geocodeHasComponent(result, 'postal_code')
+
+  if (!preciseType && !hasRoute) return false
+  if (!hasLocality && !preciseType) return false
+
+  return geocodePracticallyMatchesTyped(result, typedQuery, {
+    hasRoute,
+    hasStreetNumber,
+    preciseType,
+  })
+}
+
+function geocodePracticallyMatchesTyped(result, typedQuery, flags = {}) {
+  const typedTokens = addressMatchTokens(typedQuery)
+  if (typedTokens.length < 2) return false
+
+  const routeName = normalizeAddressMatchText(geocodeComponentName(result, 'route'))
+  const streetNumber = normalizeAddressMatchText(geocodeComponentName(result, 'street_number'))
+  const locality = normalizeAddressMatchText(
+    geocodeComponentName(result, 'locality') ||
+      geocodeComponentName(result, 'postal_town') ||
+      geocodeComponentName(result, 'sublocality')
+  )
+  const postal = normalizeAddressMatchText(geocodeComponentName(result, 'postal_code'))
+  const formattedNorm = normalizeAddressMatchText(result.formatted_address)
+  const haystack = `${formattedNorm} ${routeName} ${streetNumber} ${locality} ${postal}`.trim()
+  const typedNorm = typedTokens.join(' ')
+
+  const streetNameTokens = typedTokens.filter(
+    (t) =>
+      t.length >= 3 &&
+      !ADDRESS_FILLER_TOKENS.has(t) &&
+      !BROAD_PLACE_ONLY_TOKENS.has(t) &&
+      !/^\d+[a-z]?$/.test(t)
+  )
+  if (streetNameTokens.length === 0) return false
+
+  // Street match: longest typed street token in route/formatted, OR route tokens in typed text.
+  const longestStreet = [...streetNameTokens].sort((a, b) => b.length - a.length)[0]
+  const streetInResult =
+    (longestStreet && (routeName.includes(longestStreet) || haystack.includes(longestStreet))) ||
+    streetNameTokens.some((t) => routeName.includes(t) || haystack.includes(t))
+  const routeTokens = routeName
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !ADDRESS_FILLER_TOKENS.has(t))
+  const routeInTyped = routeTokens.length > 0 && routeTokens.every((t) => typedNorm.includes(t))
+  if (!streetInResult && !routeInTyped) return false
+  if (!routeName && !flags.preciseType) return false
+
+  // Explicit street number (not BE postal) must match Google's street_number exactly.
+  const typedNums = typedStreetNumberCandidates(typedTokens)
+  if (typedNums.length) {
+    if (!streetNumber || !flags.hasStreetNumber) return false
+    if (!typedNums.includes(streetNumber)) return false
+  }
+
+  // If a city token was typed, require a practical city/locality match (aliases OK).
+  const typedCities = typedTokens.filter((t) => BROAD_PLACE_ONLY_TOKENS.has(t) && t.length >= 3)
+  if (typedCities.length) {
+    const cityOk = typedCities.some((t) => tokenMatchesHaystack(t, haystack))
+    if (!cityOk) return false
+  }
+
+  // Optional postal: if typed a 4-digit postal and Google has one, they should match.
+  const typedPostals = typedTokens.filter((t) => /^\d{4}$/.test(t))
+  if (typedPostals.length && postal && !typedPostals.includes(postal)) return false
+
+  return true
+}
+
+function readGeocodeLatLng(result) {
+  const loc = result?.geometry?.location
+  if (!loc) return { lat: null, lng: null }
+  const lat = typeof loc.lat === 'function' ? loc.lat() : Number(loc.lat)
+  const lng = typeof loc.lng === 'function' ? loc.lng() : Number(loc.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { lat: null, lng: null }
+  return { lat, lng }
+}
+
+/**
+ * Forward-geocode typed address text (autocomplete fallback).
+ * Only called from estimate / BOOK resolve — never from raw keystrokes alone.
+ * Belgium-restricted. Does not mutate the input field.
+ */
+async function geocodeTypedAddress(query) {
+  const q = String(query || '').trim()
+  if (isTypedAddressIncomplete(q)) return { ok: false, code: 'INCOMPLETE' }
+
+  const key = `be:${q.toLowerCase()}`
+  if (typedAddressGeocodeCache.has(key)) {
+    return typedAddressGeocodeCache.get(key)
+  }
+
+  const pending = (async () => {
+    try {
+      await loadGoogleMapsPlaces()
+    } catch {
+      return { ok: false, code: 'MAPS_UNAVAILABLE' }
+    }
+    const g = window.google?.maps
+    if (!g?.Geocoder) return { ok: false, code: 'NO_GEOCODER' }
+
+    return new Promise((resolve) => {
+      const geocoder = new g.Geocoder()
+      geocoder.geocode(
+        {
+          address: q,
+          componentRestrictions: { country: 'BE' },
+          region: 'be',
+        },
+        (results, status) => {
+          if (status !== g.GeocoderStatus.OK || !results?.length) {
+            resolve({ ok: false, code: status === 'ZERO_RESULTS' ? 'NOT_FOUND' : 'GEOCODE_FAILED' })
+            return
+          }
+          const match = results.find((r) => isUsableStreetGeocodeResult(r, q))
+          if (!match) {
+            resolve({ ok: false, code: 'MISMATCH' })
+            return
+          }
+          const { lat, lng } = readGeocodeLatLng(match)
+          if (lat == null || lng == null) {
+            resolve({ ok: false, code: 'NO_COORDS' })
+            return
+          }
+          resolve({
+            ok: true,
+            displayText: q,
+            verifiedAddress: String(match.formatted_address || q).trim(),
+            lat,
+            lng,
+            placeId: match.place_id ? String(match.place_id) : null,
+          })
+        }
+      )
+    })
+  })()
+
+  typedAddressGeocodeCache.set(key, pending)
+  try {
+    const result = await pending
+    typedAddressGeocodeCache.set(key, Promise.resolve(result))
+    return result
+  } catch (err) {
+    typedAddressGeocodeCache.delete(key)
+    return { ok: false, code: 'NETWORK', error: err?.message || String(err) }
+  }
+}
+
+/**
+ * Ensure a booking address field has lat/lng: reuse confirmed place, else geocode typed text.
+ * Typed fallback never overwrites visible input — only stores verified coords internally.
+ */
+async function ensureBookingFieldResolved(inputEl, state) {
+  const text = String(inputEl?.value || '').trim()
+  if (!text) return { ok: false, code: 'EMPTY' }
+
+  if (
+    typeof state?.committed === 'string' &&
+    state.committed.length > 0 &&
+    text === state.committed &&
+    Number.isFinite(state.lat) &&
+    Number.isFinite(state.lng)
+  ) {
+    return { ok: true, reused: true }
+  }
+
+  if (isTypedAddressIncomplete(text)) return { ok: false, code: 'INCOMPLETE' }
+
+  const geo = await geocodeTypedAddress(text)
+  if (!geo.ok) return geo
+
+  const verified = verifyBookingFieldInternally({
+    inputEl,
+    state,
+    displayText: text,
+    verifiedAddress: geo.verifiedAddress,
+    lat: geo.lat,
+    lng: geo.lng,
+    placeId: geo.placeId,
+  })
+  if (!verified || !Number.isFinite(state.lat) || !Number.isFinite(state.lng)) {
+    return { ok: false, code: 'COMMIT_FAILED' }
+  }
+  return { ok: true, reused: false }
+}
+
 function digitsOnly(phone) {
   return String(phone || '').replace(/\D/g, '')
 }
@@ -408,7 +850,7 @@ function whatsappBookingIcon(className = 'h-5 w-5') {
   return `<svg class="${className} shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z"/></svg>`
 }
 
-const BK_WA_DISABLED_CLASSES = [
+const BK_BOOK_DISABLED_CLASSES = [
   'pointer-events-none',
   'bg-slate-200',
   'text-slate-500',
@@ -417,12 +859,12 @@ const BK_WA_DISABLED_CLASSES = [
   'dark:text-slate-400',
   'dark:ring-slate-700',
 ]
-const BK_WA_ENABLED_CLASSES = [
-  'bg-[#25D366]',
-  'text-white',
-  'ring-[#1fb855]/50',
-  'hover:bg-[#1ebe5d]',
-  'shadow-[0_12px_40px_rgba(37,211,102,0.25)]',
+const BK_BOOK_ENABLED_CLASSES = [
+  'bg-amber-400',
+  'text-slate-900',
+  'ring-amber-400/50',
+  'hover:bg-amber-300',
+  'shadow-[0_12px_40px_rgba(251,191,36,0.28)]',
 ]
 
 /** Optional company logo (if column / field exists). Safe fallback when missing or broken. */
@@ -484,7 +926,8 @@ export async function mountBookCompany(root, slug) {
   }
 
   const pwaIdentity = applyCompanyPwaIdentity({ context: 'booking', company, slug })
-  await prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName || slug)
+  // Never block booking form on manifest (router already primes; prefetch dedupes in-flight)
+  void prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName || slug)
 
   initPwaInstallPrompt({
     context: 'booking',
@@ -603,6 +1046,13 @@ export async function mountBookCompany(root, slug) {
           </div>
         </div>
 
+        <div id="bk-active-trip-slot"></div>
+        <p class="text-center text-xs text-slate-500 dark:text-slate-400">
+          <a href="/find-booking" class="font-semibold text-amber-800 underline-offset-2 hover:underline dark:text-amber-300">${escapeHtml(
+            tPassengerRecovery(getLocale()).findBooking || 'Find my booking'
+          )}</a>
+        </p>
+
         <div class="relative overflow-hidden rounded-3xl border border-slate-200/90 bg-white p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.45)] dark:ring-white/[0.06] sm:p-6">
           <div class="pointer-events-none absolute -right-20 -top-20 h-40 w-40 rounded-full bg-amber-400/10 blur-3xl"></div>
           <button type="button" id="book-qr-hint" class="absolute right-4 top-4 z-10 flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-400/20 text-amber-700 shadow-md ring-1 ring-amber-400/40 transition hover:bg-amber-400/30 dark:bg-amber-400/15 dark:text-amber-300 dark:shadow-lg dark:shadow-black/20 dark:ring-amber-400/30 dark:hover:bg-amber-400/25 dark:hover:text-amber-200" title="${escapeHtml(tb.qrTitle)}" aria-label="${escapeHtml(tb.qrTitle)}">
@@ -629,7 +1079,7 @@ export async function mountBookCompany(root, slug) {
           </div>
         </div>
 
-        <div class="relative z-0 rounded-3xl border border-slate-200/90 bg-white p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:ring-white/[0.05] sm:p-6">
+        <div id="bk-trip-step" class="relative z-0 rounded-3xl border border-slate-200/90 bg-white p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] ring-1 ring-slate-900/[0.04] backdrop-blur-sm dark:border-slate-700/60 dark:bg-slate-900/70 dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] dark:ring-white/[0.05] sm:p-6">
           <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-600/90 dark:text-amber-400/75">${escapeHtml(tb.tripEyebrow)}</p>
           ${isDemo ? `<div class="mb-1 rounded-xl border border-amber-400/35 bg-amber-50 px-3 py-2.5 text-xs font-medium leading-snug text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-50">${escapeHtml(tb.demoRibbon)}</div>` : ''}
           <div class="mt-5 space-y-6">
@@ -724,21 +1174,9 @@ export async function mountBookCompany(root, slug) {
 
             <input type="text" id="bk-hp" name="website" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
 
-            <a id="bk-wa" href="#" rel="noopener noreferrer" aria-disabled="true" class="pointer-events-none flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-slate-200 text-sm font-bold text-slate-500 shadow-md ring-1 ring-slate-300 transition dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700 dark:shadow-black/20">
-              ${whatsappBookingIcon('h-5 w-5')}
-              ${escapeHtml(tb.bookWhatsapp)}
-            </a>
-
-            <div class="grid grid-cols-2 gap-3">
-              <a id="bk-mail" href="#" class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:shadow-md dark:shadow-black/15 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
-                ${icon.mail('h-[18px] w-[18px] text-amber-600 dark:text-amber-400/90')}
-                ${escapeHtml(tb.email)}
-              </a>
-              <a id="bk-call" href="#" class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:shadow-md dark:shadow-black/15 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
-                ${icon.phone('h-[18px] w-[18px] text-amber-600 dark:text-amber-400/90')}
-                ${escapeHtml(tb.call)}
-              </a>
-            </div>
+            <button type="button" id="bk-book" aria-disabled="true" class="pointer-events-none flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-slate-200 text-sm font-bold uppercase tracking-[0.08em] text-slate-500 shadow-md ring-1 ring-slate-300 transition dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700 dark:shadow-black/20">
+              ${escapeHtml(tb.bookCta || 'Book')}
+            </button>
           </div>
         </div>
 
@@ -747,6 +1185,71 @@ export async function mountBookCompany(root, slug) {
           <p class="mt-2 font-bold tracking-tight text-amber-600 dark:text-amber-400/90">${escapeHtml(tb.footerPowered)}</p>
           <p class="mt-2.5"><a href="/contact" class="font-semibold text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-amber-700 dark:text-slate-400 dark:decoration-slate-600 dark:hover:text-amber-200/90">${escapeHtml(tb.footerContact)}</a></p>
         </footer>
+      </div>
+
+      <div id="bk-complete" class="fixed inset-0 z-[280] hidden" aria-hidden="true">
+        <button type="button" id="bk-complete-backdrop" class="absolute inset-0 border-0 bg-black/50 backdrop-blur-[2px] dark:bg-black/70" tabindex="-1" aria-label="${escapeHtml(tb.editTrip || 'Edit trip')}"></button>
+        <div class="absolute inset-x-0 bottom-0 z-10 flex max-h-[92vh] flex-col rounded-t-3xl border border-slate-200/90 bg-white shadow-2xl ring-1 ring-slate-900/[0.06] dark:border-slate-700/80 dark:bg-slate-900 dark:shadow-black/50 dark:ring-white/[0.06] sm:inset-x-auto sm:left-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2" role="dialog" aria-modal="true" aria-labelledby="bk-complete-heading">
+          <div class="overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 sm:px-6">
+            <button type="button" id="bk-complete-edit" class="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 transition hover:text-amber-700 dark:text-slate-300 dark:hover:text-amber-200">
+              <span aria-hidden="true">←</span> ${escapeHtml(tb.editTrip || 'Edit trip')}
+            </button>
+            <h2 id="bk-complete-heading" class="mt-3 text-xl font-bold tracking-tight text-slate-900 dark:text-white">${escapeHtml(tb.reviewBookingTitle || 'Review your booking')}</h2>
+
+            <div class="mt-5 rounded-2xl border border-slate-200/90 bg-slate-50/90 px-4 py-3.5 dark:border-slate-700/60 dark:bg-slate-800/50">
+              <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.tripSummaryTitle || 'Trip summary')}</p>
+              <dl class="mt-2.5 space-y-1.5 text-sm">
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryCompany || 'Company')}</dt><dd id="bk-sum-company" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryPickup || 'Pickup')}</dt><dd id="bk-sum-pickup" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div id="bk-sum-drop-row" class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryDestination || 'Destination')}</dt><dd id="bk-sum-drop" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryWhen || 'Date/time')}</dt><dd id="bk-sum-when" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryVehicle || 'Vehicle')}</dt><dd id="bk-sum-vehicle" class="min-w-0 text-right font-semibold text-slate-900 dark:text-white"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="shrink-0 text-slate-500 dark:text-slate-400">${escapeHtml(tb.summaryPrice || 'Estimated price')}</dt><dd id="bk-sum-price" class="min-w-0 text-right font-semibold text-amber-700 dark:text-amber-300"></dd></div>
+              </dl>
+            </div>
+
+            <div class="mt-5 flex flex-col gap-3 min-[360px]:flex-row min-[360px]:items-end min-[360px]:gap-2.5">
+              <div class="min-w-0 min-[360px]:basis-[40%] min-[360px]:grow-0 min-[360px]:shrink-0">
+                <label for="bk-complete-name" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.pickupNameLabel || 'Name')}</label>
+                <input id="bk-complete-name" type="text" autocomplete="name" maxlength="80" placeholder="${escapeHtml(tb.pickupNamePlaceholder || 'Your name')}" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              </div>
+              <div class="min-w-0 min-[360px]:basis-[60%] min-[360px]:min-w-0 min-[360px]:grow">
+                <label for="bk-complete-phone" class="text-sm font-bold text-slate-800 dark:text-slate-100">${escapeHtml(tb.mobileNumberLabel || 'Phone')}</label>
+                <input id="bk-complete-phone" type="tel" autocomplete="tel" inputmode="tel" class="mt-2 h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-900 shadow-inner shadow-slate-900/5 transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-400/20 dark:border-slate-600/80 dark:bg-slate-800/80 dark:text-slate-100 dark:shadow-black/20 dark:focus:border-amber-400 dark:focus:ring-amber-400/25" />
+              </div>
+            </div>
+
+            <p class="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">${escapeHtml(tb.contactPrivacyNote || 'Contact details are used only for this booking.')}</p>
+
+            <button type="button" id="bk-continue-trip" class="mt-5 flex h-12 w-full items-center justify-center rounded-2xl bg-amber-400 px-4 text-sm font-black tracking-wide text-slate-900 shadow-sm transition hover:bg-amber-300">
+              ${escapeHtml(tb.confirmBookingCta || 'CONFIRM BOOKING')}
+            </button>
+
+            <!-- Legacy channel sheet kept for temporary compatibility (bypassed by live trip flow). -->
+            <div id="bk-legacy-channels" class="mt-5 hidden" hidden aria-hidden="true">
+            <p class="mt-5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">${escapeHtml(tb.sendBookingVia || 'Send booking via')}</p>
+            <div class="mt-3 flex gap-2">
+              <button type="button" id="bk-channel-whatsapp" class="${whatsappDigitsForWaMe(company.phone || '') ? '' : 'hidden '}flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl bg-[#25D366] px-2 py-3 text-white shadow-[0_8px_22px_rgba(37,211,102,0.28)] ring-1 ring-[#1fb855]/40 transition hover:bg-[#1ebe5d]">
+                ${whatsappBookingIcon('h-6 w-6')}
+                <span class="text-[11px] font-bold leading-tight">WhatsApp</span>
+              </button>
+              <button type="button" id="bk-channel-sms" class="${normalizeContactPhone(phone) ? '' : 'hidden '}flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2 py-3 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+                ${icon.messageCircle('h-5 w-5 text-amber-600 dark:text-amber-400/90')}
+                <span class="text-[11px] font-bold leading-tight text-slate-900 dark:text-white">SMS</span>
+              </button>
+              <button type="button" id="bk-channel-email" class="${company.email ? '' : 'hidden '}flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2 py-3 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+                ${icon.mail('h-5 w-5 text-amber-600 dark:text-amber-400/90')}
+                <span class="text-[11px] font-bold leading-tight text-slate-900 dark:text-white">${escapeHtml(tb.email)}</span>
+              </button>
+            </div>
+            <button type="button" id="bk-channel-call" class="${normalizeContactPhone(phone) ? '' : 'hidden '}mt-2.5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-bold text-slate-800 shadow-sm transition hover:border-amber-300/60 hover:bg-slate-50 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-100 dark:hover:border-amber-400/35 dark:hover:bg-slate-800">
+              <span aria-hidden="true">📞</span>
+              ${escapeHtml(tb.callUs || 'Call us')}
+            </button>
+            </div>
+            <p id="bk-complete-err" class="mt-3 hidden rounded-xl bg-red-50 px-3 py-2.5 text-sm font-medium text-red-800 ring-1 ring-red-200 dark:bg-red-950/60 dark:text-red-200 dark:ring-red-500/30"></p>
+          </div>
+        </div>
       </div>
 
       <div id="bk-qr-modal" class="fixed inset-0 z-[300] hidden items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] dark:bg-black/70 sm:items-center sm:p-4" aria-hidden="true">
@@ -788,14 +1291,45 @@ export async function mountBookCompany(root, slug) {
     mountBookCompany(root, slug)
   })
 
+  // Same-device active trip recovery (no auto-redirect)
+  void (async () => {
+    const slot = root.querySelector('#bk-active-trip-slot')
+    if (!slot) return
+    const stored = readPassengerActiveTrip()
+    if (!stored) return
+    const validated = await validateStoredPassengerTrip(stored)
+    if (!validated.active || !validated.token) return
+    if (!root.contains(slot)) return
+    const pr = tPassengerRecovery(getLocale())
+    slot.innerHTML = passengerActiveTripBannerHtml({
+      escapeHtml,
+      token: validated.token,
+      title: pr.activeTitle || 'Your active trip',
+      viewLabel: pr.viewTrip || 'View trip',
+      showFind: false,
+    })
+  })()
+
   let selectedCar = defaultSelectedCar
   let rideMode = 'now'
   let serviceMode = 'standard'
   let estimateTimer = null
   const pickupEl = root.querySelector('#bk-pickup')
   const dropEl = root.querySelector('#bk-dropoff')
-  const pickupPlacesState = { committed: null, lat: null, lng: null, placeId: null }
-  const dropoffPlacesState = { committed: null, lat: null, lng: null, placeId: null }
+  const pickupPlacesState = {
+    committed: null,
+    verifiedAddress: null,
+    lat: null,
+    lng: null,
+    placeId: null,
+  }
+  const dropoffPlacesState = {
+    committed: null,
+    verifiedAddress: null,
+    lat: null,
+    lng: null,
+    placeId: null,
+  }
   const dropoffWrap = root.querySelector('#bk-dropoff-wrap')
   const whenWrap = root.querySelector('#bk-when-wrap')
   const hourlyWrap = root.querySelector('#bk-hourly-wrap')
@@ -814,7 +1348,26 @@ export async function mountBookCompany(root, slug) {
     return hourlyOffered && serviceMode === 'hourly'
   }
   const termsEl = root.querySelector('#bk-terms')
-  const waBtn = root.querySelector('#bk-wa')
+  const bookBtn = root.querySelector('#bk-book')
+  const tripStepEl = root.querySelector('#bk-trip-step')
+  const completeEl = root.querySelector('#bk-complete')
+  const completePhoneEl = root.querySelector('#bk-complete-phone')
+  const completeNameEl = root.querySelector('#bk-complete-name')
+  const completeErrEl = root.querySelector('#bk-complete-err')
+  /** @type {ReturnType<typeof intlTelInput> | null} */
+  let passengerPhoneIti = null
+  if (completePhoneEl) {
+    passengerPhoneIti = intlTelInput(completePhoneEl, {
+      initialCountry: 'be',
+      preferredCountries: ['be', 'fr', 'nl', 'de', 'gb', 'lu', 'us', 'ke', 'rw'],
+      countryOrder: ['be', 'fr', 'nl', 'de', 'gb', 'us'],
+      nationalMode: true,
+      autoPlaceholder: 'aggressive',
+      formatOnDisplay: true,
+      strictMode: true,
+      containerClass: 'bk-iti w-full',
+    })
+  }
   const errEl = root.querySelector('#bk-err')
   const estWrap = root.querySelector('#bk-estimate')
   const estHint = root.querySelector('#bk-estimate-hint')
@@ -831,9 +1384,33 @@ export async function mountBookCompany(root, slug) {
   let latestEstimate = null
   const estimateSessionCache = new Map()
   let estimateRequestId = 0
+  let channelBusy = false
+  /** In-flight activate promise — shared so double-taps await the same request. */
+  let activateInflight = null
+  /** @type {{ fp: string, promise: Promise<{id:string,booking_reference:string}>, data?: {id:string,booking_reference:string} } | null} */
+  let draftPrep = null
+  let activatedBookingId = null
+  let frozenBookingReference = ''
 
-  const mailA = root.querySelector('#bk-mail')
-  const callA = root.querySelector('#bk-call')
+  const CHANNEL_IDS = [
+    'bk-channel-whatsapp',
+    'bk-channel-sms',
+    'bk-channel-email',
+    'bk-channel-call',
+  ]
+
+  function setChannelButtonsLocked(locked) {
+    for (const id of [...CHANNEL_IDS, 'bk-continue-trip']) {
+      const el = root.querySelector(`#${id}`)
+      if (!el) continue
+      el.disabled = !!locked
+      el.setAttribute('aria-disabled', locked ? 'true' : 'false')
+      el.classList.toggle('pointer-events-none', !!locked)
+      el.classList.toggle('opacity-50', !!locked)
+    }
+  }
+
+  // Company A = the company whose booking page the passenger opened. Never TAXIO platform number.
   const normalizedCompanyPhone = normalizeContactPhone(phone)
   const companyWhatsAppDigits = whatsappDigitsForWaMe(company.phone || '')
   let turnstileToken = ''
@@ -896,17 +1473,24 @@ export async function mountBookCompany(root, slug) {
     })
   }
 
-  function buildWhatsappBookingMessage() {
+  function buildWhatsappBookingMessage(bookingReference) {
     const msgs = tBooking(getLocale())
     const pu = pickupEl.value.trim()
     const carLabel = bookingCarTypeLabel(selectedCar, msgs)
+    const refLine =
+      bookingReference &&
+      fillWaTemplate(msgs.waLineBookingReference || 'Booking reference: {ref}', {
+        ref: bookingReference,
+      })
+
+    const companyLine = fillWaTemplate(msgs.waLineCompany, { company: company.name })
 
     if (isHourlyMode()) {
       const startRaw = hourlyStartEl?.value || ''
       const hours = Number(hourlyHoursEl?.value)
       const notes = String(hourlyNotesEl?.value || '').trim()
       const lines = [msgs.waHourlyIntro]
-      lines.push(fillWaTemplate(msgs.waLineCompany, { company: company.name }))
+      lines.push(companyLine)
       lines.push(fillWaTemplate(msgs.waLinePickup, { pickup: pu }))
       lines.push(fillWaTemplate(msgs.waLineStartTime, { startTime: startRaw }))
       const durationVal = fillWaTemplate(msgs.waDurationHours, {
@@ -920,6 +1504,7 @@ export async function mountBookCompany(root, slug) {
         min: String(hourlyCfg.minHours),
       })
       if (refPrice) lines.push(fillWaTemplate(msgs.waLineRefPrice, { estimate: refPrice }))
+      if (refLine) lines.push(refLine)
       return lines.join('\n')
     }
 
@@ -932,7 +1517,7 @@ export async function mountBookCompany(root, slug) {
         : msgs.waWhenRideNow
 
     const lines = [msgs.waStandardIntro]
-    lines.push(fillWaTemplate(msgs.waLineCompany, { company: company.name }))
+    lines.push(companyLine)
     lines.push(fillWaTemplate(msgs.waLinePickup, { pickup: pu }))
     lines.push(fillWaTemplate(msgs.waLineDropoff, { dropoff: doff }))
     lines.push(fillWaTemplate(msgs.waLineWhen, { when: whenText }))
@@ -944,12 +1529,14 @@ export async function mountBookCompany(root, slug) {
         })
       )
     }
+    if (refLine) lines.push(refLine)
     return lines.join('\n')
   }
 
-  function buildMailtoHref() {
+  function buildMailtoHref(bookingReference) {
     if (!company.email) return '#'
     const pu = pickupEl.value.trim() || 'Not provided'
+    const refLine = bookingReference ? `\nBooking reference: ${bookingReference}` : ''
     if (isHourlyMode()) {
       const startRaw = hourlyStartEl?.value || 'Not provided'
       const hours = Number(hourlyHoursEl?.value) || hourlyCfg.minHours
@@ -966,7 +1553,7 @@ Start time: ${startRaw}
 Duration: ${hours} hours
 Car type: ${selectedCar}
 Reference price: from €${hourlyCfg.rateEur}/hour, minimum ${hourlyCfg.minHours} hours
-Notes: ${notes}
+Notes: ${notes}${refLine}
 
 Final price to be confirmed with the taxi company.`
       return `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
@@ -993,25 +1580,132 @@ Date/Time: ${whenLine}
 Car type: ${selectedCar}
 Estimate distance: ${estimateDistance}
 Estimate duration: ${estimateDuration}
-Estimate price: ${estimatePrice}`
+Estimate price: ${estimatePrice}${refLine}`
     return `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
   }
 
-  function refreshContactLinks() {
-    if (company.email) {
-      mailA.href = buildMailtoHref()
-      mailA.classList.remove('pointer-events-none', 'opacity-40')
-    } else {
-      mailA.href = '#'
-      mailA.classList.add('pointer-events-none', 'opacity-40')
+  function smsBookingUrl(e164Phone, message) {
+    const normalized = normalizeContactPhone(e164Phone)
+    if (!normalized) return null
+    return `sms:${normalized}?body=${encodeURIComponent(message)}`
+  }
+
+  function formatSummaryWhen() {
+    const msgs = tBooking(getLocale())
+    if (isHourlyMode()) {
+      return hourlyStartEl?.value || '—'
     }
-    if (normalizedCompanyPhone) {
-      callA.href = `tel:${normalizedCompanyPhone}`
-      callA.classList.remove('pointer-events-none', 'opacity-40')
-    } else {
-      callA.href = '#'
-      callA.classList.add('pointer-events-none', 'opacity-40')
+    if (rideMode === 'schedule') {
+      return scheduleInput?.value
+        ? `${msgs.waWhenScheduled}: ${scheduleInput.value}`
+        : msgs.waWhenScheduled
     }
+    return msgs.waWhenRideNow
+  }
+
+  function formatSummaryPrice() {
+    if (isHourlyMode()) {
+      return `from €${hourlyCfg.rateEur}/h`
+    }
+    if (latestEstimate?.estimatedPrice != null) {
+      return `€${latestEstimate.estimatedPrice}`
+    }
+    return '—'
+  }
+
+  function fillTripSummary() {
+    const msgs = tBooking(getLocale())
+    const setText = (id, value) => {
+      const el = root.querySelector(id)
+      if (el) el.textContent = value
+    }
+    setText('#bk-sum-company', company.name || '—')
+    setText('#bk-sum-pickup', pickupEl.value.trim() || '—')
+    const dropRow = root.querySelector('#bk-sum-drop-row')
+    if (isHourlyMode()) {
+      dropRow?.classList.add('hidden')
+    } else {
+      dropRow?.classList.remove('hidden')
+      setText('#bk-sum-drop', dropEl.value.trim() || '—')
+    }
+    setText('#bk-sum-when', formatSummaryWhen())
+    setText('#bk-sum-vehicle', bookingCarTypeLabel(selectedCar, msgs))
+    setText('#bk-sum-price', formatSummaryPrice())
+  }
+
+  function showCompleteStep() {
+    fillTripSummary()
+    completeErrEl?.classList.add('hidden')
+    tripStepEl?.classList.add('hidden')
+    completeEl?.classList.remove('hidden')
+    completeEl?.setAttribute('aria-hidden', 'false')
+    ;(completeNameEl || completePhoneEl)?.focus()
+  }
+
+  function hideCompleteStep() {
+    completeEl?.classList.add('hidden')
+    completeEl?.setAttribute('aria-hidden', 'true')
+    tripStepEl?.classList.remove('hidden')
+    completeErrEl?.classList.add('hidden')
+  }
+
+  function passengerSafeError(err, fallback) {
+    const msgs = tBooking(getLocale())
+    const fb =
+      fallback ||
+      msgs.errBookingGeneric ||
+      'Something went wrong. Please try again.'
+    const code = String(err?.code || err?.body?.code || '').trim()
+    const m = String(err?.message || err || '').trim()
+    if (
+      code === 'PAST_RIDE_DATETIME' ||
+      /future pickup time|PAST_RIDE_DATETIME|ophaaltijd in de toekomst|heure de prise en charge future/i.test(m)
+    ) {
+      return msgs.errSchedulePast || 'Please choose a future pickup time.'
+    }
+    if (!m) return fb
+    if (/Too many attempts/i.test(m)) return m
+    if (/Please wait a moment|agree to the Terms|enter a valid mobile|Pick-up|drop-off|Security verification/i.test(m)) {
+      return m
+    }
+    if (/violates check|constraint|duplicate key|PGRST|supabase|column|relation|JWT|Internal server/i.test(m)) {
+      return fb
+    }
+    if (m.length > 140) return fb
+    return m
+  }
+
+  function showCompleteError(message) {
+    if (!completeErrEl) return
+    completeErrEl.textContent = passengerSafeError(message)
+    completeErrEl.classList.remove('hidden')
+  }
+
+  function passengerPhoneDigits() {
+    const e164 = passengerPhoneE164()
+    return e164 ? whatsappDigitsForWaMe(e164) : whatsappDigitsForWaMe(completePhoneEl?.value || '')
+  }
+
+  /** Valid E.164 from intl-tel-input, or empty. */
+  function passengerPhoneE164() {
+    if (passengerPhoneIti) {
+      try {
+        if (!passengerPhoneIti.isValidNumber()) return ''
+        const num = String(passengerPhoneIti.getNumber() || '').trim()
+        return /^\+[1-9]\d{7,14}$/.test(num) ? num : ''
+      } catch {
+        return ''
+      }
+    }
+    const raw = String(completePhoneEl?.value || '').trim()
+    return /^\+[1-9]\d{7,14}$/.test(raw) ? raw : ''
+  }
+
+  function passengerPickupName() {
+    return String(completeNameEl?.value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 80)
   }
 
   function bookingContactGate(requireTripFields) {
@@ -1052,6 +1746,13 @@ Estimate price: ${estimatePrice}`
           errEl.classList.remove('hidden')
           return false
         }
+        if (isDatetimeLocalInPast(startRaw)) {
+          errEl.textContent =
+            msgs.errSchedulePast || 'Please choose a future pickup time.'
+          errEl.classList.remove('hidden')
+          enforceScheduleMinAndDefault()
+          return false
+        }
         const hours = Number(hourlyHoursEl?.value)
         if (!Number.isFinite(hours) || hours < hourlyCfg.minHours) {
           errEl.textContent = String(msgs.errHourlyDuration).replace(
@@ -1067,6 +1768,21 @@ Estimate price: ${estimatePrice}`
           errEl.textContent = msgs.errAddresses
           errEl.classList.remove('hidden')
           return false
+        }
+        if (rideMode === 'schedule') {
+          const raw = scheduleInput?.value || ''
+          if (!raw) {
+            errEl.textContent = msgs.errSchedule || 'Please select date and time for scheduled ride.'
+            errEl.classList.remove('hidden')
+            return false
+          }
+          if (isDatetimeLocalInPast(raw)) {
+            errEl.textContent =
+              msgs.errSchedulePast || 'Please choose a future pickup time.'
+            errEl.classList.remove('hidden')
+            enforceScheduleMinAndDefault()
+            return false
+          }
         }
       }
     }
@@ -1084,6 +1800,7 @@ Estimate price: ${estimatePrice}`
       cancelPendingEstimate()
       estWrap?.classList.add('hidden')
       syncEstimateDisplay()
+      enforceScheduleMinAndDefault()
     }
     if (serviceStandardBtn && serviceHourlyBtn) {
       serviceStandardBtn.className = hourly ? bkSegOff : bkSegOn
@@ -1092,22 +1809,41 @@ Estimate price: ${estimatePrice}`
     refreshWaState()
   }
 
+  function enforceScheduleMinAndDefault() {
+    const min = toBelgiumDatetimeLocalValue(new Date())
+    const fallback = defaultFutureBelgiumDatetimeLocal(15)
+    if (scheduleInput) {
+      scheduleInput.min = min
+      if (!scheduleInput.value || isDatetimeLocalInPast(scheduleInput.value)) {
+        scheduleInput.value = fallback
+      }
+    }
+    if (hourlyStartEl) {
+      hourlyStartEl.min = min
+      if (!hourlyStartEl.value || isDatetimeLocalInPast(hourlyStartEl.value)) {
+        hourlyStartEl.value = fallback
+      }
+    }
+  }
+
   function refreshWaState() {
+    if (!bookBtn) return
     const puOk = !!pickupEl.value.trim()
+    const scheduleOk =
+      rideMode !== 'schedule' ||
+      (!!scheduleInput?.value && !isDatetimeLocalInPast(scheduleInput.value))
     const tripOk = isHourlyMode()
       ? puOk &&
         !!hourlyStartEl?.value &&
+        !isDatetimeLocalInPast(hourlyStartEl.value) &&
         Number(hourlyHoursEl?.value) >= hourlyCfg.minHours
-      : puOk && !!dropEl.value.trim()
-    const ok =
-      termsEl.checked &&
-      tripOk &&
-      !!companyWhatsAppDigits
-    waBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
-    BK_WA_DISABLED_CLASSES.forEach((cls) => waBtn.classList.toggle(cls, !ok))
-    BK_WA_ENABLED_CLASSES.forEach((cls) => waBtn.classList.toggle(cls, ok))
+      : puOk && !!dropEl.value.trim() && scheduleOk
+    const hasChannel = !!(companyWhatsAppDigits || normalizedCompanyPhone || company.email)
+    const ok = termsEl.checked && tripOk && hasChannel
+    bookBtn.setAttribute('aria-disabled', ok ? 'false' : 'true')
+    BK_BOOK_DISABLED_CLASSES.forEach((cls) => bookBtn.classList.toggle(cls, !ok))
+    BK_BOOK_ENABLED_CLASSES.forEach((cls) => bookBtn.classList.toggle(cls, ok))
     errEl.classList.add('hidden')
-    refreshContactLinks()
   }
 
   function syncRideTimingUi() {
@@ -1127,18 +1863,56 @@ Estimate price: ${estimatePrice}`
           : 'border-slate-200 bg-slate-50 font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-300')
     }
     if (scheduleWrap) scheduleWrap.classList.toggle('hidden', isNow)
+    if (!isNow) enforceScheduleMinAndDefault()
   }
 
   function bookingFieldHasConfirmedPlace(state, inputEl) {
     const v = String(inputEl?.value || '').trim()
     const c = state?.committed
-    return typeof c === 'string' && c.length > 0 && v === c
+    return (
+      typeof c === 'string' &&
+      c.length > 0 &&
+      v === c &&
+      Number.isFinite(state?.lat) &&
+      Number.isFinite(state?.lng)
+    )
+  }
+
+  function bothAddressesTyped() {
+    return !!pickupEl.value.trim() && !!dropEl.value.trim()
+  }
+
+  /** Confirmed pick, or typed text complete enough to attempt fallback (never mid-"rue de"). */
+  function fieldReadyForEstimateAttempt(state, inputEl) {
+    if (bookingFieldHasConfirmedPlace(state, inputEl)) return true
+    const text = String(inputEl?.value || '').trim()
+    if (!text) return false
+    return !isTypedAddressIncomplete(text)
+  }
+
+  function bothAddressesReadyForEstimateAttempt() {
+    return (
+      fieldReadyForEstimateAttempt(pickupPlacesState, pickupEl) &&
+      fieldReadyForEstimateAttempt(dropoffPlacesState, dropEl)
+    )
+  }
+
+  function setEstimateHintMessage(text) {
+    if (!estHint) return
+    const t = String(text || '').trim()
+    if (!t) {
+      estHint.classList.add('hidden')
+      estHint.classList.remove('flex')
+      return
+    }
+    estHint.textContent = t
+    estHint.classList.remove('hidden')
+    estHint.classList.add('flex')
   }
 
   function syncEstimateDisplay() {
     if (isHourlyMode()) {
-      estHint?.classList.add('hidden')
-      estHint?.classList.remove('flex')
+      setEstimateHintMessage('')
       estUnavail?.classList.add('hidden')
       estUnavail?.classList.remove('flex')
       estWrap?.classList.add('hidden')
@@ -1150,36 +1924,43 @@ Estimate price: ${estimatePrice}`
     const doText = dropEl.value.trim()
     const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
     const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
+    const msgs = tBooking(getLocale())
 
     estUnavail?.classList.add('hidden')
     estUnavail?.classList.remove('flex')
 
     if (!puText && !doText) {
-      estHint?.classList.add('hidden')
-      estHint?.classList.remove('flex')
+      setEstimateHintMessage('')
       estWrap?.classList.add('hidden')
       latestEstimate = null
       return
     }
 
     if (!puText || !doText) {
-      estHint?.classList.add('hidden')
-      estHint?.classList.remove('flex')
+      setEstimateHintMessage('')
       estWrap?.classList.add('hidden')
       latestEstimate = null
       return
     }
 
     if (!pickupOk || !dropoffOk) {
-      estHint?.classList.remove('hidden')
-      estHint?.classList.add('flex')
+      const incompleteTyped =
+        (!pickupOk && puText && isTypedAddressIncomplete(puText)) ||
+        (!dropoffOk && doText && isTypedAddressIncomplete(doText))
+      // Incomplete typed text → ask to complete/select; otherwise soft hint until confirmed
+      setEstimateHintMessage(
+        incompleteTyped
+          ? msgs.estimateAddressUnconfirmed ||
+              "We couldn't confirm this address. Please select the correct address from the suggestions."
+          : msgs.estimateSelectHint ||
+              'Enter pickup and destination to see an estimated price.'
+      )
       estWrap?.classList.add('hidden')
       latestEstimate = null
       return
     }
 
-    estHint?.classList.add('hidden')
-    estHint?.classList.remove('flex')
+    setEstimateHintMessage('')
   }
 
   function showEstimateUnavailable(reason, detail) {
@@ -1219,33 +2000,61 @@ Estimate price: ${estimatePrice}`
   }
 
   async function refreshEstimate() {
-    syncEstimateDisplay()
-    if (isHourlyMode()) return
-
-    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
-    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
-    if (!pickupOk || !dropoffOk) return
-
-    const cacheKey = estimateCacheKey()
-    const cached = estimateSessionCache.get(cacheKey)
-    if (cached) {
-      applyEstimateToUi(cached)
+    if (isHourlyMode()) {
+      syncEstimateDisplay()
+      return
+    }
+    if (!bothAddressesTyped()) {
+      syncEstimateDisplay()
       return
     }
 
+    const msgs = tBooking(getLocale())
     const reqId = ++estimateRequestId
     estWrap?.classList.remove('hidden')
     estUnavail?.classList.add('hidden')
     estUnavail?.classList.remove('flex')
     estLoading?.classList.remove('hidden')
     estBody?.classList.add('hidden')
+    setEstimateHintMessage('')
 
-    const useCoords =
-      Number.isFinite(pickupPlacesState.lat) &&
-      Number.isFinite(pickupPlacesState.lng) &&
-      Number.isFinite(dropoffPlacesState.lat) &&
-      Number.isFinite(dropoffPlacesState.lng)
     try {
+      // Autocomplete selection preferred; typed text → Geocoder fallback (deduped)
+      const [pickupResolved, dropoffResolved] = await Promise.all([
+        ensureBookingFieldResolved(pickupEl, pickupPlacesState),
+        ensureBookingFieldResolved(dropEl, dropoffPlacesState),
+      ])
+      if (reqId !== estimateRequestId) return
+
+      if (!pickupResolved.ok || !dropoffResolved.ok) {
+        latestEstimate = null
+        estWrap?.classList.add('hidden')
+        estLoading?.classList.add('hidden')
+        setEstimateHintMessage(
+          msgs.estimateAddressUnconfirmed ||
+            "We couldn't confirm this address. Please select the correct address from the suggestions."
+        )
+        console.warn('[taxio-booking] Address resolve failed', {
+          pickup: pickupResolved.code,
+          dropoff: dropoffResolved.code,
+        })
+        return
+      }
+
+      syncEstimateDisplay()
+
+      const cacheKey = estimateCacheKey()
+      const cached = estimateSessionCache.get(cacheKey)
+      if (cached) {
+        applyEstimateToUi(cached)
+        return
+      }
+
+      const useCoords =
+        Number.isFinite(pickupPlacesState.lat) &&
+        Number.isFinite(pickupPlacesState.lng) &&
+        Number.isFinite(dropoffPlacesState.lat) &&
+        Number.isFinite(dropoffPlacesState.lng)
       if (!useCoords) {
         showEstimateUnavailable('missing_coordinates')
         return
@@ -1280,9 +2089,8 @@ Estimate price: ${estimatePrice}`
 
   function queueEstimate() {
     if (isHourlyMode()) return
-    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
-    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
-    if (!pickupOk || !dropoffOk) return
+    // Do not geocode / estimate from partial keystrokes ("rue de", city-only, etc.)
+    if (!bothAddressesReadyForEstimateAttempt()) return
     if (estimateTimer) window.clearTimeout(estimateTimer)
     estimateTimer = window.setTimeout(() => {
       estimateTimer = null
@@ -1295,9 +2103,7 @@ Estimate price: ${estimatePrice}`
   function requestEstimateIfReady() {
     syncEstimateDisplay()
     if (isHourlyMode()) return
-    const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
-    const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
-    if (!pickupOk || !dropoffOk) {
+    if (!bothAddressesReadyForEstimateAttempt()) {
       cancelPendingEstimate()
       return
     }
@@ -1344,17 +2150,29 @@ Estimate price: ${estimatePrice}`
   rideNowBtn?.addEventListener('click', () => {
     rideMode = 'now'
     syncRideTimingUi()
+    refreshWaState()
   })
   rideScheduleBtn?.addEventListener('click', () => {
     rideMode = 'schedule'
     syncRideTimingUi()
+    refreshWaState()
+  })
+
+  enforceScheduleMinAndDefault()
+  ;[scheduleInput, hourlyStartEl].forEach((el) => {
+    if (!el) return
+    el.addEventListener('focus', enforceScheduleMinAndDefault)
+    el.addEventListener('click', enforceScheduleMinAndDefault)
   })
 
   ;[pickupEl, dropEl, termsEl, scheduleInput, hourlyStartEl, hourlyHoursEl, hourlyNotesEl].forEach(
     (el) => {
       if (!el) return
       el.addEventListener('input', refreshWaState)
-      el.addEventListener('change', refreshWaState)
+      el.addEventListener('change', () => {
+        enforceScheduleMinAndDefault()
+        refreshWaState()
+      })
     }
   )
   refreshWaState()
@@ -1400,11 +2218,13 @@ Estimate price: ${estimatePrice}`
     const pickupOk = bookingFieldHasConfirmedPlace(pickupPlacesState, pickupEl)
     const dropoffOk = bookingFieldHasConfirmedPlace(dropoffPlacesState, dropEl)
     if (!pickupOk || !dropoffOk) {
+      // Keep estimate cleared until autocomplete commit or fallback resolve finishes
       cancelPendingEstimate()
       latestEstimate = null
     }
     syncEstimateDisplay()
-    if (pickupOk && dropoffOk && !isHourlyMode()) {
+    // Fallback geocode only inside refreshEstimate / BOOK — and only once typed text looks complete
+    if (bothAddressesReadyForEstimateAttempt() && !isHourlyMode()) {
       queueEstimate()
     }
   }
@@ -1480,11 +2300,8 @@ Estimate price: ${estimatePrice}`
         permState = null
       }
 
-      if (permState === 'denied') {
-        setPickupLocateMessage(msgs.locateDenied)
-        return
-      }
-
+      // Do not hard-block on Permissions API "denied" — some browsers/WebViews misreport it.
+      // Only treat denial from getCurrentPosition (code 1) as definitive.
       if (permState === 'prompt') {
         const hint = String(msgs.locatePromptHint || '').trim()
         if (hint) setPickupLocateMessage(hint)
@@ -1493,7 +2310,7 @@ Estimate price: ${estimatePrice}`
       const geoOptions =
         permState === 'granted'
           ? { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 }
-          : { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
+          : { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
 
       locating = true
       locatePickupBtn.setAttribute('aria-busy', 'true')
@@ -1629,121 +2446,56 @@ Estimate price: ${estimatePrice}`
     w.document.close()
   })
 
-  mailA.addEventListener('click', (e) => {
-    if (!company.email || mailA.classList.contains('pointer-events-none')) return
-    if (!bookingContactGate(false)) {
-      e.preventDefault()
-      return
-    }
-    if (!isDemo) {
-      trackCompanyAnalyticsEvent({
-        companyId: company.id,
-        slug,
-        eventType: 'email_click',
-        source: parseBookingAnalyticsSource(window.location.search),
-      })
-    }
-  })
-
-  callA.addEventListener('click', (e) => {
-    if (!normalizedCompanyPhone || callA.classList.contains('pointer-events-none')) return
-    if (!bookingContactGate(false)) {
-      e.preventDefault()
-      return
-    }
-    if (!isDemo) {
-      trackCompanyAnalyticsEvent({
-        companyId: company.id,
-        slug,
-        eventType: 'call_click',
-        source: parseBookingAnalyticsSource(window.location.search),
-      })
-    }
-  })
-
-  waBtn.addEventListener('click', (e) => {
-    e.preventDefault()
-    const msgs = tBooking(getLocale())
-    const waDisabled = waBtn.getAttribute('aria-disabled') === 'true'
-    if (waDisabled) return
-    if (isDemo) {
-      errEl.textContent = msgs.demoNoWhatsapp
-      errEl.classList.remove('hidden')
-      return
-    }
-    if (!bookingContactGate(true)) return
-
+  function tripDraftFingerprint() {
     const pu = pickupEl.value.trim()
     const hourlyActive = isHourlyMode()
     const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
-    const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
-
-    if (!companyWhatsAppDigits) {
-      errEl.textContent = msgs.errNoPhone
-      errEl.classList.remove('hidden')
-      return
-    }
-    let rideDateIso = null
+    let rideDateIso = 'ride_now'
     if (hourlyActive) {
       const raw = hourlyStartEl?.value || ''
       const d = new Date(raw)
-      if (Number.isNaN(d.getTime())) {
-        errEl.textContent = msgs.errHourlyStart
-        errEl.classList.remove('hidden')
-        return
-      }
-      rideDateIso = d.toISOString()
+      rideDateIso = Number.isNaN(d.getTime()) ? 'invalid' : d.toISOString()
     } else if (rideMode === 'schedule') {
       const raw = scheduleInput?.value || ''
-      if (!raw) {
-        errEl.textContent = msgs.errSchedule
-        errEl.classList.remove('hidden')
-        return
-      }
-      const d = new Date(raw)
-      if (Number.isNaN(d.getTime())) {
-        errEl.textContent = msgs.errScheduleBad
-        errEl.classList.remove('hidden')
-        return
-      }
-      rideDateIso = d.toISOString()
+      const d = raw ? new Date(raw) : null
+      rideDateIso = d && !Number.isNaN(d.getTime()) ? d.toISOString() : 'schedule'
     }
-    const estimateLineForNotes = latestEstimate
-      ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
-      : ''
-    const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
-    const fingerprint = [
+    // Do not include estimate price — updates would spawn duplicate drafts.
+    return [
       company.id,
       hourlyActive ? 'hourly' : 'standard',
       pu.toLowerCase(),
       hourlyActive ? '' : doff.toLowerCase(),
       String(selectedCar || ''),
       hourlyActive ? String(hourlyHoursEl?.value || '') : '',
-      String(rideDateIso || 'ride_now'),
+      rideDateIso,
     ].join('|')
-    const bookingMessageText = buildWhatsappBookingMessage()
-    const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
-    if (!url) {
-      errEl.textContent = msgs.errNoPhone
-      errEl.classList.remove('hidden')
-      return
+  }
+
+  function buildDraftPayload() {
+    const pu = pickupEl.value.trim()
+    const hourlyActive = isHourlyMode()
+    const doff = hourlyActive ? HOURLY_DROPOFF_PLACEHOLDER : dropEl.value.trim()
+    const honeypot = String(root.querySelector('#bk-hp')?.value || '').trim()
+    let rideDateIso = null
+    if (hourlyActive) {
+      const d = new Date(hourlyStartEl?.value || '')
+      if (!Number.isNaN(d.getTime())) rideDateIso = d.toISOString()
+    } else if (rideMode === 'schedule') {
+      const d = new Date(scheduleInput?.value || '')
+      if (!Number.isNaN(d.getTime())) rideDateIso = d.toISOString()
     }
-
-    const waSource = parseBookingAnalyticsSource(window.location.search)
-    trackCompanyAnalyticsEvent({
-      companyId: company.id,
-      slug,
-      eventType: 'whatsapp_click',
-      source: waSource,
-    })
-
-    openWaMeUrl(url)
-
+    const estimateLineForNotes = latestEstimate
+      ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+      : ''
+    const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
     const logNotes = hourlyActive
-      ? `WhatsApp by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
-      : `WhatsApp quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
+      ? `Draft by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+      : `Draft quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
 
-    void createQuickBookingLog({
+    const pickupLat = Number.isFinite(pickupPlacesState.lat) ? pickupPlacesState.lat : null
+    const pickupLng = Number.isFinite(pickupPlacesState.lng) ? pickupPlacesState.lng : null
+    return {
       company_id: company.id,
       pickup_address: pu,
       dropoff_address: doff,
@@ -1752,25 +2504,453 @@ Estimate price: ${estimatePrice}`
       duration_hours: hourlyActive ? Number(hourlyHoursEl?.value) : null,
       hourly_rate_eur: hourlyActive ? hourlyCfg.rateEur : null,
       hourly_min_hours: hourlyActive ? hourlyCfg.minHours : null,
+      estimated_price_eur:
+        !hourlyActive && latestEstimate?.estimatedPrice != null
+          ? latestEstimate.estimatedPrice
+          : null,
+      price_currency: 'EUR',
       customer_name: 'Booking request',
       customer_phone: '',
       customer_email: null,
       ride_datetime: rideDateIso,
+      pickup_lat: pickupLat,
+      pickup_lng: pickupLng,
       notes: logNotes,
       termsAcceptance: {
         terms_accepted: true,
         accepted_at: new Date().toISOString(),
         terms_version: TERMS_VERSION_BOOKING_RIDER,
       },
+      passenger_locale: getLocale(),
       turnstileToken,
       website: honeypot,
       formStartedAt,
-      submissionFingerprint: fingerprint,
+      submissionFingerprint: tripDraftFingerprint(),
       humanConfirmed: true,
-    }).then(({ error: bookingErr }) => {
-      if (bookingErr) {
-        console.warn('[createQuickBookingLog]', bookingErr.message || bookingErr)
+    }
+  }
+
+  function startDraftPrepare() {
+    const fp = tripDraftFingerprint()
+    // Single-flight: reuse in-flight or completed draft for the same trip.
+    if (draftPrep?.fp === fp && draftPrep.data?.id && draftPrep.data?.booking_reference) {
+      return Promise.resolve(draftPrep.data)
+    }
+    if (draftPrep?.fp === fp && draftPrep.promise) return draftPrep.promise
+    if (activatedBookingId && draftPrep?.fp === fp && draftPrep.data) {
+      return Promise.resolve(draftPrep.data)
+    }
+    // Trip changed — allow a new draft (server also reuses matching drafts).
+    if (draftPrep?.fp !== fp) {
+      activatedBookingId = null
+      frozenBookingReference = ''
+    }
+    const promise = (async () => {
+      try {
+        const { error, data } = await createDraftBookingLog(buildDraftPayload())
+        if (error) throw error
+        const prepared = {
+          id: String(data?.id || ''),
+          booking_reference: String(data?.booking_reference || '').trim(),
+        }
+        if (!prepared.id || !prepared.booking_reference) {
+          throw new Error('Could not prepare booking.')
+        }
+        if (draftPrep?.fp === fp) {
+          draftPrep = { fp, promise, data: prepared }
+        }
+        frozenBookingReference = prepared.booking_reference
+        return prepared
+      } catch (err) {
+        if (draftPrep?.fp === fp) draftPrep = null
+        throw err
       }
-    })
+    })()
+    draftPrep = { fp, promise }
+    return promise
+  }
+
+  async function ensureDraftReady() {
+    const fp = tripDraftFingerprint()
+    if (draftPrep?.fp !== fp || !draftPrep.promise) {
+      return startDraftPrepare()
+    }
+    return draftPrep.promise
+  }
+
+  bookBtn?.addEventListener('click', () => {
+    const msgs = tBooking(getLocale())
+    if (bookBtn.getAttribute('aria-disabled') === 'true') return
+    if (isDemo) {
+      errEl.textContent = msgs.demoNoWhatsapp
+      errEl.classList.remove('hidden')
+      return
+    }
+    // Opening completion must NOT start the 25s timer — draft prepare runs in background.
+    if (!bookingContactGate(true)) return
+
+    const openReview = () => {
+      showCompleteStep()
+      setChannelButtonsLocked(false)
+      void startDraftPrepare().catch((err) => {
+        console.warn('[createDraftBookingLog]', err?.message || err)
+        showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
+      })
+    }
+
+    if (isHourlyMode()) {
+      openReview()
+      return
+    }
+
+    // Resolve typed pickup/destination (if needed) before review so estimate/price can show
+    void (async () => {
+      bookBtn.setAttribute('aria-disabled', 'true')
+      try {
+        const [pickupResolved, dropoffResolved] = await Promise.all([
+          ensureBookingFieldResolved(pickupEl, pickupPlacesState),
+          ensureBookingFieldResolved(dropEl, dropoffPlacesState),
+        ])
+        if (!pickupResolved.ok || !dropoffResolved.ok) {
+          errEl.textContent =
+            msgs.estimateAddressUnconfirmed ||
+            "We couldn't confirm this address. Please select the correct address from the suggestions."
+          errEl.classList.remove('hidden')
+          refreshWaState()
+          return
+        }
+        try {
+          await refreshEstimate()
+        } catch {
+          /* review still allowed; price may be unavailable */
+        }
+        openReview()
+      } finally {
+        refreshWaState()
+      }
+    })()
+  })
+
+  root.querySelector('#bk-complete-edit')?.addEventListener('click', () => {
+    hideCompleteStep()
+  })
+  root.querySelector('#bk-complete-backdrop')?.addEventListener('click', () => {
+    hideCompleteStep()
+  })
+
+  function launchCompanyChannel(channel, bookingReference) {
+    const bookingMessageText = buildWhatsappBookingMessage(bookingReference || null)
+    const analyticsSource = parseBookingAnalyticsSource(window.location.search)
+
+    if (channel === 'whatsapp') {
+      const url = waMeBookingUrl(companyWhatsAppDigits, bookingMessageText)
+      if (!url) return { ok: false, errorKey: 'errNoPhone' }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'whatsapp_click',
+        source: analyticsSource,
+      })
+      openWaMeUrl(url)
+      return { ok: true }
+    }
+
+    if (channel === 'sms') {
+      const url = smsBookingUrl(normalizedCompanyPhone, bookingMessageText)
+      if (!url) return { ok: false, errorKey: 'errNoCompanyPhone' }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'call_click',
+        source: analyticsSource,
+      })
+      window.location.assign(url)
+      return { ok: true }
+    }
+
+    if (channel === 'email') {
+      const mailUrl = buildMailtoHref(bookingReference || null)
+      if (!mailUrl || mailUrl === '#') return { ok: false, errorKey: 'errNoEmail' }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'email_click',
+        source: analyticsSource,
+      })
+      window.location.assign(mailUrl)
+      return { ok: true }
+    }
+
+    if (channel === 'call') {
+      if (!normalizedCompanyPhone) return { ok: false, errorKey: 'errNoCompanyPhone' }
+      trackCompanyAnalyticsEvent({
+        companyId: company.id,
+        slug,
+        eventType: 'call_click',
+        source: analyticsSource,
+      })
+      window.location.assign(`tel:${normalizedCompanyPhone}`)
+      return { ok: true }
+    }
+
+    return { ok: false, errorKey: 'errSecurityRetry' }
+  }
+
+  /** Legacy channel launcher kept (unused by primary trip flow). */
+  async function finalizeBookingAndOpenChannel(channel) {
+    const msgs = tBooking(getLocale())
+    if (channelBusy) return
+    completeErrEl?.classList.add('hidden')
+
+    if (!bookingContactGate(true)) {
+      hideCompleteStep()
+      return
+    }
+
+    const passengerDigits = passengerPhoneDigits()
+    if (!passengerDigits) {
+      showCompleteError(msgs.errMobileNumber || 'Please enter a valid mobile number.')
+      return
+    }
+
+    if (channel === 'whatsapp' && !companyWhatsAppDigits) {
+      showCompleteError(msgs.errNoPhone)
+      return
+    }
+    if ((channel === 'sms' || channel === 'call') && !normalizedCompanyPhone) {
+      showCompleteError(msgs.errNoCompanyPhone || msgs.errNoPhone)
+      return
+    }
+    if (channel === 'email' && !company.email) {
+      showCompleteError(msgs.errNoEmail || 'This company has no email address.')
+      return
+    }
+
+    channelBusy = true
+    setChannelButtonsLocked(true)
+
+    try {
+      if (activatedBookingId && frozenBookingReference) {
+        const launched = launchCompanyChannel(channel, frozenBookingReference)
+        if (!launched.ok) {
+          showCompleteError(msgs[launched.errorKey] || msgs.errSecurityRetry)
+          setChannelButtonsLocked(false)
+        }
+        return
+      }
+
+      if (activateInflight) {
+        await activateInflight
+        if (activatedBookingId && frozenBookingReference) {
+          launchCompanyChannel(channel, frozenBookingReference)
+          return
+        }
+      }
+
+      const draft = await ensureDraftReady()
+      const bookingReference = String(draft.booking_reference || frozenBookingReference || '').trim()
+      if (!draft.id || !bookingReference) {
+        showCompleteError(msgs.errSecurityRetry || 'Could not create booking.')
+        setChannelButtonsLocked(false)
+        return
+      }
+      frozenBookingReference = bookingReference
+
+      const channelLabel =
+        channel === 'whatsapp'
+          ? 'WhatsApp'
+          : channel === 'sms'
+            ? 'SMS'
+            : channel === 'email'
+              ? 'Email'
+              : 'Call'
+      const hourlyActive = isHourlyMode()
+      const estimateLineForNotes = latestEstimate
+        ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+        : ''
+      const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
+      const logNotes = hourlyActive
+        ? `${channelLabel} by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+        : `${channelLabel} quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
+
+      activateInflight = (async () => {
+        const run = () =>
+          activateDraftBookingLog({
+            booking_id: draft.id,
+            company_id: company.id,
+            customer_phone: passengerDigits,
+            customer_name: pickupName || 'Booking request',
+            notes: logNotes,
+            passenger_locale: getLocale(),
+          })
+        let { error: actErr, data: actData } = await run()
+        if (actErr) ({ error: actErr, data: actData } = await run())
+        if (actErr) throw actErr
+        activatedBookingId = String(actData?.id || draft.id)
+        if (actData?.booking_reference) {
+          frozenBookingReference = String(actData.booking_reference)
+        }
+        return actData
+      })()
+
+      const launched = launchCompanyChannel(channel, bookingReference)
+      if (!launched.ok) {
+        showCompleteError(msgs[launched.errorKey] || msgs.errSecurityRetry)
+        setChannelButtonsLocked(false)
+        activateInflight = null
+        return
+      }
+
+      try {
+        await activateInflight
+      } catch (actErr) {
+        console.warn('[activateDraftBookingLog]', actErr?.message || actErr)
+        showCompleteError(passengerSafeError(actErr, msgs.errBookingGeneric))
+        setChannelButtonsLocked(false)
+        activateInflight = null
+        return
+      }
+      activateInflight = null
+    } catch (err) {
+      console.warn('[finalizeBookingAndOpenChannel]', err?.message || err)
+      showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
+      setChannelButtonsLocked(false)
+      activateInflight = null
+    } finally {
+      channelBusy = false
+    }
+  }
+
+  /** Review popup → validate contact → activate → /trip/:token. */
+  async function finalizeBookingAndGoToTrip() {
+    const msgs = tBooking(getLocale())
+    if (channelBusy) return
+    completeErrEl?.classList.add('hidden')
+
+    if (!bookingContactGate(true)) {
+      hideCompleteStep()
+      return
+    }
+
+    const pickupName = passengerPickupName()
+    if (!pickupName || pickupName.length < 2) {
+      showCompleteError(msgs.errPickupName || 'Please enter a name for pickup.')
+      completeNameEl?.focus()
+      return
+    }
+
+    const phoneE164 = passengerPhoneE164()
+    if (!phoneE164) {
+      showCompleteError(msgs.errMobileNumber || 'Please enter a valid mobile number.')
+      completePhoneEl?.focus()
+      return
+    }
+
+    channelBusy = true
+    setChannelButtonsLocked(true)
+    const continueBtn = root.querySelector('#bk-continue-trip')
+    if (continueBtn) continueBtn.disabled = true
+
+    try {
+      if (activateInflight) {
+        const prior = await activateInflight
+        const tok = String(prior?.trip_token || prior?.passenger_trip_token || '').trim()
+        if (tok) {
+          savePassengerActiveTrip({
+            token: tok,
+            bookingReference: prior?.booking_reference || frozenBookingReference || null,
+            companySlug: company.slug || slug || null,
+            companyName: company.name || null,
+          })
+          // Same-origin relative path only (token already returned by activate)
+          window.location.assign(`/trip/${encodeURIComponent(tok)}`)
+          return
+        }
+      }
+
+      const draft = await ensureDraftReady()
+      const bookingReference = String(draft.booking_reference || frozenBookingReference || '').trim()
+      if (!draft.id) {
+        showCompleteError(msgs.errSecurityRetry || 'Could not create booking.')
+        setChannelButtonsLocked(false)
+        if (continueBtn) continueBtn.disabled = false
+        return
+      }
+      if (bookingReference) frozenBookingReference = bookingReference
+
+      const hourlyActive = isHourlyMode()
+      const estimateLineForNotes = latestEstimate
+        ? `\nEstimate: ${latestEstimate.distanceKm} km, ${latestEstimate.durationMin} min, €${latestEstimate.estimatedPrice}`
+        : ''
+      const hourlyUserNotes = String(hourlyNotesEl?.value || '').trim()
+      const logNotes = hourlyActive
+        ? `Live trip by-hour · ${selectedCar} · ${hourlyUserNotes || '—'}`
+        : `Live trip quick book · ${selectedCar} · ${rideMode}${estimateLineForNotes}`
+
+      activateInflight = (async () => {
+        const run = () =>
+          activateDraftBookingLog({
+            booking_id: draft.id,
+            company_id: company.id,
+            customer_phone: phoneE164,
+            customer_name: pickupName,
+            notes: logNotes,
+            passenger_locale: getLocale(),
+          })
+        let { error: actErr, data: actData } = await run()
+        if (actErr) ({ error: actErr, data: actData } = await run())
+        if (actErr) throw actErr
+        activatedBookingId = String(actData?.id || draft.id)
+        if (actData?.booking_reference) {
+          frozenBookingReference = String(actData.booking_reference)
+        }
+        return actData
+      })()
+
+      const actData = await activateInflight
+      activateInflight = null
+      const tripToken = String(actData?.trip_token || actData?.passenger_trip_token || '').trim()
+      if (tripToken) {
+        savePassengerActiveTrip({
+          token: tripToken,
+          bookingReference: actData?.booking_reference || frozenBookingReference || null,
+          companySlug: company.slug || slug || null,
+          companyName: company.name || null,
+        })
+        // Same-origin relative redirect only — do not use absolute trip_url for browser nav
+        // (API origin fallback can point at taxio.be). trip_url still returned for WhatsApp/external.
+        window.location.assign(`/trip/${encodeURIComponent(tripToken)}`)
+        return
+      }
+      showCompleteError(msgs.errBookingGeneric || 'Could not open your trip page.')
+      setChannelButtonsLocked(false)
+      if (continueBtn) continueBtn.disabled = false
+    } catch (err) {
+      console.warn('[finalizeBookingAndGoToTrip]', err?.message || err)
+      showCompleteError(passengerSafeError(err, msgs.errBookingGeneric))
+      setChannelButtonsLocked(false)
+      activateInflight = null
+      if (continueBtn) continueBtn.disabled = false
+    } finally {
+      channelBusy = false
+    }
+  }
+
+  root.querySelector('#bk-continue-trip')?.addEventListener('click', () => {
+    void finalizeBookingAndGoToTrip()
+  })
+
+  // Legacy channel handlers retained (sheet hidden); do not use as primary path.
+  root.querySelector('#bk-channel-whatsapp')?.addEventListener('click', () => {
+    void finalizeBookingAndOpenChannel('whatsapp')
+  })
+  root.querySelector('#bk-channel-sms')?.addEventListener('click', () => {
+    void finalizeBookingAndOpenChannel('sms')
+  })
+  root.querySelector('#bk-channel-email')?.addEventListener('click', () => {
+    void finalizeBookingAndOpenChannel('email')
+  })
+  root.querySelector('#bk-channel-call')?.addEventListener('click', () => {
+    void finalizeBookingAndOpenChannel('call')
   })
 }

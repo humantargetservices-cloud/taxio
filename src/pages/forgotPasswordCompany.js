@@ -15,6 +15,12 @@ function resetPasswordRedirectUrl() {
     host.endsWith('.localhost') ||
     host.endsWith('.local')
 
+  const isStaging =
+    String(import.meta.env.VITE_TAXIO_STAGING || '')
+      .trim()
+      .toLowerCase() === 'true'
+
+  if (isStaging && origin) return `${origin}/reset-password`
   if (import.meta.env.DEV && isLocal && origin) return `${origin}/reset-password`
   return PRODUCTION_RESET_URL
 }

@@ -14,6 +14,26 @@ import {
   removeCompanyLogo,
   DEFAULT_PRICING,
 } from '../lib/api.js'
+import { tripPriceLabelFromBooking } from '../lib/rescuePrice.js'
+import {
+  setActiveTripsRefreshHandler,
+  startRescueNotifications,
+  stopRescueNotifications,
+} from '../lib/rescueNotifications.js'
+import {
+  completeCompanyTrip,
+  listRescueOpportunitiesForCompany,
+  markDriverArrived,
+  markDriverOnTheWay,
+} from '../lib/rescue.js'
+import {
+  deriveActiveTrips,
+  deriveCompletedTrips,
+  enrichActiveTripsWithWinnerDetails,
+  renderActiveTripItemHtml,
+  renderCompletedTripItemHtml,
+  renderCurrentTripSheetBodyHtml,
+} from '../lib/activeTrips.js'
 import { signOutEverywhere } from '../lib/auth.js'
 import { formatDateTime } from '../lib/format.js'
 import { escapeHtml } from '../lib/html.js'
@@ -45,6 +65,13 @@ import {
   isOperatorShortcutComplete,
 } from '../lib/pwaInstallPrompt.js'
 import { applyCompanyPwaIdentity, buildPwaPromptStrings, prefetchCompanyManifest } from '../lib/companyPwa.js'
+import { isTaxioStagingClient } from '../lib/companyPush.js'
+import {
+  associateOneSignalCompany,
+  enableOneSignalTripNotifications,
+  resolveOneSignalPushUiMode,
+  softSyncOneSignalTripNotifications,
+} from '../lib/oneSignalPush.js'
 
 const dashState = {
   tab: 'overview',
@@ -52,7 +79,33 @@ const dashState = {
   editingCarId: null,
   drawerOpen: false,
   qrOpen: false,
+  activeTripsExpanded: false,
+  completedTripsExpanded: false,
+  /** @type {null | { gmapsHref: string, wazeHref: string }} */
+  navSheet: null,
+  softNotice: null,
+  /** @type {string | null} open Current Trip sheet trip id */
+  tripSheetId: null,
 }
+
+/** Invalidates overlapping mounts (tab switches / concurrent loads). */
+let dashMountGen = 0
+
+/**
+ * Last successful dashboard data snapshot for local UI remounts (tabs/drawer/QR)
+ * without repeating the startup network waterfall.
+ * @type {null | {
+ *   session: object,
+ *   profile: object | null,
+ *   company: object,
+ *   cars: any[],
+ *   bookings: any[],
+ *   rescueOpportunities: any[],
+ *   activeTrips: any[],
+ *   pushMode: string,
+ * }}
+ */
+let dashDataCache = null
 
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
 const DASH_SHELL =
@@ -266,6 +319,141 @@ function renderQrSheet(td, bookPublicUrl, bookingQrSrc, open) {
   </div>`
 }
 
+function renderNavSheet(td, sheet) {
+  const open = !!(sheet && (sheet.gmapsHref || sheet.wazeHref))
+  const title = td.activeTripsNavigateTitle || td.activeTripsNavigate || 'Navigate to pickup'
+  const cancel = td.activeTripsNavCancel || 'Cancel'
+  const option =
+    'flex min-h-[48px] w-full items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
+  return `<div id="dash-nav-sheet" class="fixed inset-0 z-[70] ${open ? '' : 'pointer-events-none hidden'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(
+    title
+  )}">
+    <div id="dash-nav-backdrop" class="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"></div>
+    <div class="absolute bottom-0 left-0 right-0 mx-auto max-w-lg rounded-t-2xl border border-gray-200/80 bg-white p-4 shadow-[0_-8px_32px_rgba(15,23,42,0.14)] dark:border-slate-700/60 dark:bg-slate-900 sm:p-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div class="mx-auto mb-3 h-1 w-10 rounded-full bg-gray-200 dark:bg-slate-700" aria-hidden="true"></div>
+      <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(title)}</h2>
+      <div class="mt-3 space-y-2">
+        ${
+          sheet?.gmapsHref
+            ? `<a href="${escapeHtml(sheet.gmapsHref)}" target="_blank" rel="noopener noreferrer" data-nav-choice class="${option}">${icon.mapPin(
+                'h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400'
+              )}<span>${escapeHtml(td.activeTripsGoogleMaps || 'Google Maps')}</span></a>`
+            : ''
+        }
+        ${
+          sheet?.wazeHref
+            ? `<a href="${escapeHtml(sheet.wazeHref)}" target="_blank" rel="noopener noreferrer" data-nav-choice class="${option}">${icon.crosshair(
+                'h-4 w-4 shrink-0 text-cyan-600 dark:text-cyan-400'
+              )}<span>${escapeHtml(td.activeTripsWaze || 'Waze')}</span></a>`
+            : ''
+        }
+        <button type="button" id="dash-nav-cancel" class="flex min-h-[44px] w-full items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">${escapeHtml(
+          cancel
+        )}</button>
+      </div>
+    </div>
+  </div>`
+}
+
+const TRIP_SHEET_CLOSED_KEY = 'taxio_trip_sheet_closed'
+const TRIP_SHEET_AUTO_KEY = 'taxio_auto_open_trip'
+const TRIP_SHEET_AUTO_DONE_KEY = 'taxio_trip_sheet_auto_done'
+
+function readTripSheetIdSet(storageKey) {
+  try {
+    const raw = sessionStorage.getItem(storageKey)
+    const arr = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(arr) ? arr.map(String) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeTripSheetIdSet(storageKey, set) {
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify([...set]))
+  } catch {
+    /* ignore */
+  }
+}
+
+function markTripSheetClosed(tripId) {
+  const id = String(tripId || '').trim()
+  if (!id) return
+  const closed = readTripSheetIdSet(TRIP_SHEET_CLOSED_KEY)
+  closed.add(id)
+  writeTripSheetIdSet(TRIP_SHEET_CLOSED_KEY, closed)
+}
+
+function queueAutoOpenTrip(tripId) {
+  const id = String(tripId || '').trim()
+  if (!id) return
+  try {
+    sessionStorage.setItem(TRIP_SHEET_AUTO_KEY, id)
+  } catch {
+    /* ignore */
+  }
+}
+
+function resolveAutoOpenTripId(activeTrips) {
+  const trips = Array.isArray(activeTrips) ? activeTrips : []
+  const closed = readTripSheetIdSet(TRIP_SHEET_CLOSED_KEY)
+  const done = readTripSheetIdSet(TRIP_SHEET_AUTO_DONE_KEY)
+
+  let queued = ''
+  try {
+    queued = String(sessionStorage.getItem(TRIP_SHEET_AUTO_KEY) || '').trim()
+  } catch {
+    queued = ''
+  }
+  if (queued) {
+    try {
+      sessionStorage.removeItem(TRIP_SHEET_AUTO_KEY)
+    } catch {
+      /* ignore */
+    }
+    if (!closed.has(queued) && trips.some((t) => t.id === queued && t.phase === 'confirmed')) {
+      done.add(queued)
+      writeTripSheetIdSet(TRIP_SHEET_AUTO_DONE_KEY, done)
+      return queued
+    }
+  }
+
+  // Rescue confirmed: open once for winner when PII unlocks
+  for (const t of trips) {
+    if (t.phase !== 'confirmed' || t.kind !== 'rescue_confirmed') continue
+    if (closed.has(t.id) || done.has(t.id)) continue
+    if (t.needsPii) continue
+    done.add(t.id)
+    writeTripSheetIdSet(TRIP_SHEET_AUTO_DONE_KEY, done)
+    return t.id
+  }
+  return null
+}
+
+function renderCurrentTripSheet(td, trip, companyName) {
+  const open = !!trip
+  const title = td.activeTripsCurrentTripTitle || 'Current trip'
+  const body = trip
+    ? renderCurrentTripSheetBodyHtml(trip, td, { companyName })
+    : ''
+  return `<div id="dash-trip-sheet" class="fixed inset-0 z-[65] ${open ? '' : 'pointer-events-none hidden'}" role="dialog" aria-modal="true" aria-label="${escapeHtml(
+    title
+  )}">
+    <div id="dash-trip-backdrop" class="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"></div>
+    <div class="absolute bottom-0 left-0 right-0 mx-auto max-h-[88vh] max-w-lg overflow-y-auto rounded-t-2xl border border-gray-200/80 bg-white p-4 shadow-[0_-8px_32px_rgba(15,23,42,0.14)] dark:border-slate-700/60 dark:bg-slate-900 sm:p-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div class="mx-auto mb-3 h-1 w-10 rounded-full bg-gray-200 dark:bg-slate-700" aria-hidden="true"></div>
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(title)}</h2>
+        <button type="button" id="dash-trip-close" class="${DASH_ICON_BTN} h-9 w-9" aria-label="${escapeHtml(
+          td.activeTripsCloseSheet || 'Close'
+        )}">${icon.x('h-4 w-4')}</button>
+      </div>
+      ${body}
+    </div>
+  </div>`
+}
+
 function renderHeroCard(td, ctx) {
   const { progress, bookPublicUrl, availLabel, availDotClass } = ctx
   const pct = progress.percent
@@ -321,8 +509,87 @@ function renderHeroCard(td, ctx) {
   </section>`
 }
 
+function renderPushNotifyCard(td, pushMode) {
+  if (pushMode === 'unsupported') return ''
+  if (pushMode === 'on') {
+    return `<section id="dash-push-card" class="${DASH_CARD} border-emerald-200/70 p-4 sm:p-5 dark:border-emerald-800/40">
+      <p class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">${escapeHtml(td.pushStatusOn)}</p>
+    </section>`
+  }
+  if (pushMode === 'blocked') {
+    return `<section id="dash-push-card" class="${DASH_CARD} p-4 sm:p-5">
+      <p class="text-sm font-semibold ${DASH_TEXT}">${escapeHtml(td.pushBlocked)}</p>
+    </section>`
+  }
+  return `<section id="dash-push-card" class="${DASH_CARD} p-5 sm:p-6">
+    <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(td.pushEnableTitle)}</h2>
+    <p class="mt-1.5 text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.pushEnableHelper)}</p>
+    <p id="dash-push-msg" class="mt-2 hidden text-sm font-medium text-red-600 dark:text-red-400" role="status"></p>
+    <button type="button" id="dash-push-enable" class="${DASH_BTN_PRIMARY} mt-4 min-h-[48px] w-full sm:w-auto sm:px-6">${escapeHtml(td.pushEnableButton)}</button>
+  </section>`
+}
+
+function renderActiveTripsCard(td, ctx) {
+  const trips = Array.isArray(ctx.activeTrips) ? ctx.activeTrips : []
+  const count = trips.length
+  const expanded = !!ctx.activeTripsExpanded
+  const visible = expanded ? trips : trips.slice(0, 3)
+  const companyName = ctx.companyName || ''
+
+  const itemsHtml =
+    visible.length === 0
+      ? `<p class="text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.activeTripsEmpty || 'No active trips right now.')}</p>`
+      : `<div class="space-y-2.5">${visible
+          .map((trip) => renderActiveTripItemHtml(trip, td, { companyName }))
+          .join('')}</div>`
+
+  const moreBtn =
+    count > 3
+      ? `<button type="button" id="dash-active-trips-toggle" class="mt-3 w-full rounded-lg px-2 py-2 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-950/30 dark:hover:text-amber-300 ${DASH_FOCUS}">${escapeHtml(
+          expanded ? td.activeTripsShowLess || 'Show less' : td.activeTripsViewAll || 'View all'
+        )}</button>`
+      : ''
+
+  return `<section id="dash-active-trips-card" class="${DASH_CARD} p-4 sm:p-5" aria-label="${escapeHtml(
+    td.activeTripsTitle || 'Active trips'
+  )}">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(td.activeTripsTitle || 'Active trips')}</h2>
+      <span class="rounded-lg bg-gray-100 px-2 py-0.5 text-xs font-bold tabular-nums text-gray-700 dark:bg-slate-800 dark:text-slate-200">${count}</span>
+    </div>
+    <div class="mt-3">${itemsHtml}</div>
+    ${moreBtn}
+  </section>`
+}
+
+function renderCompletedTripsCard(td, ctx) {
+  const trips = Array.isArray(ctx.completedTrips) ? ctx.completedTrips : []
+  const count = trips.length
+  const expanded = !!ctx.completedTripsExpanded
+  const listHtml = expanded
+    ? count === 0
+      ? `<p class="mt-3 text-sm ${DASH_MUTED}">${escapeHtml(td.completedTripsEmpty || 'No completed trips yet.')}</p>`
+      : `<div class="mt-3 space-y-2">${trips.map((t) => renderCompletedTripItemHtml(t, td)).join('')}</div>`
+    : ''
+
+  return `<section id="dash-completed-trips-card" class="${DASH_CARD} p-4 sm:p-5" aria-label="${escapeHtml(
+    td.completedTripsTitle || 'Completed trips'
+  )}">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(
+        td.completedTripsTitle || 'Completed trips'
+      )}</h2>
+      <span class="rounded-lg bg-gray-100 px-2 py-0.5 text-xs font-bold tabular-nums text-gray-700 dark:bg-slate-800 dark:text-slate-200">${count}</span>
+    </div>
+    <button type="button" id="dash-completed-trips-toggle" class="mt-3 w-full rounded-lg border border-gray-200 px-2 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800 ${DASH_FOCUS}">${escapeHtml(
+      expanded ? td.completedTripsHide || 'Hide' : td.completedTripsView || 'View'
+    )}</button>
+    ${listHtml}
+  </section>`
+}
+
 function renderOverviewBody(td, ctx, tpwa) {
-  const { bookingStats, showPwaCard } = ctx
+  const { bookingStats, pushMode } = ctx
 
   const activityHtml =
     bookingStats.total === 0
@@ -344,6 +611,12 @@ function renderOverviewBody(td, ctx, tpwa) {
 
   return `<div class="mx-auto max-w-3xl space-y-4 sm:space-y-5">
     ${renderHeroCard(td, ctx)}
+
+    ${renderPushNotifyCard(td, pushMode)}
+
+    ${renderActiveTripsCard(td, ctx)}
+
+    ${renderCompletedTripsCard(td, ctx)}
 
     <section class="${DASH_CARD} p-5 sm:p-6">
       <div class="flex items-center justify-between gap-3">
@@ -477,67 +750,164 @@ function renderSetupActionCard(td, item, progress, variant) {
   </button>`
 }
 
-export async function mountDashboardCompany(root) {
+export async function mountDashboardCompany(root, opts = {}) {
+  const soft = opts.soft === true
+  /** Local UI only (tabs/drawer/QR/theme): re-paint from cache — no startup network waterfall. */
+  const localUi = opts.localUi === true && !!dashDataCache?.company && !!dashDataCache?.session
+  const gen = ++dashMountGen
+
   syncDocumentLang(getLocale())
   syncPublicThemeClass()
   const dashDark = isPublicDarkMode()
   const loadLang = getLocale()
-  root.innerHTML = `
+  if (!soft && !localUi) {
+    root.innerHTML = `
     <div class="min-h-screen flex flex-col items-center justify-center bg-[#eef0f3] dark:bg-slate-950">
       <div class="h-10 w-10 animate-pulse rounded-full border-2 border-gray-300 border-t-yellow-500 dark:border-slate-600 dark:border-t-amber-400"></div>
       <p class="mt-3 text-sm text-gray-500 dark:text-slate-400">${tDashboard(loadLang).loading}</p>
     </div>`
-
-  const session = await getSession()
-  if (!session) {
-    navigate('/login/company')
-    return
-  }
-  const profile = await getMyProfile(session.user.id)
-  if (profile?.first_login_required) {
-    navigate('/change-password/company')
-    return
   }
 
-  if (profile?.company_onboarding_completed === false) {
-    navigate('/onboarding/company')
-    return
-  }
-
-  const company = await getCompanyForUser(session.user.id)
-  if (!company) {
-    navigate('/register')
-    return
-  }
-  if (company.status === 'pending') {
-    navigate('/pending-approval')
-    return
-  }
-  if (company.status === 'suspended') {
-    navigate('/pending-approval')
-    return
-  }
-  if (company.status === 'rejected') {
-    navigate('/pending-approval')
-    return
-  }
-
-  const pwaIdentity = applyCompanyPwaIdentity({ context: 'dashboard', company })
-  await prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
-  initServiceWorkerRegistration()
-  setActiveOperatorPwaCompany(company.id)
-
+  let session
+  let profile
+  let company
   let cars = []
   let bookings = []
-  try {
-    cars = await listCarsForCompany(company.id)
-  } catch {
-    cars = []
+  let rescueOpportunities = []
+  let activeTrips = []
+  let completedTrips = []
+  /** OneSignal UI mode — never await before first paint (resolved in background). */
+  let pushMode = dashDataCache?.pushMode || 'prompt'
+
+  if (localUi) {
+    session = dashDataCache.session
+    profile = dashDataCache.profile
+    company = dashDataCache.company
+    cars = dashDataCache.cars || []
+    bookings = dashDataCache.bookings || []
+    rescueOpportunities = dashDataCache.rescueOpportunities || []
+    activeTrips = dashDataCache.activeTrips || []
+    completedTrips = dashDataCache.completedTrips || []
+    pushMode = dashDataCache.pushMode || 'prompt'
+  } else {
+    session = await getSession()
+    if (gen !== dashMountGen) return
+    if (!session) {
+      dashDataCache = null
+      navigate('/login/company')
+      return
+    }
+    profile = await getMyProfile(session.user.id)
+    if (gen !== dashMountGen) return
+    if (profile?.first_login_required) {
+      navigate('/change-password/company')
+      return
+    }
+
+    if (profile?.company_onboarding_completed === false) {
+      navigate('/onboarding/company')
+      return
+    }
+
+    company = await getCompanyForUser(session.user.id)
+    if (gen !== dashMountGen) return
+    if (!company) {
+      dashDataCache = null
+      navigate('/register')
+      return
+    }
+    if (company.status === 'pending') {
+      navigate('/pending-approval')
+      return
+    }
+    if (company.status === 'suspended') {
+      navigate('/pending-approval')
+      return
+    }
+    if (company.status === 'rejected') {
+      navigate('/pending-approval')
+      return
+    }
+
+    const pwaIdentity = applyCompanyPwaIdentity({ context: 'dashboard', company })
+    // Never block dashboard paint on manifest / PWA prefetch
+    void prefetchCompanyManifest(pwaIdentity.manifestHref, pwaIdentity.companyName)
+    initServiceWorkerRegistration()
+    setActiveOperatorPwaCompany(company.id)
+
+    try {
+      cars = await listCarsForCompany(company.id)
+    } catch {
+      cars = []
+    }
+    if (gen !== dashMountGen) return
+    try {
+      ;[bookings, rescueOpportunities] = await Promise.all([
+        listBookingRequestsForCompany(company.id).catch(() => []),
+        listRescueOpportunitiesForCompany(company.id).catch(() => []),
+      ])
+    } catch {
+      bookings = []
+      rescueOpportunities = []
+    }
+    if (gen !== dashMountGen) return
+
+    activeTrips = deriveActiveTrips({
+      companyId: company.id,
+      bookings,
+      opportunities: rescueOpportunities,
+    })
+    const rescueCompletedSink = []
+    try {
+      activeTrips = await enrichActiveTripsWithWinnerDetails(activeTrips, {
+        completedSink: rescueCompletedSink,
+      })
+    } catch {
+      /* keep preview rows */
+    }
+    completedTrips = deriveCompletedTrips({
+      companyId: company.id,
+      bookings,
+      opportunities: rescueOpportunities,
+    })
+    if (rescueCompletedSink.length) {
+      const seen = new Set(completedTrips.map((t) => t.id))
+      for (const row of rescueCompletedSink) {
+        if (seen.has(row.id)) continue
+        completedTrips.push(row)
+        seen.add(row.id)
+      }
+      completedTrips.sort((a, b) => (b.sortAt || 0) - (a.sortAt || 0))
+      completedTrips = completedTrips.slice(0, 20)
+    }
+    if (gen !== dashMountGen) return
+
+    dashDataCache = {
+      session,
+      profile,
+      company,
+      cars,
+      bookings,
+      rescueOpportunities,
+      activeTrips,
+      completedTrips,
+      pushMode,
+    }
   }
-  try {
-    bookings = await listBookingRequestsForCompany(company.id)
-  } catch {
-    bookings = []
+
+  // Rescue notifications run AFTER paint — never block dashboard load
+  if (dashState.tab === 'rescue') dashState.tab = 'overview'
+
+  // Auto-open Current Trip once (accept / rescue confirm); never reopen after manual close
+  if (!dashState.tripSheetId) {
+    const autoId = resolveAutoOpenTripId(activeTrips)
+    if (autoId) dashState.tripSheetId = autoId
+  }
+  if (
+    dashState.tripSheetId &&
+    !activeTrips.some((t) => t.id === dashState.tripSheetId && t.phase === 'confirmed')
+  ) {
+    dashState.tripSheetId = null
   }
 
   const dashLang = getLocale()
@@ -597,6 +967,7 @@ export async function mountDashboardCompany(root) {
   if (t === 'overview') {
     bodyHtml = renderOverviewBody(td, {
       progress: setupProgress,
+      pushMode,
       bookPublicUrl,
       bookingQrSrc,
       avail,
@@ -606,6 +977,11 @@ export async function mountDashboardCompany(root) {
       pricingStatus,
       carCount: cars.length,
       showPwaCard,
+      activeTrips,
+      activeTripsExpanded: dashState.activeTripsExpanded,
+      completedTrips,
+      completedTripsExpanded: dashState.completedTripsExpanded,
+      companyName: company.name,
     }, tpwa)
   } else if (t === 'cars') {
     const rows =
@@ -785,10 +1161,20 @@ export async function mountDashboardCompany(root) {
       </div>`
   } else if (t === 'ride-requests') {
     const filtered = [...bookings]
+    const statusLabel = (st) => {
+      const s = String(st || 'new')
+      if (s === 'accepted') return td.bookingAccepted || 'Accepted'
+      if (s === 'rejected') return td.bookingRefused || 'Refused'
+      return td.requestsPending || 'Pending'
+    }
     bodyHtml = `
       <div class="${DASH_PANEL}">
-        <h2 class="text-lg font-bold ${DASH_TEXT}">${td.ridesHead}</h2>
-        <p class="text-sm ${DASH_MUTED}">${td.ridesSub}</p>
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold ${DASH_TEXT}">${td.ridesHead}</h2>
+            <p class="text-sm ${DASH_MUTED}">${td.ridesSub}</p>
+          </div>
+        </div>
         <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
           <input type="search" id="ride-search" placeholder="${escapeHtml(td.ridesSearch)}" class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm" />
           <button type="button" disabled title="Coming soon" class="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-400">
@@ -800,9 +1186,10 @@ export async function mountDashboardCompany(root) {
             <thead>
               <tr class="border-b border-gray-200 text-xs font-semibold uppercase text-gray-500">
                 <th class="py-3 pr-4">${td.thPassenger}</th>
-                <th class="py-3 pr-4">${td.thFrom}</th>
-                <th class="py-3 pr-4">${td.thTo}</th>
+                <th class="py-3 pr-4">${escapeHtml(td.thRoute)}</th>
                 <th class="py-3 pr-4">${td.thWhen}</th>
+                <th class="py-3 pr-4">${escapeHtml(td.rescueTripPrice || 'Trip price')}</th>
+                <th class="py-3 pr-4">${escapeHtml(td.thStatus || 'Status')}</th>
                 <th class="py-3">${td.thActions}</th>
               </tr>
             </thead>
@@ -812,17 +1199,22 @@ export async function mountDashboardCompany(root) {
                   const wa = company.phone
                     ? `https://wa.me/${String(company.phone).replace(/\D/g, '')}?text=${encodeURIComponent(`Regarding booking from ${b.pickup_address}`)}`
                     : ''
-                  const em = `mailto:${encodeURIComponent(company.email)}?subject=${encodeURIComponent('Booking')}&body=${encodeURIComponent(`Passenger: ${b.customer_name || '—'}\nFrom: ${b.pickup_address}\nTo: ${b.dropoff_address}`)}`
+                  const em = `mailto:${encodeURIComponent(company.email || '')}?subject=${encodeURIComponent('Booking')}&body=${encodeURIComponent(`Passenger: ${b.customer_name || '—'}\nFrom: ${b.pickup_address}\nTo: ${b.dropoff_address}`)}`
+                  const est = tripPriceLabelFromBooking(b) || '—'
                   return `
                 <tr class="border-b border-gray-100 ride-row" data-search="${escapeHtml(`${b.customer_name} ${b.pickup_address} ${b.dropoff_address} ${b.ride_datetime}`.toLowerCase())}">
-                  <td class="py-3 pr-4 font-medium text-gray-900">${escapeHtml(b.customer_name || '—')}</td>
-                  <td class="py-3 pr-4 text-gray-600">${escapeHtml(b.pickup_address)}</td>
-                  <td class="py-3 pr-4 text-gray-600">${escapeHtml(b.dropoff_address)}</td>
-                  <td class="py-3 pr-4 whitespace-nowrap text-gray-600">${escapeHtml(formatDateTime(b.ride_datetime))}</td>
+                  <td class="py-3 pr-4 font-medium text-gray-900 dark:text-slate-100">${escapeHtml(b.customer_name || '—')}</td>
+                  <td class="py-3 pr-4 text-gray-600 dark:text-slate-300">
+                    <p class="font-medium text-gray-900 dark:text-slate-100">${escapeHtml(b.pickup_address || '—')}</p>
+                    <p class="mt-0.5 text-xs">→ ${escapeHtml(b.dropoff_address || '—')}</p>
+                  </td>
+                  <td class="py-3 pr-4 whitespace-nowrap text-gray-600 dark:text-slate-300">${escapeHtml(formatDateTime(b.ride_datetime))}</td>
+                  <td class="py-3 pr-4 font-semibold text-amber-700 dark:text-amber-300">${escapeHtml(est)}</td>
+                  <td class="py-3 pr-4 text-xs font-semibold text-gray-600 dark:text-slate-300">${escapeHtml(statusLabel(b.status))}</td>
                   <td class="py-3">
                     <div class="flex flex-wrap gap-2">
-                      <a href="${wa ? escapeHtml(wa) : '#'}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 ${!company.phone ? 'pointer-events-none opacity-40' : ''}">${icon.messageCircle('h-3.5 w-3.5')}${td.wa}</a>
-                      <a href="${escapeHtml(em)}" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50">${icon.mail('h-3.5 w-3.5')}${td.mail}</a>
+                      <a href="${wa ? escapeHtml(wa) : '#'}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800 ${!company.phone ? 'pointer-events-none opacity-40' : ''}">${icon.messageCircle('h-3.5 w-3.5')}${td.wa}</a>
+                      <a href="${escapeHtml(em)}" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-800 hover:bg-gray-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">${icon.mail('h-3.5 w-3.5')}${td.mail}</a>
                     </div>
                   </td>
                 </tr>`
@@ -843,8 +1235,18 @@ export async function mountDashboardCompany(root) {
       </div>`
   }
 
+  if (gen !== dashMountGen) return
+
+  const softNotice = dashState.softNotice
+  dashState.softNotice = null
+  const softNoticeHtml = softNotice
+    ? `<p class="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-300">${escapeHtml(
+        softNotice
+      )}</p>`
+    : ''
+
   root.innerHTML = `
-    <div class="${DASH_SHELL}">
+    <div class="${DASH_SHELL}" data-dash-root="1">
       ${renderDrawer(td, t, company.name, avail, dashState.drawerOpen)}
       <header class="${DASH_HEADER} sticky top-0 z-30">
         <div class="mx-auto flex h-[3.25rem] max-w-6xl items-center justify-between gap-1.5 px-3 sm:h-14 sm:gap-2 sm:px-4">
@@ -872,6 +1274,7 @@ export async function mountDashboardCompany(root) {
 
       <main class="mx-auto max-w-6xl px-3 py-4 ${showPwaCard ? 'pb-[calc(4.25rem+env(safe-area-inset-bottom,0px)+9.5rem)]' : 'pb-[calc(4.25rem+env(safe-area-inset-bottom,0px)+0.5rem)]'} sm:px-4 sm:py-6 sm:pb-6">
         <p id="dash-msg" class="mb-4 hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"></p>
+        ${softNoticeHtml}
         ${bodyHtml}
       </main>
 
@@ -884,52 +1287,62 @@ export async function mountDashboardCompany(root) {
       </footer>
 
       ${renderQrSheet(td, bookPublicUrl, bookingQrSrc, dashState.qrOpen)}
+      ${renderCurrentTripSheet(
+        td,
+        activeTrips.find((x) => x.id === dashState.tripSheetId) || null,
+        company.name
+      )}
+      ${renderNavSheet(td, dashState.navSheet)}
       ${renderMobileBottomNav(td, t)}
       ${showPwaCard ? renderDashboardPwaCard(td, tpwa) : ''}
       <div id="dash-modal-root"></div>
     </div>`
+
+  const remountLocalUi = () => mountDashboardCompany(root, { localUi: true })
 
   root.querySelectorAll('[data-dash-tab]').forEach((btn) => {
     btn.addEventListener('click', () => {
       dashState.tab = btn.getAttribute('data-dash-tab')
       dashState.modal = null
       dashState.drawerOpen = false
-      mountDashboardCompany(root)
+      remountLocalUi()
     })
   })
 
   root.querySelector('#dash-menu-btn')?.addEventListener('click', () => {
     dashState.drawerOpen = !dashState.drawerOpen
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-drawer-backdrop')?.addEventListener('click', () => {
     dashState.drawerOpen = false
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-qr-open')?.addEventListener('click', () => {
     dashState.qrOpen = true
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-qr-close')?.addEventListener('click', () => {
     dashState.qrOpen = false
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#dash-qr-backdrop')?.addEventListener('click', () => {
     dashState.qrOpen = false
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#co-toggle-dark')?.addEventListener('click', () => {
     setPublicDarkMode(!isPublicDarkMode())
     syncPublicThemeClass()
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
 
   root.querySelector('#co-logout')?.addEventListener('click', async () => {
+    stopRescueNotifications()
+    dashDataCache = null
     await signOutEverywhere()
     navigate('/')
   })
@@ -958,7 +1371,7 @@ export async function mountDashboardCompany(root) {
     b.addEventListener('click', () => {
       const lc = b.getAttribute('data-dash-lang')
       if (lc) setLocale(lc)
-      mountDashboardCompany(root)
+      remountLocalUi()
     })
   })
 
@@ -967,13 +1380,13 @@ export async function mountDashboardCompany(root) {
     if (action === 'pricing') {
       dashState.tab = 'pricing'
       dashState.drawerOpen = false
-      mountDashboardCompany(root)
+      remountLocalUi()
       return
     }
     if (action === 'photo' || action === 'motto' || action === 'whatsapp') {
       dashState.tab = 'essential'
       dashState.drawerOpen = false
-      mountDashboardCompany(root)
+      remountLocalUi()
       return
     }
     if (action === 'preview') {
@@ -983,7 +1396,7 @@ export async function mountDashboardCompany(root) {
         /* ignore */
       }
       window.open(bookPublicUrl, '_blank', 'noopener,noreferrer')
-      window.setTimeout(() => mountDashboardCompany(root), 400)
+      window.setTimeout(() => remountLocalUi(), 400)
       return
     }
     if (action === 'qr') {
@@ -998,7 +1411,7 @@ export async function mountDashboardCompany(root) {
         locale,
       })
       window.open(url, '_blank', 'noopener,noreferrer')
-      window.setTimeout(() => mountDashboardCompany(root), 400)
+      window.setTimeout(() => remountLocalUi(), 400)
       return
     }
     if (action === 'support') {
@@ -1018,10 +1431,10 @@ export async function mountDashboardCompany(root) {
       companyId: company.id,
       strings: tpwa,
       variant: 'operator',
-      onComplete: () => mountDashboardCompany(root),
+      onComplete: () => remountLocalUi(),
     })
     logDashboardPwaDebug('install:result', { result })
-    mountDashboardCompany(root)
+    remountLocalUi()
   }
 
   root.onclick = (e) => {
@@ -1105,6 +1518,25 @@ export async function mountDashboardCompany(root) {
     })
   })
 
+  // Rescue overlays live outside the dashboard mount (display-only vs server cron).
+  // Full data load starts/keeps the poll; local UI remounts must not re-trigger fetch.
+  try {
+    if (!localUi) {
+      startRescueNotifications({
+        companyId: company.id,
+        accessToken: session.access_token,
+        companyName: company.name,
+      })
+    }
+    // Soft remount Active Trips after Rescue accept / confirm / cancel (no winner overlay)
+    setActiveTripsRefreshHandler(() => {
+      if (gen !== dashMountGen) return
+      mountDashboardCompany(root)
+    })
+  } catch (e) {
+    console.warn('[dashboard] rescue notifications failed soft', e?.message || e)
+  }
+
   root.querySelector('#dash-pwa-add')?.addEventListener('click', () => {
     void triggerDashboardPwaInstall()
   })
@@ -1112,8 +1544,392 @@ export async function mountDashboardCompany(root) {
   root.querySelector('#dash-pwa-later')?.addEventListener('click', () => {
     setPromptDismissed('operator', company.id)
     logDashboardPwaDebug('inline-card:dismissed')
-    mountDashboardCompany(root)
+    remountLocalUi()
   })
+
+  root.querySelector('#dash-active-trips-toggle')?.addEventListener('click', () => {
+    dashState.activeTripsExpanded = !dashState.activeTripsExpanded
+    remountLocalUi()
+  })
+
+  root.querySelector('#dash-completed-trips-toggle')?.addEventListener('click', () => {
+    dashState.completedTripsExpanded = !dashState.completedTripsExpanded
+    remountLocalUi()
+  })
+
+  const closeNavSheet = () => {
+    if (!dashState.navSheet) return
+    dashState.navSheet = null
+    remountLocalUi()
+  }
+
+  const closeTripSheet = ({ rememberClose = true } = {}) => {
+    if (!dashState.tripSheetId) return
+    if (rememberClose) markTripSheetClosed(dashState.tripSheetId)
+    dashState.tripSheetId = null
+    remountLocalUi()
+  }
+
+  root.querySelectorAll('[data-open-trip]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-open-trip') || ''
+      if (!id) return
+      dashState.tripSheetId = id
+      remountLocalUi()
+    })
+  })
+
+  root.querySelector('#dash-trip-backdrop')?.addEventListener('click', () => closeTripSheet())
+  root.querySelector('#dash-trip-close')?.addEventListener('click', () => closeTripSheet())
+
+  root.querySelectorAll('[data-open-nav]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      dashState.navSheet = {
+        gmapsHref: btn.getAttribute('data-gmaps') || '',
+        wazeHref: btn.getAttribute('data-waze') || '',
+      }
+      remountLocalUi()
+    })
+  })
+
+  root.querySelector('#dash-nav-backdrop')?.addEventListener('click', closeNavSheet)
+  root.querySelector('#dash-nav-cancel')?.addEventListener('click', closeNavSheet)
+  root.querySelectorAll('[data-nav-choice]').forEach((a) => {
+    a.addEventListener('click', () => {
+      dashState.navSheet = null
+      remountLocalUi()
+    })
+  })
+
+  function showDashTripError(text) {
+    const msg = root.querySelector('#dash-msg')
+    if (!msg) return
+    msg.textContent = text
+    msg.className =
+      'mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300'
+    msg.classList.remove('hidden')
+  }
+
+  function readTripActionIds(btn) {
+    return {
+      bookingRequestId: btn.getAttribute('data-complete-booking') || '',
+      rescueRequestId: btn.getAttribute('data-complete-rescue') || '',
+    }
+  }
+
+  async function queryGeoPermission() {
+    try {
+      if (!navigator?.permissions?.query) return null
+      const status = await navigator.permissions.query({ name: 'geolocation' })
+      return status?.state || null
+    } catch {
+      return null
+    }
+  }
+
+  async function onceGeolocation({ timeoutMs = 6000, requirePrompt = false } = {}) {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      return { lat: null, lng: null }
+    }
+    if (!requirePrompt) {
+      const perm = await queryGeoPermission()
+      if (perm && perm !== 'granted') return { lat: null, lng: null }
+    }
+    try {
+      const pos = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('geo_timeout')), timeoutMs)
+        navigator.geolocation.getCurrentPosition(
+          (p) => {
+            clearTimeout(timer)
+            resolve(p)
+          },
+          (err) => {
+            clearTimeout(timer)
+            reject(err)
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: timeoutMs,
+            maximumAge: 0,
+          }
+        )
+      })
+      return {
+        lat: Number(pos.coords.latitude),
+        lng: Number(pos.coords.longitude),
+      }
+    } catch {
+      return { lat: null, lng: null }
+    }
+  }
+
+  async function enhanceEtaInBackground({ bookingRequestId, rescueRequestId, requirePrompt = false }) {
+    const geo = await onceGeolocation({ timeoutMs: 6000, requirePrompt })
+    const geoOk = Number.isFinite(geo.lat) && Number.isFinite(geo.lng)
+    if (!geoOk) return { ok: false, geoOk: false }
+    const result = await markDriverOnTheWay({
+      companyId: company.id,
+      bookingRequestId: bookingRequestId || undefined,
+      rescueRequestId: rescueRequestId || undefined,
+      driverLat: geo.lat,
+      driverLng: geo.lng,
+    })
+    return { ok: !!result?.ok, geoOk: true, result }
+  }
+
+  root.querySelectorAll('[data-mark-on-way]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
+      btn.disabled = true
+      const label = btn.textContent
+      btn.textContent = td.activeTripsOnWayBusy || 'Updating…'
+      let remounted = false
+      const resetBtn = () => {
+        if (btn.isConnected) {
+          btn.disabled = false
+          btn.textContent = label
+        }
+      }
+      // Hard safety: never leave Updating… forever (Android overlay / hung network)
+      const safetyTimer = window.setTimeout(() => {
+        if (!remounted) resetBtn()
+      }, 15000)
+      try {
+        // 1) Authoritative ON_THE_WAY immediately — never await GPS / permissions here
+        const result = await Promise.race([
+          markDriverOnTheWay({
+            companyId: company.id,
+            bookingRequestId: bookingRequestId || undefined,
+            rescueRequestId: rescueRequestId || undefined,
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('on_way_timeout')), 12000)
+          ),
+        ])
+        if (!result?.ok) {
+          const code = String(result?.body?.code || '').trim()
+          showDashTripError(
+            (td.activeTripsOnWayError || 'Could not update trip status. Try again.') +
+              (code ? ` (${code})` : '')
+          )
+          resetBtn()
+          return
+        }
+        // Remount UI NOW — GPS must not hold this open
+        remounted = true
+        dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
+        mountDashboardCompany(root)
+        // 2) Best-effort ETA only if permission already granted (no forced prompt)
+        void (async () => {
+          const perm = await queryGeoPermission()
+          if (perm !== 'granted') return
+          const enh = await enhanceEtaInBackground({
+            bookingRequestId,
+            rescueRequestId,
+            requirePrompt: false,
+          })
+          if (enh?.ok && enh.geoOk) {
+            dashState.softNotice = null
+            mountDashboardCompany(root)
+          }
+        })()
+      } catch {
+        showDashTripError(td.activeTripsOnWayError || 'Could not update trip status. Try again.')
+        resetBtn()
+      } finally {
+        window.clearTimeout(safetyTimer)
+        if (!remounted) resetBtn()
+      }
+    })
+  })
+
+  root.querySelectorAll('[data-update-eta]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
+      btn.disabled = true
+      const label = btn.textContent
+      btn.textContent = td.activeTripsOnWayBusy || 'Updating…'
+      try {
+        const enh = await Promise.race([
+          enhanceEtaInBackground({
+            bookingRequestId,
+            rescueRequestId,
+            requirePrompt: true,
+          }),
+          new Promise((resolve) => setTimeout(() => resolve({ ok: false, geoOk: false }), 10000)),
+        ])
+        if (enh?.ok && enh.geoOk) {
+          dashState.softNotice = null
+          mountDashboardCompany(root)
+          return
+        }
+        dashState.softNotice = td.activeTripsOnWayNoEta || 'On the way · ETA unavailable'
+        remountLocalUi()
+      } catch {
+        /* soft */
+      } finally {
+        if (btn.isConnected) {
+          btn.disabled = false
+          btn.textContent = label
+        }
+      }
+    })
+  })
+
+  root.querySelectorAll('[data-mark-arrived]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
+      btn.disabled = true
+      try {
+        const result = await markDriverArrived({
+          companyId: company.id,
+          bookingRequestId: bookingRequestId || undefined,
+          rescueRequestId: rescueRequestId || undefined,
+        })
+        if (!result?.ok) {
+          const code = String(result?.body?.code || '').trim()
+          showDashTripError(
+            (td.activeTripsArrivedError || 'Could not mark arrival. Try again.') +
+              (code ? ` (${code})` : '')
+          )
+          btn.disabled = false
+          return
+        }
+        mountDashboardCompany(root)
+      } catch {
+        showDashTripError(td.activeTripsArrivedError || 'Could not mark arrival. Try again.')
+        btn.disabled = false
+      } finally {
+        if (btn.isConnected) btn.disabled = false
+      }
+    })
+  })
+
+  root.querySelectorAll('[data-complete-trip]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const confirmMsg = td.activeTripsCompleteConfirm || 'Mark this trip as completed?'
+      if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) return
+      const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
+      btn.disabled = true
+      try {
+        const result = await completeCompanyTrip({
+          companyId: company.id,
+          bookingRequestId: bookingRequestId || undefined,
+          rescueRequestId: rescueRequestId || undefined,
+        })
+        if (!result?.ok) {
+          showDashTripError(td.activeTripsCompleteError || 'Could not complete this trip. Try again.')
+          btn.disabled = false
+          return
+        }
+        if (dashState.tripSheetId) {
+          markTripSheetClosed(dashState.tripSheetId)
+          dashState.tripSheetId = null
+        }
+        mountDashboardCompany(root)
+      } catch {
+        btn.disabled = false
+        showDashTripError(td.activeTripsCompleteError || 'Could not complete this trip. Try again.')
+      } finally {
+        if (btn.isConnected) btn.disabled = false
+      }
+    })
+  })
+
+  root.querySelector('#dash-push-enable')?.addEventListener('click', async () => {
+    const btn = root.querySelector('#dash-push-enable')
+    const msg = root.querySelector('#dash-push-msg')
+    if (btn) {
+      btn.disabled = true
+      btn.textContent = td.pushBusy || 'Turning on…'
+    }
+    if (msg) {
+      msg.classList.add('hidden')
+      msg.textContent = ''
+      msg.innerHTML = ''
+    }
+    const showPushFailure = (userMessage, technicalReason) => {
+      if (!msg) return
+      const generic =
+        userMessage || td.pushError || 'Could not enable notifications. Try again.'
+      if (isTaxioStagingClient() && technicalReason) {
+        const safe = String(technicalReason)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .slice(0, 280)
+        msg.innerHTML = `${escapeHtml(generic)}<br/><span class="mt-1 block text-xs font-normal opacity-90">Technical reason:<br/>${safe}</span>`
+      } else {
+        msg.textContent = generic
+      }
+      msg.classList.remove('hidden')
+    }
+    try {
+      // OneSignal path (legacy PushManager / company_push_subscriptions not UI authority)
+      const result = await enableOneSignalTripNotifications(company.id)
+      if (result.ok) {
+        if (dashDataCache) dashDataCache.pushMode = 'on'
+        remountLocalUi()
+        return
+      }
+      if (result.code === 'DENIED' || result.permission === 'denied') {
+        if (dashDataCache) dashDataCache.pushMode = 'blocked'
+        remountLocalUi()
+        return
+      }
+      showPushFailure(result.userMessage || null, result.technicalReason || null)
+      if (btn) {
+        btn.disabled = false
+        btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
+      }
+    } catch (e) {
+      const name = String(e?.name || 'Error')
+      const message = String(e?.message || e || 'enable_failed')
+      const stage = e?.stage || 'ENABLE'
+      console.error('[TAXIO ONESIGNAL]', {
+        phase: stage,
+        errorName: name,
+        errorMessage: message,
+      })
+      showPushFailure(null, `${stage} — ${name}: ${message}`)
+      if (btn) {
+        btn.disabled = false
+        btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
+      }
+    }
+  })
+
+  // OneSignal: never block first paint — resolve in background, then local UI update.
+  if (!localUi) {
+    const paintedPushMode = pushMode
+    void resolveOneSignalPushUiMode(company.id)
+      .then((mode) => {
+        if (gen !== dashMountGen) return
+        if (dashDataCache) dashDataCache.pushMode = mode
+        if (mode === paintedPushMode) return
+        remountLocalUi()
+      })
+      .catch(() => {})
+
+    // Associate company External ID on authenticated dashboard load (no JWT to OneSignal)
+    void associateOneSignalCompany(company.id)
+
+    // Soft re-sync: permission granted but OneSignal may still need explicit opt-in.
+    // Remount at most once per page load so sync cannot create a dashboard refresh loop.
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      const syncGen = gen
+      void softSyncOneSignalTripNotifications(company.id)
+        .then((result) => {
+          if (!result.ok || syncGen !== dashMountGen) return
+          if (dashDataCache?.pushMode === 'on' || paintedPushMode === 'on') return
+          if (window.__taxioOneSignalUiRemounted) return
+          window.__taxioOneSignalUiRemounted = true
+          if (dashDataCache) dashDataCache.pushMode = 'on'
+          remountLocalUi()
+        })
+        .catch(() => {})
+    }
+  }
 
   if (t === 'pricing') {
     const mount = root.querySelector('#pricing-form-mount')

@@ -48,7 +48,15 @@ export function makeSupabaseServiceClient() {
   })
 }
 
+/** True when this process is taxio-v001 staging (never production taxio.be). */
+export function isTaxioStaging() {
+  return String(process.env.TAXIO_STAGING || '')
+    .trim()
+    .toLowerCase() === 'true'
+}
+
 export function makeResendClient() {
+  if (isTaxioStaging()) return null
   const key = process.env.RESEND_API_KEY
   if (!key) return null
   return new Resend(key)
@@ -108,6 +116,14 @@ export function resolveAdminCommunicationMailFrom() {
  * If `replyTo` is omitted, uses {@link resolveMailReplyTo}.
  */
 export async function safeSendEmail({ to, subject, html, from, replyTo }) {
+  if (isTaxioStaging()) {
+    console.warn('[mail:skip] TAXIO_STAGING=true; outbound Resend mail is disabled')
+    return {
+      skipped: true,
+      reason: 'taxio_staging',
+      error: 'Email skipped because TAXIO_STAGING=true (staging must not send real mail).',
+    }
+  }
   const resolvedFrom = String(from ?? '').trim() || resolveAutomatedMailFrom()
   const resolvedReplyTo = String(replyTo ?? '').trim() || resolveMailReplyTo()
   if (!to || !resolvedFrom) {

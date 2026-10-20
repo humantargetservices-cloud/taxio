@@ -181,16 +181,20 @@ export async function fetchApprovedCompanyBySlug(slug) {
   return data
 }
 
-export async function createBookingRequest(row) {
+export async function createBookingRequest(row, fetchOpts = {}) {
   try {
     const response = await fetch(apiUrl('/api/public-booking'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(row),
+      // Keep activation alive when the browser switches to WhatsApp/SMS/tel.
+      keepalive: fetchOpts.keepalive === true,
     })
     const body = await response.json().catch(() => ({}))
     if (!response.ok) {
-      return { error: new Error(body.error || `Booking request failed (${response.status}).`) }
+      const err = new Error(body.error || `Booking request failed (${response.status}).`)
+      if (body.code) err.code = body.code
+      return { error: err }
     }
     return { error: null, data: body.data || null }
   } catch (err) {
@@ -224,11 +228,46 @@ export async function createQuickBookingLog(row) {
   })
 }
 
+/** Prepare booking on BOOK (TX + frozen price). Does not start Company A 25s timer. */
+export async function createDraftBookingLog(row) {
+  return createBookingRequest({
+    ...row,
+    booking_phase: 'draft',
+    notes: bookingLegalNotesFallback(row, row.notes || ''),
+  })
+}
+
+/** Activate draft — starts 25s Company A deadline; returns passenger trip_token + trip_url. */
+export async function activateDraftBookingLog(row, fetchOpts = {}) {
+  return createBookingRequest(
+    {
+      ...row,
+      booking_phase: 'activate',
+    },
+    { keepalive: fetchOpts.keepalive !== false }
+  )
+}
+
+/** Passenger live trip status (opaque trip token). */
+export async function fetchPassengerTripStatus(tripToken) {
+  try {
+    const response = await fetch(
+      apiUrl(`/api/trip-status?token=${encodeURIComponent(String(tripToken || '').trim())}`),
+      { method: 'GET', headers: { Accept: 'application/json' } }
+    )
+    const body = await response.json().catch(() => ({}))
+    return { ok: response.ok && body?.ok !== false, status: response.status, body }
+  } catch (err) {
+    return { ok: false, status: 0, body: { state: 'INVALID', error: err?.message || 'failed' } }
+  }
+}
+
 export async function listBookingRequestsForCompany(companyId) {
   const { data, error } = await supabase
     .from('booking_requests')
     .select('*')
     .eq('company_id', companyId)
+    .neq('status', 'draft')
     .order('created_at', { ascending: false })
   if (error) throw error
   return data || []
@@ -511,9 +550,60 @@ export async function updateBookingRequestStatus(companyId, bookingId, status) {
   if (!BOOKING_STATUSES.includes(status)) {
     return { error: new Error('Invalid booking status.') }
   }
+  // ACCEPT goes through authoritative /api/rescue accept_booking (server-side WhatsApp).
+  // Blocks late accept after Rescue auto-activation (status already rejected / no longer new).
+  if (status === 'accepted') {
+    try {
+      const { data: sessData } = await supabase.auth.getSession()
+      let accessToken = sessData?.session?.access_token
+      if (!accessToken) {
+        return { error: new Error('Your session has expired. Please sign in again.') }
+      }
+      const doPost = async (token) => {
+        const res = await fetch(apiUrl('/api/rescue'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            action: 'accept_booking',
+            companyId,
+            bookingRequestId: bookingId,
+          }),
+        })
+        const body = await res.json().catch(() => ({}))
+        return { res, body }
+      }
+      let { res, body } = await doPost(accessToken)
+      if (res.status === 401) {
+        const { data: refreshed } = await supabase.auth.refreshSession()
+        accessToken = refreshed?.session?.access_token
+        if (!accessToken) {
+          return { error: new Error('Your session has expired. Please sign in again.') }
+        }
+        ;({ res, body } = await doPost(accessToken))
+      }
+      if (!res.ok || body?.ok !== true) {
+        return {
+          error: new Error(
+            body?.error ||
+              (body?.code === 'NO_LONGER_AVAILABLE'
+                ? 'Booking is no longer available to accept.'
+                : 'Could not accept this trip.')
+          ),
+        }
+      }
+      return { error: null, data: body }
+    } catch (err) {
+      return { error: new Error(err?.message || 'Could not accept this trip.') }
+    }
+  }
+  const patch = { status }
+  if (status === 'rejected') patch.decision_deadline_at = null
   const { error } = await supabase
     .from('booking_requests')
-    .update({ status })
+    .update(patch)
     .eq('id', bookingId)
     .eq('company_id', companyId)
   return { error }
@@ -532,6 +622,7 @@ export async function updateCompanyByOwner(companyId, patch) {
     'hourly_enabled',
     'hourly_rate_eur',
     'hourly_min_hours',
+    'rescue_enabled',
   ]
   const data = {}
   for (const k of allowed) {
@@ -541,7 +632,7 @@ export async function updateCompanyByOwner(companyId, patch) {
       data[k] = v == null || v === '' ? null : String(v).trim()
       continue
     }
-    if (k === 'hourly_enabled') {
+    if (k === 'hourly_enabled' || k === 'rescue_enabled') {
       data[k] = patch[k] === true
       continue
     }

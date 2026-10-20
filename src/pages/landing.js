@@ -1,9 +1,14 @@
-import { translations } from '../i18n.js'
+import { translations, tPassengerRecovery } from '../i18n.js'
 import { escapeHtml } from '../lib/html.js'
 import { getLocale, setLocale, syncDocumentLang } from '../lib/locale.js'
 import { icon, featureIcon } from '../lib/icons.js'
 import { taxioLogoImg } from '../lib/taxioLogo.js'
 import { isPublicDarkMode, setPublicDarkMode, syncPublicThemeClass } from '../lib/publicTheme.js'
+import {
+  passengerActiveTripBannerHtml,
+  readPassengerActiveTrip,
+  validateStoredPassengerTrip,
+} from '../lib/passengerActiveTrip.js'
 
 let lang = getLocale()
 let detailsOpen = false
@@ -53,6 +58,12 @@ export function mountLanding(root) {
   </div>
   <section class="px-4 pt-20 pb-12 sm:pt-24 sm:pb-14 ${t ? 'bg-slate-900' : 'bg-gradient-to-b from-slate-50 via-white to-white'}">
     <div class="container mx-auto max-w-5xl">
+      <div id="landing-active-trip-slot" class="mx-auto mb-6 max-w-md"></div>
+      <p class="mb-8 text-center text-xs ${t ? 'text-slate-400' : 'text-slate-500'}">
+        <a href="/find-booking" class="font-semibold ${t ? 'text-amber-300 hover:underline' : 'text-amber-800 hover:underline'}">${escapeHtml(
+          tPassengerRecovery(lang).findBooking || 'Find my booking'
+        )}</a>
+      </p>
       <div class="mb-10 text-center sm:mb-12">
         <div class="mb-6 flex flex-col items-center gap-5 sm:mb-8">
           ${taxioLogoImg('h-16 w-16 sm:h-[4.5rem] sm:w-[4.5rem]')}
@@ -169,4 +180,22 @@ export function mountLanding(root) {
     detailsOpen = !detailsOpen
     mountLanding(root)
   })
+
+  void (async () => {
+    const slot = root.querySelector('#landing-active-trip-slot')
+    if (!slot) return
+    const stored = readPassengerActiveTrip()
+    if (!stored) return
+    const validated = await validateStoredPassengerTrip(stored)
+    if (!validated.active || !validated.token) return
+    if (!root.contains(slot)) return
+    const pr = tPassengerRecovery(lang)
+    slot.innerHTML = passengerActiveTripBannerHtml({
+      escapeHtml,
+      token: validated.token,
+      title: pr.activeTitle || 'Your active trip',
+      viewLabel: pr.viewTrip || 'View trip',
+      showFind: false,
+    })
+  })()
 }

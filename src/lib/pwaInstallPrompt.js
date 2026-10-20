@@ -77,6 +77,47 @@ export function waitForServiceWorkerReady() {
   return Promise.resolve()
 }
 
+const SW_CONTROLLER_RELOAD_SESSION_KEY = 'taxio_sw_controller_reloaded'
+
+function hasSessionControllerReload() {
+  try {
+    return sessionStorage.getItem(SW_CONTROLLER_RELOAD_SESSION_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function markSessionControllerReload() {
+  try {
+    sessionStorage.setItem(SW_CONTROLLER_RELOAD_SESSION_KEY, '1')
+  } catch {
+    /* private mode — in-memory flags still apply for this page */
+  }
+}
+
+/**
+ * At most ONE automatic reload per tab session when a new SW takes control.
+ * In-memory flags alone reset on reload and caused infinite loops with OneSignal
+ * reclaiming the unified /sw.js registration.
+ */
+function bindControllerChangeReloadOnce() {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
+  if (window.__taxioSwControllerReloadBound) return
+  window.__taxioSwControllerReloadBound = true
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (window.__taxioSwRefreshing) return
+    if (hasSessionControllerReload()) {
+      pwaLog('controllerchange ignored (session already reloaded once)')
+      return
+    }
+    window.__taxioSwRefreshing = true
+    markSessionControllerReload()
+    pwaLog('controllerchange → one session reload')
+    window.location.reload()
+  })
+}
+
 /** Register SW and mark ready (or ready-on-failure so install logic is not blocked forever). */
 export function initServiceWorkerRegistration() {
   if (!('serviceWorker' in navigator)) {
@@ -85,10 +126,19 @@ export function initServiceWorkerRegistration() {
   }
   if (serviceWorkerReadyPromise) return serviceWorkerReadyPromise
 
+  bindControllerChangeReloadOnce()
+
   serviceWorkerReadyPromise = navigator.serviceWorker
     .register('/sw.js')
     .then((reg) => {
       setServiceWorkerReady(true)
+      // Check for updated SW once on register. Do NOT update on every visibilitychange —
+      // that + skipWaiting/clients.claim + controllerchange reload caused PWA loops.
+      try {
+        void reg.update()
+      } catch {
+        /* ignore */
+      }
       return reg
     })
     .catch(() => {

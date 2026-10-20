@@ -1,12 +1,13 @@
 import { slugFromCompanyName } from '../lib/slug.js'
 import { parseBookingAnalyticsSource } from '../lib/companyAnalytics.js'
 import { bookingPageUrlWithSource } from '../lib/tenant.js'
-import { mountBookCompany } from './bookCompany.js'
 
 /**
  * /r/:slug?src=qr|share — redirect to booking page with src preserved.
  * qr_scan / share_visit are recorded once on the booking page load (not here),
  * so cross-origin redirects do not abort in-flight tracking requests.
+ *
+ * Booking page is dynamically imported so intl-tel-input stays out of the main bundle.
  */
 export async function mountCompanyAnalyticsRedirect(root, slug) {
   const normalized = slugFromCompanyName(slug)
@@ -22,6 +23,7 @@ export async function mountCompanyAnalyticsRedirect(root, slug) {
       return
     }
     window.history.replaceState({}, '', `${destUrl.pathname}${destUrl.search}`)
+    const { mountBookCompany } = await import('./bookCompany.js')
     await mountBookCompany(root, normalized)
   } catch {
     window.location.replace(dest)
