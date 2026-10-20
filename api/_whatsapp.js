@@ -19,6 +19,7 @@ import {
   isUnresolvedWhatsappUrlPlaceholder,
   whatsappTripUrlButtonParameter,
 } from './_passengerTrip.js'
+import { resolveWhatsAppTemplateLanguage } from './_passengerLocale.js'
 
 function digitsOnly(phone) {
   return String(phone || '').replace(/\D/g, '')
@@ -69,8 +70,11 @@ export function bookingConfirmedTemplateConfigured() {
   return Boolean(String(process.env.WHATSAPP_BOOKING_CONFIRMED_TEMPLATE_NAME || '').trim())
 }
 
-function templateLang() {
-  return String(process.env.WHATSAPP_TEMPLATE_LANG || 'en').trim() || 'en'
+function languageForSend({ templateName, passengerLocale }) {
+  return resolveWhatsAppTemplateLanguage({
+    templateName,
+    passengerLocale,
+  })
 }
 
 /** @deprecated Legacy quick-reply payload — not used by active View Booking templates. */
@@ -209,11 +213,20 @@ export function buildRescueConfirmTemplateComponents({
   }
 }
 
-async function sendCloudTemplate({ toPhone, templateName, components, bodyParamCount, dryRun }) {
+async function sendCloudTemplate({
+  toPhone,
+  templateName,
+  components,
+  bodyParamCount,
+  dryRun,
+  passengerLocale,
+}) {
   const name = String(templateName || '').trim()
   if (!name) {
     return { ok: false, skipped: true, error: 'TEMPLATE_NOT_CONFIGURED', metaTemplateSetupRequired: true }
   }
+
+  const languageCode = languageForSend({ templateName: name, passengerLocale })
 
   const payload = {
     messaging_product: 'whatsapp',
@@ -221,7 +234,7 @@ async function sendCloudTemplate({ toPhone, templateName, components, bodyParamC
     type: 'template',
     template: {
       name,
-      language: { code: templateLang() },
+      language: { code: languageCode },
       components,
     },
   }
@@ -255,7 +268,7 @@ async function sendCloudTemplate({ toPhone, templateName, components, bodyParamC
     console.info('[whatsapp] template send attempt', {
       phone_number_id: phoneNumberId,
       template: name,
-      language: templateLang(),
+      language: languageCode,
       to_len: String(to).length,
       body_param_count: bodyParamCount,
       url_button_suffix_len: urlSuffix ? String(urlSuffix).length : 0,
@@ -318,7 +331,7 @@ async function sendCloudTemplate({ toPhone, templateName, components, bodyParamC
       message_id: messageId,
       phone_number_id: phoneNumberId,
       template: name,
-      language: templateLang(),
+      language: languageCode,
     })
     return {
       ok: true,
@@ -378,6 +391,7 @@ export async function sendBookingConfirmedTemplate({
   companyName,
   bookingReference,
   tripToken,
+  passengerLocale,
   dryRun = false,
 }) {
   const token = whatsappTripUrlButtonParameter(tripToken)
@@ -412,11 +426,13 @@ export async function sendBookingConfirmedTemplate({
     bookingReference: ref,
     tripToken: token,
   })
+  const templateName = bookingConfirmedTemplateName()
   const result = await sendCloudTemplate({
     toPhone,
-    templateName: bookingConfirmedTemplateName(),
+    templateName,
     components: built.components,
     bodyParamCount: built.bodyParameters.length,
+    passengerLocale,
     dryRun,
   })
   if (dryRun && result.ok) {
@@ -427,6 +443,7 @@ export async function sendBookingConfirmedTemplate({
       companyName: company,
       bookingReference: ref,
       tripToken: token,
+      language: languageForSend({ templateName, passengerLocale }),
       expectedTemplate: 'taxio_booking_confirmed_staging',
     }
   }
@@ -441,6 +458,7 @@ export async function sendRescueOfferTemplate({
   originalCompanyName,
   winnerCompanyName,
   tripToken,
+  passengerLocale,
   dryRun = false,
 }) {
   const token = whatsappTripUrlButtonParameter(tripToken)
@@ -474,11 +492,13 @@ export async function sendRescueOfferTemplate({
     winnerCompanyName: winner,
     tripToken: token,
   })
+  const templateName = rescueOfferTemplateName() || 'taxio_rescue_offer_staging'
   const result = await sendCloudTemplate({
     toPhone,
-    templateName: rescueOfferTemplateName() || 'taxio_rescue_offer_staging',
+    templateName,
     components: built.components,
     bodyParamCount: built.bodyParameters.length,
+    passengerLocale,
     dryRun,
   })
   if (dryRun && result.ok) {
@@ -489,6 +509,7 @@ export async function sendRescueOfferTemplate({
       originalCompanyName: original,
       winnerCompanyName: winner,
       tripToken: token,
+      language: languageForSend({ templateName, passengerLocale }),
     }
   }
   return result
@@ -501,6 +522,7 @@ export async function sendRescueReminderTemplate({
   toPhone,
   winnerCompanyName,
   tripToken,
+  passengerLocale,
   dryRun = false,
 }) {
   const token = whatsappTripUrlButtonParameter(tripToken)
@@ -530,11 +552,13 @@ export async function sendRescueReminderTemplate({
     winnerCompanyName: winner,
     tripToken: token,
   })
+  const templateName = rescueReminderTemplateName() || 'taxio_rescue_reminder_staging'
   const result = await sendCloudTemplate({
     toPhone,
-    templateName: rescueReminderTemplateName() || 'taxio_rescue_reminder_staging',
+    templateName,
     components: built.components,
     bodyParamCount: built.bodyParameters.length,
+    passengerLocale,
     dryRun,
   })
   if (dryRun && result.ok) {
@@ -544,6 +568,7 @@ export async function sendRescueReminderTemplate({
       urlParameter: built.urlParameter,
       winnerCompanyName: winner,
       tripToken: token,
+      language: languageForSend({ templateName, passengerLocale }),
     }
   }
   return result

@@ -8,6 +8,7 @@ import {
 } from './_utils.js'
 import { generateBookingReference } from './_bookingReference.js'
 import { mintPassengerTripToken, tripUrlForToken } from './_passengerTrip.js'
+import { normalizePassengerLocale } from './_passengerLocale.js'
 
 const MAX_NOTES_LEN = 500
 const VEHICLE_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
@@ -244,23 +245,41 @@ async function activateDraftBooking(req, res, body) {
 
   const tripToken = mintPassengerTripToken()
   const deadlineIso = new Date(Date.now() + decisionSeconds * 1000).toISOString()
+  const passengerLocale = normalizePassengerLocale(
+    body.passenger_locale || body.locale || body.language
+  )
   const patch = {
     status: 'new',
     customer_phone: riderPhoneE164,
     customer_name: riderName,
     decision_deadline_at: deadlineIso,
     passenger_trip_token: tripToken,
+    passenger_locale: passengerLocale,
   }
   if (notes) patch.notes = notes
 
-  const { data: updated, error: updErr } = await supabase
+  let updated = null
+  let updErr = null
+  ;({ data: updated, error: updErr } = await supabase
     .from('booking_requests')
     .update(patch)
     .eq('id', bookingId)
     .eq('company_id', companyId)
     .eq('status', 'draft')
     .select('id, booking_reference, passenger_trip_token')
-    .maybeSingle()
+    .maybeSingle())
+
+  if (updErr && missingColumn(updErr, 'passenger_locale')) {
+    const { passenger_locale: _drop, ...withoutLocale } = patch
+    ;({ data: updated, error: updErr } = await supabase
+      .from('booking_requests')
+      .update(withoutLocale)
+      .eq('id', bookingId)
+      .eq('company_id', companyId)
+      .eq('status', 'draft')
+      .select('id, booking_reference, passenger_trip_token')
+      .maybeSingle())
+  }
 
   if (updErr) {
     if (/passenger_trip_token|schema cache|column/i.test(updErr.message || '')) {
@@ -533,6 +552,18 @@ export default async function handler(req, res) {
             .eq('status', 'draft')
             .is('estimated_price_eur', null)
         }
+        // Refresh passenger UI language on reused draft (best-effort).
+        const reuseLocale = normalizePassengerLocale(
+          body.passenger_locale || body.locale || body.language
+        )
+        const { error: localeUpdErr } = await supabase
+          .from('booking_requests')
+          .update({ passenger_locale: reuseLocale })
+          .eq('id', reusableDraft.id)
+          .eq('status', 'draft')
+        if (localeUpdErr && !missingColumn(localeUpdErr, 'passenger_locale')) {
+          console.error('[public-booking:draft-locale]', localeUpdErr)
+        }
         return json(res, 200, {
           data: {
             ok: true,
@@ -668,6 +699,9 @@ export default async function handler(req, res) {
         : null
 
     const bookingReference = generateBookingReference()
+    const passengerLocale = normalizePassengerLocale(
+      body.passenger_locale || body.locale || body.language
+    )
     const payload = {
       company_id: companyId,
       pickup_address: pickup,
@@ -690,6 +724,7 @@ export default async function handler(req, res) {
       notes: notes || null,
       status,
       booking_reference: bookingReference,
+      passenger_locale: passengerLocale,
       rider_terms_accepted: true,
       rider_terms_accepted_at: new Date().toISOString(),
       rider_terms_version: String(body?.termsAcceptance?.terms_version || '').trim() || null,
@@ -713,6 +748,11 @@ export default async function handler(req, res) {
     if (insertErr && /booking_reference|duplicate key|unique/i.test(insertErr.message || '')) {
       payload.booking_reference = generateBookingReference()
       ;({ data: inserted, error: insertErr } = await insertReturning(payload))
+    }
+
+    if (insertErr && missingColumn(insertErr, 'passenger_locale')) {
+      const { passenger_locale: _pl, ...withoutLocale } = payload
+      ;({ data: inserted, error: insertErr } = await insertReturning(withoutLocale))
     }
 
     if (insertErr && missingColumn(insertErr, 'booking_reference')) {

@@ -75,15 +75,32 @@ async function loadRescueNotifyContext(admin, rescueRequestId) {
     return { ok: false, code: 'NO_ACTION', reason: 'NO_WINNER' }
   }
 
-  const { data: booking, error: bookErr } = await admin
-    .from('booking_requests')
-    .select('id, customer_phone, estimated_price_eur, price_currency, passenger_trip_token')
-    .eq('id', rescue.booking_request_id)
-    .maybeSingle()
-
-  if (bookErr) {
-    console.error('[rescue-notify:booking]', bookErr.message)
-    return { ok: false, code: 'LOAD_FAILED', error: bookErr.message }
+  let booking = null
+  {
+    const { data, error: bookErr } = await admin
+      .from('booking_requests')
+      .select(
+        'id, customer_phone, estimated_price_eur, price_currency, passenger_trip_token, passenger_locale'
+      )
+      .eq('id', rescue.booking_request_id)
+      .maybeSingle()
+    if (bookErr && /passenger_locale/i.test(bookErr.message || '')) {
+      const { data: fallback, error: book2 } = await admin
+        .from('booking_requests')
+        .select('id, customer_phone, estimated_price_eur, price_currency, passenger_trip_token')
+        .eq('id', rescue.booking_request_id)
+        .maybeSingle()
+      if (book2) {
+        console.error('[rescue-notify:booking]', book2.message)
+        return { ok: false, code: 'LOAD_FAILED', error: book2.message }
+      }
+      booking = fallback
+    } else if (bookErr) {
+      console.error('[rescue-notify:booking]', bookErr.message)
+      return { ok: false, code: 'LOAD_FAILED', error: bookErr.message }
+    } else {
+      booking = data
+    }
   }
 
   const tripToken = String(booking?.passenger_trip_token || '').trim()
@@ -152,7 +169,16 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
   const ctx = await loadRescueNotifyContext(admin, rescueRequestId)
   if (!ctx.ok) return ctx
 
-  const { rescue, tripToken, tripUrl, passengerPhone, originalCompanyName, winnerCompanyName } = ctx
+  const {
+    rescue,
+    booking,
+    tripToken,
+    tripUrl,
+    passengerPhone,
+    originalCompanyName,
+    winnerCompanyName,
+  } = ctx
+  const passengerLocale = booking?.passenger_locale ?? null
 
   if (rescue.passenger_confirm_whatsapp_sent_at) {
     return {
@@ -181,6 +207,7 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
       originalCompanyName,
       winnerCompanyName,
       tripToken,
+      passengerLocale,
       dryRun: true,
     })
     return {
@@ -193,6 +220,7 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
       originalCompanyName,
       winnerCompanyName,
       tripToken,
+      passengerLocale,
       bodyParamCount: sendResult.bodyParameters?.length ?? null,
       bodyParameters: sendResult.bodyParameters || null,
       urlParameter: sendResult.urlParameter || null,
@@ -226,6 +254,7 @@ export async function notifyRescuePassengerConfirmWhatsApp(admin, opts = {}) {
     originalCompanyName,
     winnerCompanyName,
     tripToken,
+    passengerLocale,
     dryRun: false,
   })
 
@@ -279,7 +308,8 @@ export async function notifyRescuePassengerReminderWhatsApp(admin, opts = {}) {
   const ctx = await loadRescueNotifyContext(admin, rescueRequestId)
   if (!ctx.ok) return ctx
 
-  const { rescue, tripToken, tripUrl, passengerPhone, winnerCompanyName } = ctx
+  const { rescue, booking, tripToken, tripUrl, passengerPhone, winnerCompanyName } = ctx
+  const passengerLocale = booking?.passenger_locale ?? null
 
   if (!reminderDue(rescue)) {
     return { ok: false, code: 'NO_ACTION', reason: 'REMINDER_NOT_DUE', kind: 'reminder', tripUrl }
@@ -311,6 +341,7 @@ export async function notifyRescuePassengerReminderWhatsApp(admin, opts = {}) {
       toPhone: passengerPhone,
       winnerCompanyName,
       tripToken,
+      passengerLocale,
       dryRun: true,
     })
     return {
@@ -322,6 +353,7 @@ export async function notifyRescuePassengerReminderWhatsApp(admin, opts = {}) {
       tripUrl,
       winnerCompanyName,
       tripToken,
+      passengerLocale,
       bodyParamCount: sendResult.bodyParameters?.length ?? null,
       bodyParameters: sendResult.bodyParameters || null,
       urlParameter: sendResult.urlParameter || null,
@@ -372,6 +404,7 @@ export async function notifyRescuePassengerReminderWhatsApp(admin, opts = {}) {
     toPhone: passengerPhone,
     winnerCompanyName,
     tripToken,
+    passengerLocale,
     dryRun: false,
   })
 

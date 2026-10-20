@@ -37,26 +37,33 @@ export async function notifyBookingConfirmedWhatsApp(admin, opts = {}) {
   let booking = null
   let columnReady = true
   {
-    const { data, error: loadErr } = await admin
-      .from('booking_requests')
-      .select(
-        `id, status, company_id, customer_phone, booking_reference, passenger_trip_token, ${SEND_ONCE_COLUMN}`
-      )
-      .eq('id', bookingRequestId)
-      .maybeSingle()
-    if (loadErr && isMissingColumnError(loadErr)) {
-      columnReady = false
-      const { data: fallback, error: load2 } = await admin
+    const selectAttempts = [
+      `id, status, company_id, customer_phone, booking_reference, passenger_trip_token, passenger_locale, ${SEND_ONCE_COLUMN}`,
+      `id, status, company_id, customer_phone, booking_reference, passenger_trip_token, ${SEND_ONCE_COLUMN}`,
+      'id, status, company_id, customer_phone, booking_reference, passenger_trip_token, passenger_locale',
+      'id, status, company_id, customer_phone, booking_reference, passenger_trip_token',
+    ]
+    let lastErr = null
+    for (const cols of selectAttempts) {
+      const { data, error } = await admin
         .from('booking_requests')
-        .select('id, status, company_id, customer_phone, booking_reference, passenger_trip_token')
+        .select(cols)
         .eq('id', bookingRequestId)
         .maybeSingle()
-      if (load2) return { ok: false, code: 'LOAD_FAILED', error: load2.message }
-      booking = fallback
-    } else if (loadErr) {
-      return { ok: false, code: 'LOAD_FAILED', error: loadErr.message }
-    } else {
-      booking = data
+      if (!error) {
+        booking = data
+        if (!cols.includes(SEND_ONCE_COLUMN)) columnReady = false
+        break
+      }
+      lastErr = error
+      if (isMissingColumnError(error) || /passenger_locale/i.test(error.message || '')) {
+        if (isMissingColumnError(error)) columnReady = false
+        continue
+      }
+      return { ok: false, code: 'LOAD_FAILED', error: error.message }
+    }
+    if (!booking && lastErr) {
+      return { ok: false, code: 'LOAD_FAILED', error: lastErr.message }
     }
   }
   if (!booking) return { ok: false, code: 'NOT_FOUND' }
@@ -84,12 +91,15 @@ export async function notifyBookingConfirmedWhatsApp(admin, opts = {}) {
     return { ok: false, code: 'NO_BOOKING_REFERENCE', kind: 'booking_confirmed' }
   }
 
+  const passengerLocale = booking.passenger_locale ?? null
+
   if (dryRun) {
     const sendResult = await sendBookingConfirmedTemplate({
       toPhone: passengerPhone,
       companyName,
       bookingReference,
       tripToken,
+      passengerLocale,
       dryRun: true,
     })
     return {
@@ -101,6 +111,7 @@ export async function notifyBookingConfirmedWhatsApp(admin, opts = {}) {
       bookingReference,
       tripToken,
       tripUrl,
+      passengerLocale,
       passengerPhoneDigits: whatsappCloudRecipient(passengerPhone),
       templateConfigured: bookingConfirmedTemplateConfigured(),
       expectedTemplate: 'taxio_booking_confirmed_staging',
@@ -189,6 +200,7 @@ export async function notifyBookingConfirmedWhatsApp(admin, opts = {}) {
     companyName,
     bookingReference,
     tripToken,
+    passengerLocale,
     dryRun: false,
   })
 

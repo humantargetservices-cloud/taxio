@@ -2521,6 +2521,7 @@ Estimate price: ${estimatePrice}${refLine}`
         accepted_at: new Date().toISOString(),
         terms_version: TERMS_VERSION_BOOKING_RIDER,
       },
+      passenger_locale: getLocale(),
       turnstileToken,
       website: honeypot,
       formStartedAt,
@@ -2778,7 +2779,9 @@ Estimate price: ${estimatePrice}${refLine}`
             booking_id: draft.id,
             company_id: company.id,
             customer_phone: passengerDigits,
+            customer_name: pickupName || 'Booking request',
             notes: logNotes,
+            passenger_locale: getLocale(),
           })
         let { error: actErr, data: actData } = await run()
         if (actErr) ({ error: actErr, data: actData } = await run())
@@ -2892,6 +2895,7 @@ Estimate price: ${estimatePrice}${refLine}`
             customer_phone: phoneE164,
             customer_name: pickupName,
             notes: logNotes,
+            passenger_locale: getLocale(),
           })
         let { error: actErr, data: actData } = await run()
         if (actErr) ({ error: actErr, data: actData } = await run())
