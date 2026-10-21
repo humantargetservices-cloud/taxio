@@ -4,7 +4,7 @@
   "description": "TAXIO operator dashboard — manage your taxi company.",
   "display": "standalone",
   "start_url": "/dashboard/company",
-  "scope": "/dashboard/",
+  "scope": "/",
   "id": "taxio-dashboard",
   "theme_color": "#facc15",
   "background_color": "#020617",

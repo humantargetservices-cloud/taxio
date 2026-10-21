@@ -225,6 +225,8 @@ export const translations = {
       pushNotGranted: 'Notifications were not allowed. Tap Enable notifications and choose Allow.',
       pushUnsupported: 'This browser cannot show TAXIO notifications.',
       pushOptInFailed: 'Permission was allowed, but the subscription did not finish. Try again.',
+      pushSubscriptionIncomplete:
+        'Notifications are allowed, but this phone has no push subscription yet. Tap Enable notifications to finish setup.',
       pushBusy: 'Turning on…',
       pushError: 'Could not enable notifications. Try again.',
       activeTripsTitle: 'Active trips',
@@ -1197,6 +1199,8 @@ Thank you.`,
       pushUnsupported: 'Ce navigateur ne peut pas afficher les notifications TAXIO.',
       pushOptInFailed:
         'L’autorisation a été accordée, mais l’abonnement ne s’est pas terminé. Réessayez.',
+      pushSubscriptionIncomplete:
+        'Les notifications sont autorisées, mais ce téléphone n’a pas encore d’abonnement push. Touchez Activer les notifications pour terminer.',
       pushBusy: 'Activation…',
       pushError: 'Impossible d’activer les notifications. Réessayez.',
       activeTripsTitle: 'Courses actives',
@@ -2171,6 +2175,8 @@ Merci.`,
       pushNotGranted: 'Meldingen zijn niet toegestaan. Tik op Meldingen inschakelen en kies Toestaan.',
       pushUnsupported: 'Deze browser kan geen TAXIO-meldingen tonen.',
       pushOptInFailed: 'Toestemming is gegeven, maar het abonnement is niet afgerond. Probeer opnieuw.',
+      pushSubscriptionIncomplete:
+        'Meldingen zijn toegestaan, maar deze telefoon heeft nog geen push-abonnement. Tik op Meldingen inschakelen om de installatie af te ronden.',
       pushBusy: 'Bezig…',
       pushError: 'Meldingen inschakelen mislukt. Probeer opnieuw.',
       activeTripsTitle: 'Actieve ritten',

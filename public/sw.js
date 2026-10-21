@@ -2,8 +2,9 @@
  * TAXIO root service worker — PWA cache/update + OneSignal Web Push display.
  * Never caches /api/*, Supabase, or booking/Rescue/trip network authority.
  *
- * v4: OneSignal SDK imported here (scope /). Legacy raw push/notificationclick
- * handlers removed — OneSignal is the only push-display handler.
+ * v4: OneSignal SDK imported here (scope /). This is the only worker OneSignal
+ * may register. Do not also register /OneSignalSDKWorker.js — that path is the
+ * SPA HTML rewrite and cannot create a push subscription.
  * Purges older taxio-shell-v1/v2 and taxio-assets-v1/v2 on activate.
  */
 importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js')

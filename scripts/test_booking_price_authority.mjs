@@ -141,9 +141,9 @@ describe('production origin fallback', () => {
     else process.env.PUBLIC_APP_ORIGIN = prev
   })
 
-  it('uses PUBLIC_APP_ORIGIN, otherwise https://taxio.be', () => {
+  it('uses PUBLIC_APP_ORIGIN, otherwise https://www.taxio.be', () => {
     delete process.env.PUBLIC_APP_ORIGIN
-    assert.equal(publicAppOrigin(), 'https://taxio.be')
+    assert.equal(publicAppOrigin(), 'https://www.taxio.be')
     process.env.PUBLIC_APP_ORIGIN = 'https://taxio.be/'
     assert.equal(publicAppOrigin(), 'https://taxio.be')
     process.env.PUBLIC_APP_ORIGIN = 'https://www.taxio.be'

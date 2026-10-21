@@ -167,7 +167,8 @@ export function pushTtlSecondsForEvent(eventType) {
 
 export function publicAppOrigin() {
   const raw = String(process.env.PUBLIC_APP_ORIGIN || '').trim().replace(/\/$/, '')
-  return raw || 'https://taxio.be'
+  // Apex redirects to www. Push click URLs must be the same origin as the service worker.
+  return raw || 'https://www.taxio.be'
 }
 
 /** Absolute dashboard launch URL for OneSignal web push. */
@@ -223,6 +224,8 @@ export async function sendOneSignalPushToCompany({ companyId, eventType, content
     contents: { en: String(content?.body || 'Open TAXIO for trip updates.').slice(0, 160) },
     url,
     ttl,
+    // High priority where the browser supports it. Web Push uses the device
+    // default sound; there is no custom ringtone on this channel.
     priority: 10,
     chrome_web_icon: `${publicAppOrigin()}/taxio-logo.png`,
     firefox_icon: `${publicAppOrigin()}/taxio-logo.png`,
@@ -506,16 +509,12 @@ export function dashboardDeepLink(extraQuery = '') {
  */
 export function buildPushNotificationContent(eventType, ctx = {}) {
   const url = dashboardDeepLink(ctx.urlQuery || '')
-  const pickup = shortAddressLabel(ctx.pickup)
-  const dropoff = shortAddressLabel(ctx.dropoff)
-  const price = ctx.priceLabel || null
-  const route = price ? `${pickup} → ${dropoff} · ${price}` : `${pickup} → ${dropoff}`
 
   switch (eventType) {
     case PUSH_EVENT_TYPES.COMPANY_BOOKING_NEW:
       return {
         title: 'New trip request',
-        body: route,
+        body: 'New trip request — respond within 30 seconds.',
         tag: `booking-${ctx.bookingId || 'new'}`,
         data: {
           url,
@@ -525,8 +524,8 @@ export function buildPushNotificationContent(eventType, ctx = {}) {
       }
     case PUSH_EVENT_TYPES.RESCUE_OPPORTUNITY_NEW:
       return {
-        title: 'New TAXIO Rescue trip',
-        body: route,
+        title: 'New trip request',
+        body: 'New trip request — respond within 30 seconds.',
         tag: `rescue-opp-${ctx.opportunityId || ctx.rescueRequestId || 'new'}`,
         data: {
           url,

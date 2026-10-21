@@ -521,6 +521,14 @@ function renderPushNotifyCard(td, pushMode) {
       <p class="text-sm font-semibold ${DASH_TEXT}">${escapeHtml(td.pushBlocked)}</p>
     </section>`
   }
+  if (pushMode === 'incomplete') {
+    return `<section id="dash-push-card" class="${DASH_CARD} p-5 sm:p-6">
+      <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(td.pushEnableTitle)}</h2>
+      <p class="mt-1.5 text-sm leading-relaxed ${DASH_TEXT}">${escapeHtml(td.pushSubscriptionIncomplete || td.pushOptInFailed)}</p>
+      <p id="dash-push-msg" class="mt-2 hidden text-sm font-medium text-red-600 dark:text-red-400" role="status"></p>
+      <button type="button" id="dash-push-enable" class="${DASH_BTN_PRIMARY} mt-4 min-h-[48px] w-full sm:w-auto sm:px-6">${escapeHtml(td.pushEnableButton)}</button>
+    </section>`
+  }
   return `<section id="dash-push-card" class="${DASH_CARD} p-5 sm:p-6">
     <h2 class="text-base font-bold tracking-tight ${DASH_TEXT}">${escapeHtml(td.pushEnableTitle)}</h2>
     <p class="mt-1.5 text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.pushEnableHelper)}</p>

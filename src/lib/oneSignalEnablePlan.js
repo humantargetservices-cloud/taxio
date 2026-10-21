@@ -1,6 +1,69 @@
 /** Absolute path so registration does not resolve under /dashboard/company. */
 export const ONESIGNAL_SW_PATH = '/sw.js'
 export const ONESIGNAL_SW_SCOPE = '/'
+/**
+ * Canonical operator origin. Apex taxio.be redirects here; the service worker
+ * and OneSignal site URL are this origin.
+ */
+export const PRODUCTION_PUSH_ORIGIN = 'https://www.taxio.be'
+
+/**
+ * OneSignal v16 Typical Site ignores serviceWorkerPath unless this override is set,
+ * then registers /OneSignalSDKWorker.js. That URL is the SPA HTML rewrite (not JS),
+ * so PushManager.subscribe never runs. Custom Code still receives the same path.
+ * Path has no leading slash: the SDK joins it onto `path`.
+ */
+export function oneSignalInitWorkerOptions() {
+  return {
+    path: '/',
+    serviceWorkerPath: 'sw.js',
+    serviceWorkerParam: { scope: ONESIGNAL_SW_SCOPE },
+    serviceWorkerOverrideForTypical: true,
+  }
+}
+
+/**
+ * Drop only a default OneSignal worker that occupies scope `/`.
+ * Never matches /sw.js, /onesignal/, or any other scope.
+ */
+export function isCompetingRootOneSignalWorker({ scriptPath, scopePath } = {}) {
+  const script = String(scriptPath || '')
+  const scope = String(scopePath || '')
+  if (scope !== '/') return false
+  if (/\/sw\.js$/i.test(script)) return false
+  return /\/OneSignalSDKWorker\.js$/i.test(script) || /\/OneSignalSDKUpdaterWorker\.js$/i.test(script)
+}
+
+/** Enabled only when the browser allowed notifications AND OneSignal has a real subscription. */
+export function isPushEnrollmentComplete({
+  permission,
+  optedIn,
+  subscriptionIdPresent,
+  tokenPresent,
+} = {}) {
+  return permission === 'granted' && !!optedIn && !!(subscriptionIdPresent || tokenPresent)
+}
+
+/**
+ * Dashboard card mode. Permission granted without a subscription is incomplete, never on.
+ */
+export function pushUiModeFromSnapshot({
+  supported = true,
+  permission,
+  optedIn,
+  subscriptionIdPresent,
+  tokenPresent,
+} = {}) {
+  if (!supported) return 'unsupported'
+  if (permission === 'denied') return 'blocked'
+  if (
+    isPushEnrollmentComplete({ permission, optedIn, subscriptionIdPresent, tokenPresent })
+  ) {
+    return 'on'
+  }
+  if (permission === 'granted') return 'incomplete'
+  return 'prompt'
+}
 export const IOS_HOME_SCREEN_MESSAGE =
   'Add TAXIO to your Home Screen first: tap Share, then Add to Home Screen, open TAXIO from the installed icon, then tap Enable notifications.'
 
