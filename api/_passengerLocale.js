@@ -43,8 +43,13 @@ export function forceWhatsAppEnglishTemplateLanguage(templateName) {
   const origin = String(process.env.PUBLIC_APP_ORIGIN || '')
     .trim()
     .toLowerCase()
-  if (origin.includes('staging.taxio.be') || origin.includes('stagingtaxio')) return true
-  return false
+  if (!origin) return false
+  if (origin.includes('stagingtaxio')) return true
+  try {
+    return new URL(origin).hostname.startsWith('staging.')
+  } catch {
+    return false
+  }
 }
 
 /**

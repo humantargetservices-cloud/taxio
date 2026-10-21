@@ -9,12 +9,15 @@ import {
 import { generateBookingReference } from './_bookingReference.js'
 import { mintPassengerTripToken, tripUrlForToken } from './_passengerTrip.js'
 import { normalizePassengerLocale } from './_passengerLocale.js'
+import { draftPriceWrite, resolveStandardBookingPrice } from './_bookingPrice.js'
 
 const MAX_NOTES_LEN = 500
 const VEHICLE_TYPE_ORDER = ['Standard', 'Van', 'Luxury']
 /** Allow tiny clock skew between client and server (Belgium trip-local → ISO). */
 const PAST_RIDE_SKEW_MS = 60_000
 const PAST_RIDE_ERROR = 'Please choose a future pickup time.'
+const PRICE_UNAVAILABLE_ERROR =
+  "We couldn't calculate this trip price. Please check the addresses and try again."
 
 function isRideDatetimeInPast(iso) {
   const t = new Date(iso).getTime()
@@ -379,22 +382,9 @@ export default async function handler(req, res) {
       : new Date().toISOString()
     const notesRaw = String(body.notes || '')
     const notes = notesRaw.slice(0, MAX_NOTES_LEN)
-    // SECURITY TODO (before production): recompute this once at create using Company A's
-    // pricing + route distance. Freeze the result. Never recalculate during Rescue.
-    // Current staging: trust the passenger-facing estimate submitted by the booking page.
+    // Filled after company pricing is known. Never taken from the passenger body.
     let estimatedPriceEur = null
     let priceCurrency = 'EUR'
-    if (serviceType === 'standard') {
-      const rawPrice = Number(body.estimated_price_eur)
-      if (Number.isFinite(rawPrice) && rawPrice >= 0 && rawPrice <= 100000) {
-        estimatedPriceEur = Math.round(rawPrice * 100) / 100
-      }
-      const cur = String(body.price_currency || 'EUR')
-        .trim()
-        .toUpperCase()
-        .slice(0, 8)
-      if (cur) priceCurrency = cur
-    }
     const humanConfirmed = !!body.humanConfirmed
     const ipAddress = getClientIp(req)
     const userAgent = getUserAgent(req)
@@ -497,6 +487,27 @@ export default async function handler(req, res) {
       return json(res, 400, { error: `Message too long (max ${MAX_NOTES_LEN} characters).` })
     }
 
+    if (serviceType === 'standard') {
+      const priced = await resolveStandardBookingPrice({
+        companyPricing: companyRow.pricing,
+        carType,
+        pickup: {
+          lat: body.pickup_lat ?? body.pickupLat,
+          lng: body.pickup_lng ?? body.pickupLng,
+        },
+        dropoff: {
+          lat: body.dropoff_lat ?? body.dropoffLat,
+          lng: body.dropoff_lng ?? body.dropoffLng,
+        },
+        clientPriceEur: body.estimated_price_eur,
+      })
+      if (!priced.ok) {
+        return json(res, 422, { error: PRICE_UNAVAILABLE_ERROR, code: 'PRICE_UNAVAILABLE' })
+      }
+      estimatedPriceEur = priced.estimatedPriceEur
+      priceCurrency = priced.priceCurrency
+    }
+
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString()
     const dedupeKey =
@@ -528,7 +539,7 @@ export default async function handler(req, res) {
       const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString()
       let reuseQuery = supabase
         .from('booking_requests')
-        .select('id, booking_reference, status, decision_deadline_at')
+        .select('id, booking_reference, status, decision_deadline_at, estimated_price_eur')
         .eq('company_id', companyId)
         .eq('status', 'draft')
         .eq('pickup_address', pickup)
@@ -537,20 +548,45 @@ export default async function handler(req, res) {
         .order('created_at', { ascending: false })
         .limit(1)
       reuseQuery = carType ? reuseQuery.eq('car_type', carType) : reuseQuery.is('car_type', null)
-      const { data: reusableDraft, error: reuseErr } = await reuseQuery.maybeSingle()
+      let { data: reusableDraft, error: reuseErr } = await reuseQuery.maybeSingle()
+      if (reuseErr && missingColumn(reuseErr, 'estimated_price_eur')) {
+        let retry = supabase
+          .from('booking_requests')
+          .select('id, booking_reference, status, decision_deadline_at')
+          .eq('company_id', companyId)
+          .eq('status', 'draft')
+          .eq('pickup_address', pickup)
+          .eq('dropoff_address', dropoffFinal)
+          .gte('created_at', thirtyMinutesAgo)
+          .order('created_at', { ascending: false })
+          .limit(1)
+        retry = carType ? retry.eq('car_type', carType) : retry.is('car_type', null)
+        const again = await retry.maybeSingle()
+        reusableDraft = again.data
+        reuseErr = again.error
+      }
       if (reuseErr) console.error('[public-booking:draft-reuse]', reuseErr)
       if (reusableDraft?.id && reusableDraft?.booking_reference) {
-        // Keep frozen price if client sends one and draft has null.
-        if (estimatedPriceEur != null) {
-          await supabase
-            .from('booking_requests')
-            .update({
-              estimated_price_eur: estimatedPriceEur,
-              price_currency: priceCurrency,
-            })
-            .eq('id', reusableDraft.id)
-            .eq('status', 'draft')
-            .is('estimated_price_eur', null)
+        // Keep a frozen fare. Fill a null fare with the server quote only.
+        if (serviceType === 'standard') {
+          const decision = draftPriceWrite(reusableDraft.estimated_price_eur, estimatedPriceEur)
+          if (decision.missing) {
+            return json(res, 422, { error: PRICE_UNAVAILABLE_ERROR, code: 'PRICE_UNAVAILABLE' })
+          }
+          if (decision.write) {
+            const { error: priceErr } = await supabase
+              .from('booking_requests')
+              .update({
+                estimated_price_eur: decision.estimatedPriceEur,
+                price_currency: 'EUR',
+              })
+              .eq('id', reusableDraft.id)
+              .eq('status', 'draft')
+              .is('estimated_price_eur', null)
+            if (priceErr && !missingColumn(priceErr, 'estimated_price_eur')) {
+              console.error('[public-booking:draft-price]', priceErr)
+            }
+          }
         }
         // Refresh passenger UI language on reused draft (best-effort).
         const reuseLocale = normalizePassengerLocale(

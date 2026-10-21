@@ -2495,6 +2495,8 @@ Estimate price: ${estimatePrice}${refLine}`
 
     const pickupLat = Number.isFinite(pickupPlacesState.lat) ? pickupPlacesState.lat : null
     const pickupLng = Number.isFinite(pickupPlacesState.lng) ? pickupPlacesState.lng : null
+    const dropoffLat = Number.isFinite(dropoffPlacesState.lat) ? dropoffPlacesState.lat : null
+    const dropoffLng = Number.isFinite(dropoffPlacesState.lng) ? dropoffPlacesState.lng : null
     return {
       company_id: company.id,
       pickup_address: pu,
@@ -2515,6 +2517,8 @@ Estimate price: ${estimatePrice}${refLine}`
       ride_datetime: rideDateIso,
       pickup_lat: pickupLat,
       pickup_lng: pickupLng,
+      dropoff_lat: dropoffLat,
+      dropoff_lng: dropoffLng,
       notes: logNotes,
       termsAcceptance: {
         terms_accepted: true,

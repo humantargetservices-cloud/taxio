@@ -36,7 +36,7 @@ export function isTaxioStagingClient() {
   }
   if (typeof window === 'undefined') return false
   const host = String(window.location.hostname || '').toLowerCase()
-  return host === 'staging.taxio.be' || host.startsWith('staging.') || host.includes('stagingtaxio')
+  return host.startsWith('staging.') || host.includes('stagingtaxio')
 }
 
 export function pushPermissionState() {

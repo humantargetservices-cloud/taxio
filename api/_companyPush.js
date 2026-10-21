@@ -167,7 +167,7 @@ export function pushTtlSecondsForEvent(eventType) {
 
 export function publicAppOrigin() {
   const raw = String(process.env.PUBLIC_APP_ORIGIN || '').trim().replace(/\/$/, '')
-  return raw || 'https://staging.taxio.be'
+  return raw || 'https://taxio.be'
 }
 
 /** Absolute dashboard launch URL for OneSignal web push. */
