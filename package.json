@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test scripts/test_passenger_trip_token.mjs scripts/test_passenger_locale.mjs scripts/test_booking_price_authority.mjs"
+    "test": "node --test scripts/test_passenger_trip_token.mjs scripts/test_passenger_locale.mjs scripts/test_booking_price_authority.mjs scripts/test_onesignal_enable_plan.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

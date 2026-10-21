@@ -1877,7 +1877,17 @@ export async function mountDashboardCompany(root, opts = {}) {
         remountLocalUi()
         return
       }
-      showPushFailure(result.userMessage || null, result.technicalReason || null)
+      const userText =
+        result.code === 'IOS_NEEDS_HOME_SCREEN'
+          ? td.pushIosInstall || result.userMessage
+          : result.code === 'NOT_GRANTED'
+            ? td.pushNotGranted || result.userMessage
+            : result.code === 'UNSUPPORTED'
+              ? td.pushUnsupported || result.userMessage
+              : result.code === 'NOT_OPTED_IN' || result.code === 'NO_SUBSCRIPTION'
+                ? td.pushOptInFailed || result.userMessage
+                : result.userMessage || null
+      showPushFailure(userText, result.technicalReason || null)
       if (btn) {
         btn.disabled = false
         btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'

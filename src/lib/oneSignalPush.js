@@ -6,9 +6,25 @@
  * Does not send Supabase JWTs to OneSignal. External ID is company:<company_id>.
  */
 import { isTaxioStagingClient } from './companyPush.js'
+import {
+  ONESIGNAL_SW_PATH,
+  ONESIGNAL_SW_SCOPE,
+  companyOneSignalExternalId,
+  isInstalledPwa,
+  isIosDevice,
+  planPushEnable,
+} from './oneSignalEnablePlan.js'
 
-export const ONESIGNAL_SW_PATH = 'sw.js'
-export const ONESIGNAL_SW_SCOPE = '/'
+export {
+  ONESIGNAL_SW_PATH,
+  ONESIGNAL_SW_SCOPE,
+  IOS_HOME_SCREEN_MESSAGE,
+  companyOneSignalExternalId,
+  isIosDevice,
+  isInstalledPwa,
+  planPushEnable,
+} from './oneSignalEnablePlan.js'
+
 export const ONESIGNAL_SDK_URL = 'https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js'
 
 const OPT_IN_WAIT_MS = 15_000
@@ -26,11 +42,6 @@ export function getOneSignalAppId() {
   } catch {
     return ''
   }
-}
-
-/** Stable OneSignal External ID for a company account (multi-device). */
-export function companyOneSignalExternalId(companyId) {
-  return `company:${String(companyId || '').trim()}`
 }
 
 export function isOneSignalPushSupported() {
@@ -393,19 +404,57 @@ export async function resolveOneSignalPushUiMode(companyId) {
  * init → login(company:<id>) → permission → optIn → wait until opted in.
  */
 export async function enableOneSignalTripNotifications(companyId) {
-  if (!isOneSignalPushSupported()) {
-    return { ok: false, permission: 'unsupported', code: 'UNSUPPORTED' }
+  const early = planPushEnable({
+    supported: isOneSignalPushSupported(),
+    ios: isIosDevice(),
+    installedPwa: isInstalledPwa(),
+    permission: nativePermission(),
+    alreadySubscribed: false,
+    companyId,
+    appIdConfigured: Boolean(getOneSignalAppId()),
+  })
+  if (early.ok === false) {
+    console.error('[TAXIO ONESIGNAL]', {
+      phase: early.stage || early.code,
+      code: early.code,
+      errorMessage: early.technicalReason || early.userMessage || early.code,
+    })
+    return early
   }
-  if (!companyId) {
-    return { ok: false, permission: nativePermission(), code: 'NO_COMPANY', stage: 'LOGIN' }
+
+  // Ask the browser while this tap is still the user gesture. Do not await
+  // OneSignal login or init before this, or phones drop the prompt.
+  let permission = nativePermission()
+  if (permission === 'default' && typeof Notification !== 'undefined') {
+    try {
+      permission = await Notification.requestPermission()
+    } catch (err) {
+      const message = String(err?.message || err || 'requestPermission failed')
+      console.error('[TAXIO ONESIGNAL]', {
+        phase: 'PERMISSION',
+        errorName: String(err?.name || 'Error'),
+        errorMessage: message,
+      })
+      return {
+        ok: false,
+        permission: nativePermission(),
+        code: 'NOT_GRANTED',
+        stage: 'PERMISSION',
+        userMessage: 'Notifications were not allowed. Tap Enable notifications and choose Allow.',
+        technicalReason: `PERMISSION — ${message}`,
+      }
+    }
   }
-  if (!getOneSignalAppId()) {
+  if (permission === 'denied') {
+    return { ok: false, permission: 'denied', code: 'DENIED', stage: 'PERMISSION' }
+  }
+  if (permission !== 'granted') {
     return {
       ok: false,
-      permission: nativePermission(),
-      code: 'MISSING_APP_ID',
-      stage: 'INIT',
-      technicalReason: 'INIT — OneSignalConfigError: VITE_ONESIGNAL_APP_ID is not configured',
+      permission,
+      code: 'NOT_GRANTED',
+      stage: 'PERMISSION',
+      userMessage: 'Notifications were not allowed. Tap Enable notifications and choose Allow.',
     }
   }
 
@@ -417,20 +466,22 @@ export async function enableOneSignalTripNotifications(companyId) {
     const externalId = companyOneSignalExternalId(companyId)
     await OneSignal.login(externalId)
     const afterLogin = await waitUntilExternalId(OneSignal, externalId)
-    const loginOk = afterLogin.externalId === externalId
+    const seenId = afterLogin.externalId
+    const loginOk = !seenId || seenId === externalId
     console.info('[TAXIO ONESIGNAL]', {
       phase: 'LOGIN',
       expectedExternalId: externalId,
       loginOk,
-      externalId: afterLogin.externalId,
+      externalId: seenId,
     })
-    if (!loginOk) {
+    if (seenId && seenId !== externalId) {
       return {
         ok: false,
-        permission: afterLogin.browserPermission,
+        permission: 'granted',
         code: 'LOGIN_FAILED',
         stage: 'LOGIN',
-        technicalReason: `LOGIN — externalId mismatch (got ${afterLogin.externalId || 'null'})`,
+        userMessage: 'Could not link this phone to your company. Try again.',
+        technicalReason: `LOGIN — externalId mismatch (got ${seenId})`,
         externalId,
         before,
         after: afterLogin,
@@ -438,35 +489,21 @@ export async function enableOneSignalTripNotifications(companyId) {
       }
     }
 
-    let permission = OneSignal.Notifications?.permissionNative || nativePermission()
-    if (permission !== 'granted') {
-      await OneSignal.Notifications.requestPermission()
-      permission = OneSignal.Notifications?.permissionNative || nativePermission()
-    }
-    if (permission === 'denied') {
+    if (isActivelySubscribed(afterLogin)) {
+      console.info('[TAXIO ONESIGNAL]', { phase: 'ALREADY_SUBSCRIBED', expectedExternalId: externalId })
       return {
-        ok: false,
-        permission: 'denied',
-        code: 'DENIED',
-        stage: 'PERMISSION',
+        ok: true,
+        permission: 'granted',
+        code: 'ALREADY_SUBSCRIBED',
         externalId,
+        subscriptionId: afterLogin.subscriptionId,
+        tokenPresent: afterLogin.tokenPresent,
         before,
-        loginOk: true,
-      }
-    }
-    if (permission !== 'granted') {
-      return {
-        ok: false,
-        permission,
-        code: 'NOT_GRANTED',
-        stage: 'PERMISSION',
-        externalId,
-        before,
+        after: afterLogin,
         loginOk: true,
       }
     }
 
-    // Always opt-in explicitly (even when browser permission was already granted)
     await OneSignal.User.PushSubscription.optIn()
     const after = await waitUntilOneSignalOptedIn(OneSignal)
     console.info('[TAXIO ONESIGNAL]', {
@@ -477,30 +514,21 @@ export async function enableOneSignalTripNotifications(companyId) {
       ...after,
     })
 
-    if (!after.optedIn) {
+    if (!isActivelySubscribed(after)) {
+      const code = after.optedIn ? 'NO_SUBSCRIPTION' : 'NOT_OPTED_IN'
       return {
         ok: false,
         permission: 'granted',
-        code: 'NOT_OPTED_IN',
+        code,
         stage: 'OPT_IN',
+        userMessage:
+          'Permission was allowed, but the subscription did not finish. Try again.',
         technicalReason:
-          'OPT_IN — OneSignal PushSubscription.optedIn is still false after optIn() wait',
+          code === 'NO_SUBSCRIPTION'
+            ? 'OPT_IN — optedIn true but no subscription id/token yet'
+            : 'OPT_IN — OneSignal PushSubscription.optedIn is still false after optIn() wait',
         externalId,
         subscriptionId: after.subscriptionId,
-        before,
-        after,
-        loginOk: true,
-      }
-    }
-
-    if (!after.subscriptionIdPresent && !after.tokenPresent) {
-      return {
-        ok: false,
-        permission: 'granted',
-        code: 'NO_SUBSCRIPTION',
-        stage: 'OPT_IN',
-        technicalReason: 'OPT_IN — optedIn true but no subscription id/token yet',
-        externalId,
         before,
         after,
         loginOk: true,
@@ -528,6 +556,7 @@ export async function enableOneSignalTripNotifications(companyId) {
       permission: nativePermission(),
       code: err?.code || 'ENABLE_FAILED',
       stage,
+      userMessage: 'Could not enable notifications. Try again.',
       technicalReason: `${stage} — ${name}: ${message}`,
     }
   }

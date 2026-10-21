@@ -220,6 +220,11 @@ export const translations = {
       pushStatusOn: 'Trip notifications on',
       pushBlocked:
         'Notifications are blocked on this phone. Enable them in your phone or app settings for TAXIO.',
+      pushIosInstall:
+        'Add TAXIO to your Home Screen first: tap Share, then Add to Home Screen, open TAXIO from the installed icon, then tap Enable notifications.',
+      pushNotGranted: 'Notifications were not allowed. Tap Enable notifications and choose Allow.',
+      pushUnsupported: 'This browser cannot show TAXIO notifications.',
+      pushOptInFailed: 'Permission was allowed, but the subscription did not finish. Try again.',
       pushBusy: 'Turning on…',
       pushError: 'Could not enable notifications. Try again.',
       activeTripsTitle: 'Active trips',
@@ -1185,6 +1190,13 @@ Thank you.`,
       pushStatusOn: 'Notifications de courses activées',
       pushBlocked:
         'Les notifications sont bloquées sur ce téléphone. Activez-les dans les réglages du téléphone ou de l’appli TAXIO.',
+      pushIosInstall:
+        'Ajoutez d’abord TAXIO à l’écran d’accueil : touchez Partager, puis Sur l’écran d’accueil, ouvrez TAXIO depuis l’icône, puis touchez Activer les notifications.',
+      pushNotGranted:
+        'Les notifications n’ont pas été autorisées. Touchez Activer les notifications et choisissez Autoriser.',
+      pushUnsupported: 'Ce navigateur ne peut pas afficher les notifications TAXIO.',
+      pushOptInFailed:
+        'L’autorisation a été accordée, mais l’abonnement ne s’est pas terminé. Réessayez.',
       pushBusy: 'Activation…',
       pushError: 'Impossible d’activer les notifications. Réessayez.',
       activeTripsTitle: 'Courses actives',
@@ -2154,6 +2166,11 @@ Merci.`,
       pushStatusOn: 'Ritmeldingen aan',
       pushBlocked:
         'Meldingen zijn geblokkeerd op deze telefoon. Schakel ze in via de telefoon- of TAXIO-appinstellingen.',
+      pushIosInstall:
+        'Zet TAXIO eerst op je beginscherm: tik op Deel, dan Zet op beginscherm, open TAXIO via het icoon en tik daarna op Meldingen inschakelen.',
+      pushNotGranted: 'Meldingen zijn niet toegestaan. Tik op Meldingen inschakelen en kies Toestaan.',
+      pushUnsupported: 'Deze browser kan geen TAXIO-meldingen tonen.',
+      pushOptInFailed: 'Toestemming is gegeven, maar het abonnement is niet afgerond. Probeer opnieuw.',
       pushBusy: 'Bezig…',
       pushError: 'Meldingen inschakelen mislukt. Probeer opnieuw.',
       activeTripsTitle: 'Actieve ritten',
