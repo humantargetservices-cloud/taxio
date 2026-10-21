@@ -69,6 +69,7 @@ import { isTaxioStagingClient } from '../lib/companyPush.js'
 import {
   associateOneSignalCompany,
   enableOneSignalTripNotifications,
+  pushModeAfterAssociation,
   resolveOneSignalPushUiMode,
   softSyncOneSignalTripNotifications,
   watchPushEnrollment,
@@ -1880,10 +1881,13 @@ export async function mountDashboardCompany(root, opts = {}) {
     try {
       // OneSignal path (legacy PushManager / company_push_subscriptions not UI authority)
       const result = await enableOneSignalTripNotifications(company.id)
-      if (result.ok) {
+      if (result.ok && result.loginOk) {
         if (dashDataCache) dashDataCache.pushMode = 'on'
         remountLocalUi()
         return
+      }
+      if (dashDataCache && result.permission === 'granted') {
+        dashDataCache.pushMode = 'incomplete'
       }
       if (result.code === 'DENIED' || result.permission === 'denied') {
         if (dashDataCache) dashDataCache.pushMode = 'blocked'
@@ -1954,20 +1958,34 @@ export async function mountDashboardCompany(root, opts = {}) {
       })
       .catch(() => {})
 
-    // Associate company External ID on authenticated dashboard load (no JWT to OneSignal)
-    void associateOneSignalCompany(company.id)
+    // Association result decides the card. A failed login must not leave "enabled".
+    associateOneSignalCompany(company.id).then((result) => {
+      if (gen !== dashMountGen || !dashDataCache) return
+      const mode = pushModeAfterAssociation(company.id, result)
+      if (dashDataCache.pushMode === mode) return
+      dashDataCache.pushMode = mode
+      remountLocalUi()
+    }).catch(() => {})
 
-    // Soft re-sync: permission granted but OneSignal may still need explicit opt-in.
+    // Soft re-sync: permission already granted. Do not request it again.
     // Remount at most once per page load so sync cannot create a dashboard refresh loop.
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       const syncGen = gen
       void softSyncOneSignalTripNotifications(company.id)
         .then((result) => {
-          if (!result.ok || syncGen !== dashMountGen) return
-          if (dashDataCache?.pushMode === 'on' || paintedPushMode === 'on') return
+          if (syncGen !== dashMountGen || !dashDataCache) return
+          const mode = pushModeAfterAssociation(company.id, result)
+          if (mode !== 'on') {
+            if (dashDataCache.pushMode === 'on') {
+              dashDataCache.pushMode = mode
+              remountLocalUi()
+            }
+            return
+          }
+          if (dashDataCache.pushMode === 'on' || paintedPushMode === 'on') return
           if (window.__taxioOneSignalUiRemounted) return
           window.__taxioOneSignalUiRemounted = true
-          if (dashDataCache) dashDataCache.pushMode = 'on'
+          dashDataCache.pushMode = 'on'
           remountLocalUi()
         })
         .catch(() => {})

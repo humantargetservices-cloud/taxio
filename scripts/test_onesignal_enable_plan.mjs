@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import {
   absoluteDashboardLaunchUrl,
   buildPushNotificationContent,
+  oneSignalSendOutcome,
   publicAppOrigin,
 } from '../api/_companyPush.js'
 import {
@@ -17,6 +18,7 @@ import {
   ONESIGNAL_SW_SCOPE,
   PRODUCTION_PUSH_ORIGIN,
   companyOneSignalExternalId,
+  externalIdAssociationOk,
   isCompetingRootOneSignalWorker,
   isIosDevice,
   isPushEnrollmentComplete,
@@ -24,6 +26,7 @@ import {
   planPushEnable,
   pushUiModeFromSnapshot,
 } from '../src/lib/oneSignalEnablePlan.js'
+import { pushModeAfterAssociation } from '../src/lib/oneSignalPush.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -149,25 +152,131 @@ describe('enabled only with a real push subscription', () => {
     )
   })
 
-  it('permission granted plus subscription id or token is enabled', () => {
+  it('permission granted plus subscription without the company external id is not enabled', () => {
+    const expected = companyOneSignalExternalId(COMPANY)
     assert.equal(
       pushUiModeFromSnapshot({
         permission: 'granted',
         optedIn: true,
         subscriptionIdPresent: true,
         tokenPresent: true,
+        externalId: '',
+        expectedExternalId: expected,
       }),
-      'on'
+      'incomplete'
     )
     assert.equal(
       isPushEnrollmentComplete({
         permission: 'granted',
         optedIn: true,
-        subscriptionIdPresent: false,
+        subscriptionIdPresent: true,
         tokenPresent: true,
+        externalId: `company:other`,
+        expectedExternalId: expected,
       }),
-      true
+      false
     )
+  })
+})
+
+describe('enabled only when the company external id matches', () => {
+  const expected = companyOneSignalExternalId(COMPANY)
+  const linked = {
+    permission: 'granted',
+    optedIn: true,
+    subscriptionIdPresent: true,
+    tokenPresent: true,
+    expectedExternalId: expected,
+  }
+
+  it('granted + optedIn + subscription + correct external ID is enabled', () => {
+    assert.equal(pushUiModeFromSnapshot({ ...linked, externalId: expected }), 'on')
+    assert.equal(isPushEnrollmentComplete({ ...linked, externalId: expected }), true)
+  })
+
+  it('granted + optedIn + subscription + empty external ID is not enabled', () => {
+    assert.equal(externalIdAssociationOk('', expected), false)
+    assert.equal(pushUiModeFromSnapshot({ ...linked, externalId: '' }), 'incomplete')
+    assert.equal(isPushEnrollmentComplete({ ...linked, externalId: null }), false)
+  })
+
+  it('granted + optedIn + subscription + wrong external ID is not enabled', () => {
+    assert.equal(externalIdAssociationOk('company:someone-else', expected), false)
+    assert.equal(
+      pushUiModeFromSnapshot({ ...linked, externalId: 'company:someone-else' }),
+      'incomplete'
+    )
+  })
+
+  it('association returning empty external ID requires reconnect', () => {
+    assert.equal(externalIdAssociationOk('', expected), false)
+    const mode = pushModeAfterAssociation(COMPANY, {
+      loginOk: false,
+      browserPermission: 'granted',
+      optedIn: true,
+      subscriptionIdPresent: true,
+      tokenPresent: true,
+      externalId: '',
+    })
+    assert.equal(mode, 'incomplete')
+  })
+
+  it('association returning the correct external ID is success', () => {
+    assert.equal(externalIdAssociationOk(expected, expected), true)
+    const mode = pushModeAfterAssociation(COMPANY, {
+      loginOk: true,
+      browserPermission: 'granted',
+      optedIn: true,
+      subscriptionId: 'sub-1',
+      tokenPresent: true,
+      externalId: expected,
+    })
+    assert.equal(mode, 'on')
+  })
+})
+
+describe('OneSignal send result', () => {
+  it('id plus recipients greater than 0 is SENT', () => {
+    const outcome = oneSignalSendOutcome({
+      httpOk: true,
+      notificationId: 'note-1',
+      recipients: 2,
+    })
+    assert.equal(outcome.ok, true)
+    assert.equal(outcome.code, 'SENT')
+  })
+
+  it('id plus recipients 0 is FAILED', () => {
+    const outcome = oneSignalSendOutcome({
+      httpOk: true,
+      notificationId: 'note-1',
+      recipients: 0,
+    })
+    assert.equal(outcome.ok, false)
+    assert.equal(outcome.code, 'ONESIGNAL_NO_RECIPIENTS')
+    assert.equal(outcome.error, 'onesignal_no_recipients')
+  })
+
+  it('no id is FAILED', () => {
+    const outcome = oneSignalSendOutcome({
+      httpOk: true,
+      notificationId: '',
+      recipients: null,
+      errorDetail: 'All included players are not subscribed',
+    })
+    assert.equal(outcome.ok, false)
+    assert.equal(outcome.error, 'All included players are not subscribed')
+  })
+
+  it('API error is FAILED', () => {
+    const outcome = oneSignalSendOutcome({
+      httpOk: false,
+      notificationId: null,
+      recipients: null,
+      errorDetail: 'onesignal_http_400',
+    })
+    assert.equal(outcome.ok, false)
+    assert.equal(outcome.code, 'ONESIGNAL_HTTP')
   })
 })
 
@@ -214,6 +323,12 @@ describe('one service worker configuration', () => {
     assert.equal(/serviceWorkerPath:\s*['"]sw\.js['"]/.test(client), false)
     assert.equal(client.includes('unregisterStagingScopedOneSignalWorker'), false)
     assert.equal(client.includes("pathname !== '/onesignal/'"), false)
+    assert.equal(client.includes('!seenId || seenId === externalId'), false)
+    assert.match(client, /externalIdAssociationOk\(seenId, externalId\)/)
+    const dashboard = fs.readFileSync(path.join(root, 'src/pages/dashboardCompany.js'), 'utf8')
+    assert.equal(dashboard.includes('void associateOneSignalCompany'), false)
+    assert.match(dashboard, /associateOneSignalCompany\(company\.id\)\.then/)
+    assert.match(dashboard, /pushModeAfterAssociation\(company\.id, result\)/)
   })
 
   it('installed PWA scope includes the root service worker and opens the company dashboard', () => {

@@ -11,6 +11,7 @@ import {
   ONESIGNAL_SW_PATH,
   ONESIGNAL_SW_SCOPE,
   companyOneSignalExternalId,
+  externalIdAssociationOk,
   isCompetingRootOneSignalWorker,
   isInstalledPwa,
   isIosDevice,
@@ -26,6 +27,7 @@ export {
   PRODUCTION_PUSH_ORIGIN,
   IOS_HOME_SCREEN_MESSAGE,
   companyOneSignalExternalId,
+  externalIdAssociationOk,
   isCompetingRootOneSignalWorker,
   isIosDevice,
   isInstalledPwa,
@@ -448,9 +450,10 @@ export async function associateOneSignalCompany(companyId) {
     return {
       ok: loginOk,
       loginOk,
-      externalId,
       code: loginOk ? 'LOGIN_OK' : 'LOGIN_MISMATCH',
       ...snap,
+      externalId: snap.externalId || '',
+      expectedExternalId: externalId,
     }
   } catch (err) {
     console.warn('[TAXIO ONESIGNAL] associate failed', err?.message || err)
@@ -465,7 +468,28 @@ export async function associateOneSignalCompany(companyId) {
 }
 
 /**
+ * Card mode after company association. Enabled only when loginOk and the subscription match.
+ * A failed association with permission already granted stays on the reconnect card.
+ */
+export function pushModeAfterAssociation(companyId, result) {
+  const expected = companyOneSignalExternalId(companyId)
+  const permission = result?.browserPermission || nativePermission()
+  if (permission === 'denied') return 'blocked'
+  const seen = result?.loginOk ? expected : result?.externalId || ''
+  return pushUiModeFromSnapshot({
+    supported: result?.code !== 'UNSUPPORTED',
+    permission,
+    optedIn: !!result?.optedIn,
+    subscriptionIdPresent: !!(result?.subscriptionIdPresent || result?.subscriptionId),
+    tokenPresent: !!result?.tokenPresent,
+    externalId: seen,
+    expectedExternalId: expected,
+  })
+}
+
+/**
  * UI mode from OneSignal only (never legacy localStorage / company_push_subscriptions).
+ * Enabled only when the company external id is confirmed.
  * @returns {Promise<'unsupported'|'prompt'|'incomplete'|'on'|'blocked'>}
  */
 export async function resolveOneSignalPushUiMode(companyId) {
@@ -475,10 +499,10 @@ export async function resolveOneSignalPushUiMode(companyId) {
 
   try {
     const OneSignal = await initOneSignalOnce()
+    const expectedExternalId = companyOneSignalExternalId(companyId)
     if (companyId) {
-      const externalId = companyOneSignalExternalId(companyId)
       try {
-        await OneSignal.login(externalId)
+        await OneSignal.login(expectedExternalId)
       } catch (err) {
         logPushStage('LOGIN', {
           initialized: true,
@@ -487,11 +511,14 @@ export async function resolveOneSignalPushUiMode(companyId) {
         })
       }
     }
-    let snap = readOneSignalPushSnapshot(OneSignal)
+    let snap = companyId
+      ? await waitUntilExternalId(OneSignal, expectedExternalId, { timeoutMs: 2500 })
+      : readOneSignalPushSnapshot(OneSignal)
     // The push token can arrive just after init/login. Wait briefly before
     // deciding the card, without calling optIn or any permission prompt.
     if (snap.browserPermission === 'granted' && !isActivelySubscribed(snap)) {
-      snap = await waitUntilOneSignalOptedIn(OneSignal, { timeoutMs: 2500 })
+      const waited = await waitUntilOneSignalOptedIn(OneSignal, { timeoutMs: 2500 })
+      snap = { ...waited, externalId: waited.externalId || snap.externalId }
     }
     const mode = pushUiModeFromSnapshot({
       supported: true,
@@ -499,6 +526,8 @@ export async function resolveOneSignalPushUiMode(companyId) {
       optedIn: snap.optedIn,
       subscriptionIdPresent: snap.subscriptionIdPresent,
       tokenPresent: snap.tokenPresent,
+      externalId: snap.externalId,
+      expectedExternalId,
     })
     logPushStage('UI_MODE', {
       permission: snap.browserPermission,
@@ -613,67 +642,12 @@ export async function enableOneSignalTripNotifications(companyId) {
       tokenPresent: before.tokenPresent,
     })
 
-    const externalId = companyOneSignalExternalId(companyId)
-    await OneSignal.login(externalId)
-    const afterLogin = await waitUntilExternalId(OneSignal, externalId)
-    const seenId = afterLogin.externalId
-    const loginOk = !seenId || seenId === externalId
-    logPushStage('LOGIN', {
-      permission: afterLogin.browserPermission,
-      initialized: true,
-      optedIn: afterLogin.optedIn,
-      subscriptionIdPresent: afterLogin.subscriptionIdPresent,
-      tokenPresent: afterLogin.tokenPresent,
-      error: loginOk ? null : 'external_id_mismatch',
-    })
-    if (seenId && seenId !== externalId) {
-      return {
-        ok: false,
-        permission: 'granted',
-        code: 'LOGIN_FAILED',
-        stage: 'LOGIN',
-        userMessage: 'Could not link this phone to your company. Try again.',
-        technicalReason: `LOGIN — externalId mismatch (got ${seenId})`,
-        externalId,
-        before,
-        after: afterLogin,
-        loginOk: false,
-      }
+    let subscribed = before
+    if (!isActivelySubscribed(subscribed)) {
+      subscribed = await optInUntilSubscribed(OneSignal)
     }
-
-    if (isActivelySubscribed(afterLogin)) {
-      logPushStage('ALREADY_SUBSCRIBED', {
-        permission: 'granted',
-        initialized: true,
-        optedIn: true,
-        subscriptionIdPresent: afterLogin.subscriptionIdPresent,
-        tokenPresent: afterLogin.tokenPresent,
-      })
-      return {
-        ok: true,
-        permission: 'granted',
-        code: 'ALREADY_SUBSCRIBED',
-        externalId,
-        subscriptionId: afterLogin.subscriptionId,
-        tokenPresent: afterLogin.tokenPresent,
-        before,
-        after: afterLogin,
-        loginOk: true,
-      }
-    }
-
-    const after = await optInUntilSubscribed(OneSignal)
-    logPushStage('AUDIT_AFTER', {
-      permission: after.browserPermission,
-      initialized: true,
-      optedIn: after.optedIn,
-      subscriptionIdPresent: after.subscriptionIdPresent,
-      tokenPresent: after.tokenPresent,
-      error: isActivelySubscribed(after) ? null : 'subscription_missing',
-    })
-
-    if (!isActivelySubscribed(after)) {
-      const code = after.optedIn ? 'NO_SUBSCRIPTION' : 'NOT_OPTED_IN'
+    if (!isActivelySubscribed(subscribed)) {
+      const code = subscribed.optedIn ? 'NO_SUBSCRIPTION' : 'NOT_OPTED_IN'
       return {
         ok: false,
         permission: 'granted',
@@ -685,23 +659,62 @@ export async function enableOneSignalTripNotifications(companyId) {
           code === 'NO_SUBSCRIPTION'
             ? 'OPT_IN — optedIn true but no subscription id/token yet'
             : 'OPT_IN — OneSignal PushSubscription.optedIn is still false after optIn() wait',
-        externalId,
-        subscriptionId: after.subscriptionId,
         before,
-        after,
-        loginOk: true,
+        after: subscribed,
+        loginOk: false,
       }
     }
 
+    const externalId = companyOneSignalExternalId(companyId)
+    await OneSignal.login(externalId)
+    const afterLogin = await waitUntilExternalId(OneSignal, externalId)
+    const seenId = afterLogin.externalId || ''
+    const loginOk = externalIdAssociationOk(seenId, externalId)
+    logPushStage('LOGIN', {
+      permission: afterLogin.browserPermission,
+      initialized: true,
+      optedIn: afterLogin.optedIn,
+      subscriptionIdPresent: afterLogin.subscriptionIdPresent,
+      tokenPresent: afterLogin.tokenPresent,
+      error: loginOk ? null : seenId ? 'external_id_mismatch' : 'external_id_empty',
+    })
+    if (!loginOk || !isActivelySubscribed(afterLogin)) {
+      return {
+        ok: false,
+        permission: 'granted',
+        code: loginOk ? 'NO_SUBSCRIPTION' : 'LOGIN_FAILED',
+        stage: 'LOGIN',
+        userMessage: 'Could not link this phone to your company. Try again.',
+        technicalReason: seenId
+          ? `LOGIN — externalId mismatch (got ${seenId})`
+          : 'LOGIN — externalId empty after association',
+        externalId,
+        subscriptionId: afterLogin.subscriptionId,
+        before,
+        after: afterLogin,
+        loginOk: false,
+      }
+    }
+
+    logPushStage('SUBSCRIBED', {
+      permission: 'granted',
+      initialized: true,
+      optedIn: true,
+      subscriptionIdPresent: afterLogin.subscriptionIdPresent,
+      tokenPresent: afterLogin.tokenPresent,
+    })
     return {
       ok: true,
       permission: 'granted',
       code: 'SUBSCRIBED',
-      externalId,
-      subscriptionId: after.subscriptionId,
-      tokenPresent: after.tokenPresent,
+      externalId: seenId,
+      subscriptionId: afterLogin.subscriptionId,
+      tokenPresent: afterLogin.tokenPresent,
+      optedIn: afterLogin.optedIn,
+      subscriptionIdPresent: afterLogin.subscriptionIdPresent,
+      browserPermission: afterLogin.browserPermission,
       before,
-      after,
+      after: afterLogin,
       loginOk: true,
     }
   } catch (err) {
@@ -731,38 +744,41 @@ export async function softSyncOneSignalTripNotifications(companyId) {
     const externalId = companyOneSignalExternalId(companyId)
     await OneSignal.login(externalId)
 
-    let before = readOneSignalPushSnapshot(OneSignal)
+    let before = await waitUntilExternalId(OneSignal, externalId, { timeoutMs: 2500 })
     if (!isActivelySubscribed(before)) {
-      before = await waitUntilOneSignalOptedIn(OneSignal, { timeoutMs: 2500 })
+      const opted = await waitUntilOneSignalOptedIn(OneSignal, { timeoutMs: 2500 })
+      before = { ...opted, externalId: opted.externalId || before.externalId }
     }
-    if (isActivelySubscribed(before)) {
-      return {
-        ok: true,
-        code: 'SUBSCRIBED',
-        externalId,
-        subscriptionId: before.subscriptionId,
-        tokenPresent: before.tokenPresent,
-        before,
-        after: before,
+    let after = before
+    if (!isActivelySubscribed(after)) {
+      after = await optInUntilSubscribed(OneSignal)
+      if (!externalIdAssociationOk(after.externalId, externalId)) {
+        await OneSignal.login(externalId)
+        const linked = await waitUntilExternalId(OneSignal, externalId, { timeoutMs: 2500 })
+        after = { ...after, ...linked, externalId: linked.externalId }
       }
     }
-
-    const after = await optInUntilSubscribed(OneSignal)
-    const ok = isActivelySubscribed(after)
+    const loginOk = externalIdAssociationOk(after.externalId, externalId)
+    const ok = loginOk && isActivelySubscribed(after)
     logPushStage('SOFT_SYNC', {
       permission: after.browserPermission,
       initialized: true,
       optedIn: after.optedIn,
       subscriptionIdPresent: after.subscriptionIdPresent,
       tokenPresent: after.tokenPresent,
-      error: ok ? null : 'subscription_missing',
+      error: ok ? null : loginOk ? 'subscription_missing' : 'external_id_empty',
     })
     return {
       ok,
-      code: ok ? 'SUBSCRIBED' : 'NOT_OPTED_IN',
-      externalId,
+      loginOk,
+      code: ok ? 'SUBSCRIBED' : loginOk ? 'NOT_OPTED_IN' : 'LOGIN_FAILED',
+      externalId: after.externalId || '',
+      expectedExternalId: externalId,
       subscriptionId: after.subscriptionId,
+      subscriptionIdPresent: after.subscriptionIdPresent,
       tokenPresent: after.tokenPresent,
+      optedIn: after.optedIn,
+      browserPermission: after.browserPermission,
       before,
       after,
     }

@@ -31,14 +31,31 @@ export function isCompetingRootOneSignalWorker({ scriptPath, scopePath } = {}) {
   return /\/OneSignalSDKWorker\.js$/i.test(script) || /\/OneSignalSDKUpdaterWorker\.js$/i.test(script)
 }
 
-/** Enabled only when the browser allowed notifications AND OneSignal has a real subscription. */
+/**
+ * Company alias is linked only when OneSignal reports that exact external id.
+ * An empty or different id is not a successful association.
+ */
+export function externalIdAssociationOk(seenId, expectedExternalId) {
+  const expected = String(expectedExternalId || '').trim()
+  if (!expected) return false
+  return String(seenId || '') === expected
+}
+
+/** Enabled only when permission, a real subscription, and the company external id all match. */
 export function isPushEnrollmentComplete({
   permission,
   optedIn,
   subscriptionIdPresent,
   tokenPresent,
+  externalId,
+  expectedExternalId,
 } = {}) {
-  return permission === 'granted' && !!optedIn && !!(subscriptionIdPresent || tokenPresent)
+  return (
+    permission === 'granted' &&
+    !!optedIn &&
+    !!(subscriptionIdPresent || tokenPresent) &&
+    externalIdAssociationOk(externalId, expectedExternalId)
+  )
 }
 
 /**
@@ -50,11 +67,20 @@ export function pushUiModeFromSnapshot({
   optedIn,
   subscriptionIdPresent,
   tokenPresent,
+  externalId,
+  expectedExternalId,
 } = {}) {
   if (!supported) return 'unsupported'
   if (permission === 'denied') return 'blocked'
   if (
-    isPushEnrollmentComplete({ permission, optedIn, subscriptionIdPresent, tokenPresent })
+    isPushEnrollmentComplete({
+      permission,
+      optedIn,
+      subscriptionIdPresent,
+      tokenPresent,
+      externalId,
+      expectedExternalId,
+    })
   ) {
     return 'on'
   }

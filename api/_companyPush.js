@@ -186,6 +186,38 @@ function scrubOneSignalErrorText(text) {
 }
 
 /**
+ * Map a OneSignal Create Notification response to SENT or FAILED.
+ * recipients === 0 is a failed delivery even when an id is present.
+ * A successful body that omits recipients stays SENT so older responses still count.
+ *
+ * @returns {{ ok: boolean, code: string, error?: string }}
+ */
+export function oneSignalSendOutcome({ httpOk, notificationId, recipients, errorDetail } = {}) {
+  if (!httpOk) {
+    return {
+      ok: false,
+      code: 'ONESIGNAL_HTTP',
+      error: errorDetail || 'onesignal_http_error',
+    }
+  }
+  const id = notificationId ? String(notificationId).trim() : ''
+  if (!id) {
+    return {
+      ok: false,
+      code: 'ONESIGNAL_NO_RECIPIENTS',
+      error: errorDetail || 'onesignal_no_notification_id',
+    }
+  }
+  if (recipients === 0) {
+    return { ok: false, code: 'ONESIGNAL_NO_RECIPIENTS', error: 'onesignal_no_recipients' }
+  }
+  if (recipients == null || recipients > 0) {
+    return { ok: true, code: 'SENT' }
+  }
+  return { ok: false, code: 'ONESIGNAL_NO_RECIPIENTS', error: 'onesignal_no_recipients' }
+}
+
+/**
  * Send push via OneSignal REST Create Notification API.
  * Targets External ID company:<company_id> — not company_push_subscriptions.
  *
@@ -264,26 +296,21 @@ export async function sendOneSignalPushToCompany({ companyId, eventType, content
     parsed?.recipients != null && Number.isFinite(Number(parsed.recipients))
       ? Number(parsed.recipients)
       : null
+  const errorDetail =
+    (Array.isArray(parsed?.errors) && parsed.errors[0]) ||
+    parsed?.error ||
+    (!res.ok ? `onesignal_http_${res.status}` : '')
+  const outcome = oneSignalSendOutcome({
+    httpOk: res.ok,
+    notificationId,
+    recipients,
+    errorDetail,
+  })
 
-  if (!res.ok) {
-    const detail =
-      (Array.isArray(parsed?.errors) && parsed.errors[0]) ||
-      parsed?.error ||
-      `onesignal_http_${res.status}`
-    const err = new Error(scrubOneSignalErrorText(detail))
-    err.statusCode = res.status
-    err.code = 'ONESIGNAL_HTTP'
-    throw err
-  }
-
-  // 200 without id = audience empty / not subscribed — do not mark SENT
-  if (!notificationId) {
-    const detail =
-      (Array.isArray(parsed?.errors) && parsed.errors[0]) ||
-      'onesignal_no_notification_id'
-    const err = new Error(scrubOneSignalErrorText(detail))
-    err.statusCode = 200
-    err.code = 'ONESIGNAL_NO_RECIPIENTS'
+  if (!outcome.ok) {
+    const err = new Error(scrubOneSignalErrorText(outcome.error))
+    err.statusCode = res.ok ? 200 : res.status
+    err.code = outcome.code
     throw err
   }
 
