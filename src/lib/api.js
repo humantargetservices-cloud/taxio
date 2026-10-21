@@ -388,6 +388,7 @@ const ADMIN_EDITABLE_COMPANY_FIELDS = [
   'hourly_enabled',
   'hourly_rate_eur',
   'hourly_min_hours',
+  'rescue_enabled',
 ]
 
 /**
@@ -416,6 +417,76 @@ export async function updateCompanyAsAdmin(companyId, patch) {
   const body = await res.json().catch(() => ({}))
   if (!res.ok) return { error: new Error(body.error || `Company update failed (${res.status}).`) }
   return { error: null, data: body.data || null }
+}
+
+/** Read the singleton platform Rescue flag. Does not write. */
+export async function fetchPlatformRescueFlag() {
+  const { data, error } = await supabase
+    .from('taxio_platform_flags')
+    .select('rescue_globally_enabled')
+    .eq('id', 1)
+    .maybeSingle()
+  if (error) return { known: false, enabled: false, missing: false, error }
+  if (!data) return { known: false, enabled: false, missing: true, error: null }
+  return {
+    known: true,
+    enabled: data.rescue_globally_enabled === true,
+    missing: false,
+    error: null,
+  }
+}
+
+/**
+ * Super Admin company Rescue switch.
+ * Writes through the admin API, then confirms with a fresh read.
+ */
+export async function setCompanyRescueEnabled(companyId, enabled) {
+  const want = enabled === true
+  const { error } = await updateCompanyAsAdmin(companyId, { rescue_enabled: want })
+  if (error) return { error, enabled: null }
+  const { data, error: readErr } = await supabase
+    .from('companies')
+    .select('rescue_enabled')
+    .eq('id', companyId)
+    .maybeSingle()
+  if (readErr) {
+    return { error: new Error(readErr.message || 'Could not confirm Rescue setting.'), enabled: null }
+  }
+  const saved = data?.rescue_enabled === true
+  if (saved !== want) return { error: new Error('Rescue setting did not save.'), enabled: saved }
+  return { error: null, enabled: saved }
+}
+
+/**
+ * Super Admin platform Rescue switch.
+ * Confirms the saved row from Supabase. Does not insert a flag row.
+ */
+export async function setPlatformRescueEnabled(enabled) {
+  const want = enabled === true
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData?.session?.access_token
+  if (!token) return { error: new Error('You must be signed in as admin.'), enabled: null }
+
+  const res = await fetch(apiUrl('/api/admin-rescue-platform'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ enabled: want }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    return { error: new Error(body.error || `Platform Rescue update failed (${res.status}).`), enabled: null }
+  }
+  const read = await fetchPlatformRescueFlag()
+  if (!read.known) {
+    return { error: new Error('Could not confirm Platform Rescue.'), enabled: null }
+  }
+  if (read.enabled !== want) {
+    return { error: new Error('Platform Rescue did not save.'), enabled: read.enabled }
+  }
+  return { error: null, enabled: read.enabled }
 }
 
 export async function deleteCompanyAsAdmin(companyId) {

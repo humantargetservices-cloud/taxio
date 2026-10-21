@@ -12,6 +12,9 @@ import {
   listAbuseRateEventsForAdmin,
   setCompanySubscriptionPlan,
   updateCompanyAsAdmin,
+  fetchPlatformRescueFlag,
+  setCompanyRescueEnabled,
+  setPlatformRescueEnabled,
   deleteCompanyAsAdmin,
   adminSendCommunicationEmail,
   devCleanupTestCompanies,
@@ -330,6 +333,13 @@ function normalizePhoneForWhatsApp(phone) {
   return digits
 }
 
+function rescueSwitchButton({ action, companyId, on, label }) {
+  const checked = on === true
+  return `<button type="button" role="switch" aria-checked="${checked ? 'true' : 'false'}" aria-label="${escapeHtml(label)}" data-adm="${escapeHtml(action)}" ${companyId ? `data-id="${escapeHtml(companyId)}" ` : ''}data-enabled="${checked ? '1' : '0'}" class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/30 ${checked ? 'bg-emerald-500' : 'bg-slate-300'}">
+      <span class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition ${checked ? 'translate-x-4' : 'translate-x-0.5'}"></span>
+    </button>`
+}
+
 function isMobileWhatsAppTarget() {
   if (typeof navigator === 'undefined') return false
   return /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(navigator.userAgent || '')
@@ -363,6 +373,7 @@ export async function mountAdminDashboard(root) {
 
   let companies = []
   let companiesLoadError = false
+  let platformRescue = { known: false, enabled: false, missing: false }
   let totalCars = 0
   let carMap = {}
   let recentBookings = []
@@ -376,6 +387,11 @@ export async function mountAdminDashboard(root) {
   } catch {
     companies = []
     companiesLoadError = true
+  }
+  try {
+    platformRescue = await fetchPlatformRescueFlag()
+  } catch {
+    platformRescue = { known: false, enabled: false, missing: false }
   }
   try {
     totalCars = await countAllCarsAdmin()
@@ -577,7 +593,7 @@ export async function mountAdminDashboard(root) {
     const activeFiltered = filterCompaniesBySearch([...active, ...suspended], activeQ)
     const rows =
       activeFiltered.length === 0
-        ? `<tr><td colspan="7">${admEmptyState(
+        ? `<tr><td colspan="8">${admEmptyState(
             activeQ ? td.noSearchResults : 'No active companies found.',
             activeQ ? '' : 'Approved and suspended tenants appear here.'
           )}</td></tr>`
@@ -595,6 +611,17 @@ export async function mountAdminDashboard(root) {
             <td class="px-4 py-3.5 text-sm text-slate-600">${escapeHtml(c.email)}</td>
             <td class="px-4 py-3.5 text-sm text-slate-600">${escapeHtml(c.phone || '—')}</td>
             <td class="px-4 py-3.5">${admStatusBadgeHtml(c.status)}</td>
+            <td class="px-4 py-3.5">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold ${c.rescue_enabled === true ? 'text-emerald-700' : 'text-slate-500'}">Rescue: ${c.rescue_enabled === true ? 'ON' : 'OFF'}</span>
+                ${rescueSwitchButton({
+                  action: 'rescue-company',
+                  companyId: c.id,
+                  on: c.rescue_enabled === true,
+                  label: `Rescue for ${c.name || 'company'}, currently ${c.rescue_enabled === true ? 'on' : 'off'}`,
+                })}
+              </div>
+            </td>
             <td class="px-4 py-3.5">${planBadge(c.subscription_plan)}</td>
             <td class="px-4 py-3.5 text-sm tabular-nums font-semibold text-slate-700">${ncars}</td>
             <td class="px-4 py-3.5">
@@ -621,6 +648,26 @@ export async function mountAdminDashboard(root) {
       <div class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-900/5">
         ${admSectionHeader(td.activeTitle, td.activeSubtitle)}
         <div class="border-b border-slate-100 px-5 py-3 sm:px-6">
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            ${
+              platformRescue.known
+                ? `${rescueSwitchButton({
+                    action: 'rescue-platform',
+                    on: platformRescue.enabled === true,
+                    label: `Platform Rescue, currently ${platformRescue.enabled ? 'on' : 'off'}`,
+                  })}
+                  <p class="text-sm font-semibold text-slate-900">Platform Rescue: ${platformRescue.enabled ? 'ON' : 'OFF'}</p>
+                  <p class="text-xs text-slate-500">${
+                    platformRescue.enabled
+                      ? 'Global ON: each company’s Rescue setting applies. Normal bookings stay available.'
+                      : 'Global OFF: Rescue is disabled platform-wide, regardless of each company’s setting. Normal bookings stay available.'
+                  }</p>`
+                : `<p class="text-sm font-semibold text-slate-900">Platform Rescue: unavailable</p>
+                  <p class="text-xs text-slate-500">The platform Rescue flag could not be read. No setting was changed. Normal bookings stay available.</p>`
+            }
+          </div>
+        </div>
+        <div class="border-b border-slate-100 px-5 py-3 sm:px-6">
           <div class="relative max-w-md">
             <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">${icon.search('h-4 w-4')}</span>
             <input id="adm-active-search" type="search" value="${escapeHtml(activeQ)}" placeholder="${escapeHtml(td.searchCompanies)}" autocomplete="off" class="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10" />
@@ -634,6 +681,7 @@ export async function mountAdminDashboard(root) {
                 <th class="px-4 py-3">Email</th>
                 <th class="px-4 py-3">Phone</th>
                 <th class="px-4 py-3">${escapeHtml(td.status)}</th>
+                <th class="px-4 py-3">Rescue</th>
                 <th class="px-4 py-3">${escapeHtml(td.plan)}</th>
                 <th class="px-4 py-3">${escapeHtml(td.cars)}</th>
                 <th class="px-4 py-3">${escapeHtml(td.actions)}</th>
@@ -1833,6 +1881,27 @@ export async function mountAdminDashboard(root) {
       const id = btn.getAttribute('data-id')
       const slug = btn.getAttribute('data-slug')
       const plan = btn.getAttribute('data-plan')
+
+      if (action === 'rescue-company' && id) {
+        const next = btn.getAttribute('data-enabled') !== '1'
+        btn.disabled = true
+        const { error, enabled } = await setCompanyRescueEnabled(id, next)
+        await mountAdminDashboard(root)
+        if (error) showMsg(error.message)
+        else showMsg(enabled ? 'Rescue: ON' : 'Rescue: OFF')
+        return
+      }
+
+      if (action === 'rescue-platform') {
+        if (!platformRescue.known) return
+        const next = btn.getAttribute('data-enabled') !== '1'
+        btn.disabled = true
+        const { error, enabled } = await setPlatformRescueEnabled(next)
+        await mountAdminDashboard(root)
+        if (error) showMsg(error.message)
+        else showMsg(enabled ? 'Platform Rescue: ON' : 'Platform Rescue: OFF')
+        return
+      }
 
       if (action === 'copy' && slug) {
         const url = absolutePublicBookingUrl(slug)

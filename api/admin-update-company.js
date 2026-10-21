@@ -20,6 +20,7 @@ const ALLOWED_FIELDS = [
   'hourly_enabled',
   'hourly_rate_eur',
   'hourly_min_hours',
+  'rescue_enabled',
 ]
 
 const AVAILABILITY_STATUSES = ['available', 'busy', 'offline']
@@ -110,7 +111,7 @@ function normalizeEditablePatch(rawPatch) {
       data[key] = value == null || value === '' ? null : String(value).trim()
       continue
     }
-    if (key === 'hourly_enabled') {
+    if (key === 'hourly_enabled' || key === 'rescue_enabled') {
       data[key] = value === true
       continue
     }
@@ -232,16 +233,26 @@ export default async function handler(req, res) {
       if (msg) return json(res, 409, { error: msg })
     }
 
+    const selectCols =
+      'rescue_enabled' in patch
+        ? 'id, name, slug, email, phone, city, vat_number, status, rescue_enabled'
+        : 'id, name, slug, email, phone, city, vat_number, status'
     const { data: updated, error: updateErr } = await supabase
       .from('companies')
       .update(patch)
       .eq('id', companyId)
-      .select('id, name, slug, email, phone, city, vat_number, status')
+      .select(selectCols)
       .maybeSingle()
 
     if (updateErr) {
       console.error('[admin-update-company:update]', updateErr)
       return json(res, 500, { error: `Could not update company: ${updateErr.message}` })
+    }
+    if (
+      'rescue_enabled' in patch &&
+      updated?.rescue_enabled !== patch.rescue_enabled
+    ) {
+      return json(res, 409, { error: 'Rescue setting did not save.' })
     }
 
     return json(res, 200, { data: { updated: true, company: updated, warnings } })

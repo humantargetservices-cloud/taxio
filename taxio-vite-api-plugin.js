@@ -80,6 +80,8 @@ export function taxioApiPlugin() {
           '/api/company-push-subscribe': 'api/company-push-subscribe.js',
           '/api/company-push-dispatch': 'api/company-push-dispatch.js',
           '/api/admin-approve-company': 'api/admin-approve-company.js',
+          '/api/admin-update-company': 'api/admin-update-company.js',
+          '/api/admin-rescue-platform': 'api/admin-rescue-platform.js',
           '/api/admin-delete-company': 'api/admin-delete-company.js',
           '/api/admin-dev-cleanup-test-companies': 'api/admin-dev-cleanup-test-companies.js',
           '/api/admin-send-communication-email': 'api/admin-send-communication-email.js',
