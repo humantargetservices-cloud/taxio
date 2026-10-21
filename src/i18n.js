@@ -216,8 +216,9 @@ export const translations = {
         'Create a shortcut on your home screen for faster access to your company dashboard.',
       pushEnableTitle: 'Enable trip notifications',
       pushEnableHelper: 'Receive new trip requests even when TAXIO is closed.',
-      pushEnableButton: 'ENABLE NOTIFICATIONS',
-      pushStatusOn: 'Trip notifications on',
+      pushEnableButton: 'Enable notifications',
+      pushStatusOn: 'Notifications enabled ✓',
+      pushStatusOnHelper: "You'll receive new trip requests even when TAXIO is closed.",
       pushBlocked:
         'Notifications are blocked on this phone. Enable them in your phone or app settings for TAXIO.',
       pushIosInstall:
@@ -1188,8 +1189,9 @@ Thank you.`,
         'Créez un raccourci sur votre écran d’accueil pour accéder plus vite à votre tableau de bord.',
       pushEnableTitle: 'Activer les notifications de courses',
       pushEnableHelper: 'Recevez les nouvelles demandes même quand TAXIO est fermé.',
-      pushEnableButton: 'ACTIVER LES NOTIFICATIONS',
-      pushStatusOn: 'Notifications de courses activées',
+      pushEnableButton: 'Activer les notifications',
+      pushStatusOn: 'Notifications activées ✓',
+      pushStatusOnHelper: 'Vous recevrez les nouvelles demandes, même lorsque TAXIO est fermé.',
       pushBlocked:
         'Les notifications sont bloquées sur ce téléphone. Activez-les dans les réglages du téléphone ou de l’appli TAXIO.',
       pushIosInstall:
@@ -2166,8 +2168,9 @@ Merci.`,
         'Maak een snelkoppeling op je startscherm voor snellere toegang tot je bedrijfsdashboard.',
       pushEnableTitle: 'Ritmeldingen inschakelen',
       pushEnableHelper: 'Ontvang nieuwe ritaanvragen zelfs als TAXIO gesloten is.',
-      pushEnableButton: 'MELDINGEN INSCHAKELEN',
-      pushStatusOn: 'Ritmeldingen aan',
+      pushEnableButton: 'Meldingen inschakelen',
+      pushStatusOn: 'Meldingen ingeschakeld ✓',
+      pushStatusOnHelper: 'Je ontvangt nieuwe ritaanvragen, ook wanneer TAXIO gesloten is.',
       pushBlocked:
         'Meldingen zijn geblokkeerd op deze telefoon. Schakel ze in via de telefoon- of TAXIO-appinstellingen.',
       pushIosInstall:

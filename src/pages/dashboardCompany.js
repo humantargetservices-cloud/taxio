@@ -71,6 +71,7 @@ import {
   enableOneSignalTripNotifications,
   resolveOneSignalPushUiMode,
   softSyncOneSignalTripNotifications,
+  watchPushEnrollment,
 } from '../lib/oneSignalPush.js'
 
 const dashState = {
@@ -106,6 +107,9 @@ let dashMountGen = 0
  * }}
  */
 let dashDataCache = null
+/** Latest dashboard paint. Subscription and visibility events call this. */
+let refreshPushCard = null
+let pushCardWatchBound = false
 
 const DASH_MOBILE_NAV_HEIGHT = '4.25rem'
 const DASH_SHELL =
@@ -514,6 +518,7 @@ function renderPushNotifyCard(td, pushMode) {
   if (pushMode === 'on') {
     return `<section id="dash-push-card" class="${DASH_CARD} border-emerald-200/70 p-4 sm:p-5 dark:border-emerald-800/40">
       <p class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">${escapeHtml(td.pushStatusOn)}</p>
+      <p class="mt-1 text-sm leading-relaxed ${DASH_MUTED}">${escapeHtml(td.pushStatusOnHelper || '')}</p>
     </section>`
   }
   if (pushMode === 'blocked') {
@@ -1898,7 +1903,7 @@ export async function mountDashboardCompany(root, opts = {}) {
       showPushFailure(userText, result.technicalReason || null)
       if (btn) {
         btn.disabled = false
-        btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
+        btn.textContent = td.pushEnableButton || 'Enable notifications'
       }
     } catch (e) {
       const name = String(e?.name || 'Error')
@@ -1912,10 +1917,30 @@ export async function mountDashboardCompany(root, opts = {}) {
       showPushFailure(null, `${stage} — ${name}: ${message}`)
       if (btn) {
         btn.disabled = false
-        btn.textContent = td.pushEnableButton || 'ENABLE NOTIFICATIONS'
+        btn.textContent = td.pushEnableButton || 'Enable notifications'
       }
     }
   })
+
+  refreshPushCard = () => {
+    const companyId = company?.id
+    if (!companyId) return
+    void resolveOneSignalPushUiMode(companyId)
+      .then((mode) => {
+        if (gen !== dashMountGen || !dashDataCache) return
+        if (dashDataCache.pushMode === mode) return
+        dashDataCache.pushMode = mode
+        remountLocalUi()
+      })
+      .catch(() => {})
+  }
+  if (!pushCardWatchBound) {
+    pushCardWatchBound = true
+    watchPushEnrollment(() => refreshPushCard?.())
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') refreshPushCard?.()
+    })
+  }
 
   // OneSignal: never block first paint — resolve in background, then local UI update.
   if (!localUi) {

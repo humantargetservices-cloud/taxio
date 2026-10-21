@@ -43,6 +43,7 @@ const OPT_IN_POLL_MS = 250
 let sdkLoadPromise = null
 let initPromise = null
 let subscriptionListenersBound = false
+const enrollmentWatchers = new Set()
 
 export function getOneSignalAppId() {
   try {
@@ -288,6 +289,22 @@ function isActivelySubscribed(snap) {
   })
 }
 
+function notifyEnrollmentWatchers() {
+  for (const listener of enrollmentWatchers) {
+    try {
+      listener()
+    } catch {
+      /* dashboard refresh is best-effort */
+    }
+  }
+}
+
+/** Re-read the live subscription when OneSignal reports a change. No localStorage. */
+export function watchPushEnrollment(listener) {
+  enrollmentWatchers.add(listener)
+  return () => enrollmentWatchers.delete(listener)
+}
+
 function bindOneSignalStateListeners(OneSignal) {
   if (subscriptionListenersBound) return
   subscriptionListenersBound = true
@@ -297,6 +314,7 @@ function bindOneSignalStateListeners(OneSignal) {
         permission: granted === true ? 'granted' : granted === false ? 'denied' : nativePermission(),
         initialized: true,
       })
+      notifyEnrollmentWatchers()
     })
   } catch {
     /* SDK build without this event */
@@ -311,6 +329,7 @@ function bindOneSignalStateListeners(OneSignal) {
         subscriptionIdPresent: !!current?.id,
         tokenPresent: !!current?.token,
       })
+      notifyEnrollmentWatchers()
     })
   } catch {
     /* poll path still covers enrollment */
@@ -468,7 +487,12 @@ export async function resolveOneSignalPushUiMode(companyId) {
         })
       }
     }
-    const snap = readOneSignalPushSnapshot(OneSignal)
+    let snap = readOneSignalPushSnapshot(OneSignal)
+    // The push token can arrive just after init/login. Wait briefly before
+    // deciding the card, without calling optIn or any permission prompt.
+    if (snap.browserPermission === 'granted' && !isActivelySubscribed(snap)) {
+      snap = await waitUntilOneSignalOptedIn(OneSignal, { timeoutMs: 2500 })
+    }
     const mode = pushUiModeFromSnapshot({
       supported: true,
       permission: snap.browserPermission,
@@ -707,7 +731,10 @@ export async function softSyncOneSignalTripNotifications(companyId) {
     const externalId = companyOneSignalExternalId(companyId)
     await OneSignal.login(externalId)
 
-    const before = readOneSignalPushSnapshot(OneSignal)
+    let before = readOneSignalPushSnapshot(OneSignal)
+    if (!isActivelySubscribed(before)) {
+      before = await waitUntilOneSignalOptedIn(OneSignal, { timeoutMs: 2500 })
+    }
     if (isActivelySubscribed(before)) {
       return {
         ok: true,
