@@ -1,11 +1,12 @@
 /**
  * OneSignal Web Push client (subscription + delivery layer).
- * Uses the unified root TAXIO worker (/sw.js, scope /) which also imports OneSignalSDK.sw.js.
+ * Typical Site worker path and scope come from the OneSignal dashboard
+ * (/onesignal/OneSignalSDKWorker.js, scope /onesignal/).
+ * TAXIO's own PWA cache worker remains /sw.js at scope / and is not unregistered.
  *
  * Staging active UX: OneSignal subscription state is the only notification-status authority.
  * Does not send Supabase JWTs to OneSignal. External ID is company:<company_id>.
  */
-import { isTaxioStagingClient } from './companyPush.js'
 import {
   ONESIGNAL_SW_PATH,
   ONESIGNAL_SW_SCOPE,
@@ -41,10 +42,7 @@ const OPT_IN_POLL_MS = 250
 
 let sdkLoadPromise = null
 let initPromise = null
-let stagingCleanupPromise = null
 let subscriptionListenersBound = false
-
-const STAGING_ONESIGNAL_SCOPE_CLEANUP_KEY = 'taxio_os_onesignal_scope_cleaned'
 
 export function getOneSignalAppId() {
   try {
@@ -216,73 +214,8 @@ async function withOneSignal(fn) {
 }
 
 /**
- * Staging-only: unregister the old OneSignal-only worker (scope …/onesignal/).
- * Runs at most once per tab session; never unregisters root TAXIO /sw.js.
- */
-export async function unregisterStagingScopedOneSignalWorker() {
-  if (!isTaxioStagingClient()) {
-    return { ok: false, code: 'NOT_STAGING', unregistered: 0 }
-  }
-  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
-    return { ok: false, code: 'NO_SW', unregistered: 0 }
-  }
-
-  try {
-    if (sessionStorage.getItem(STAGING_ONESIGNAL_SCOPE_CLEANUP_KEY) === '1') {
-      return { ok: true, code: 'ALREADY_CLEANED', unregistered: 0 }
-    }
-  } catch {
-    /* private mode */
-  }
-
-  if (stagingCleanupPromise) return stagingCleanupPromise
-
-  stagingCleanupPromise = (async () => {
-    let unregistered = 0
-    try {
-      const regs = await navigator.serviceWorker.getRegistrations()
-      for (const reg of regs) {
-        let pathname = ''
-        try {
-          pathname = new URL(reg.scope).pathname
-        } catch {
-          pathname = String(reg.scope || '')
-        }
-        if (!pathname.endsWith('/onesignal/') && pathname !== '/onesignal/') continue
-        const scriptURL = String(
-          reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || ''
-        )
-        // Only drop the dedicated onesignal worker — never root /sw.js
-        if (scriptURL && /\/sw\.js(\?|$)/i.test(scriptURL) && !/onesignal/i.test(scriptURL)) {
-          continue
-        }
-        const did = await reg.unregister()
-        if (did) unregistered += 1
-        console.info('[TAXIO ONESIGNAL]', {
-          phase: 'STAGING_SW_CLEANUP',
-          scope: reg.scope,
-          scriptURL: scriptURL || null,
-          unregistered: did,
-        })
-      }
-      try {
-        sessionStorage.setItem(STAGING_ONESIGNAL_SCOPE_CLEANUP_KEY, '1')
-      } catch {
-        /* ignore */
-      }
-      return { ok: true, code: unregistered > 0 ? 'CLEANED' : 'NOOP', unregistered }
-    } catch (err) {
-      console.warn('[TAXIO ONESIGNAL] staging SW cleanup failed', err?.message || err)
-      stagingCleanupPromise = null
-      return { ok: false, code: 'CLEANUP_FAILED', unregistered }
-    }
-  })()
-
-  return stagingCleanupPromise
-}
-
-/**
  * Initialize OneSignal once per page lifetime.
+ * Worker path and scope are the Typical Site dashboard values. Do not override them.
  * @returns {Promise<any>} OneSignal SDK
  */
 export async function initOneSignalOnce() {
@@ -299,7 +232,6 @@ export async function initOneSignalOnce() {
 
   initPromise = withOneSignal(async (OneSignal) => {
     try {
-      await unregisterStagingScopedOneSignalWorker()
       await ensureTaxioRootServiceWorker()
       await OneSignal.init({
         appId,

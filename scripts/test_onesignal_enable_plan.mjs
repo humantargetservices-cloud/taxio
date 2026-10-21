@@ -50,7 +50,7 @@ describe('company external id', () => {
 })
 
 describe('service worker registration target', () => {
-  it('uses the root /sw.js worker and root scope', () => {
+  it('keeps the TAXIO PWA worker at /sw.js scope /', () => {
     assert.equal(ONESIGNAL_SW_PATH, '/sw.js')
     assert.equal(ONESIGNAL_SW_SCOPE, '/')
     assert.equal(ONESIGNAL_SW_PATH.startsWith('/'), true)
@@ -172,15 +172,14 @@ describe('enabled only with a real push subscription', () => {
 })
 
 describe('one service worker configuration', () => {
-  it('points OneSignal at /sw.js scope / and overrides Typical Site defaults', () => {
+  it('does not override the Typical Site /onesignal/ dashboard worker', () => {
     const opts = oneSignalInitWorkerOptions()
+    assert.deepEqual(opts, {})
+    assert.equal(opts.serviceWorkerOverrideForTypical, undefined)
+    assert.equal(opts.serviceWorkerPath, undefined)
+    assert.equal(opts.serviceWorkerParam, undefined)
     assert.equal(ONESIGNAL_SW_PATH, '/sw.js')
     assert.equal(ONESIGNAL_SW_SCOPE, '/')
-    assert.equal(opts.path, '/')
-    assert.equal(opts.serviceWorkerPath, 'sw.js')
-    assert.deepEqual(opts.serviceWorkerParam, { scope: '/' })
-    assert.equal(opts.serviceWorkerOverrideForTypical, true)
-    assert.equal(opts.serviceWorkerPath.includes('OneSignalSDKWorker'), false)
   })
 
   it('drops only a root default OneSignal worker, never /sw.js or /onesignal/', () => {
@@ -202,13 +201,19 @@ describe('one service worker configuration', () => {
     )
   })
 
-  it('keeps OneSignal inside the unified root worker and does not add a second root worker file', () => {
+  it('keeps /sw.js as the PWA worker and does not unregister /onesignal/', () => {
     const sw = fs.readFileSync(path.join(root, 'public/sw.js'), 'utf8')
     assert.match(sw, /importScripts\('https:\/\/cdn\.onesignal\.com\/sdks\/web\/v16\/OneSignalSDK\.sw\.js'\)/)
+    assert.equal(fs.existsSync(path.join(root, 'public/onesignal/OneSignalSDKWorker.js')), true)
+    assert.equal(fs.existsSync(path.join(root, 'public/onesignal/OneSignalSDKUpdaterWorker.js')), true)
     assert.equal(fs.existsSync(path.join(root, 'public/OneSignalSDKWorker.js')), false)
     const client = fs.readFileSync(path.join(root, 'src/lib/oneSignalPush.js'), 'utf8')
     assert.match(client, /oneSignalInitWorkerOptions\(\)/)
-    assert.equal(/serviceWorkerPath:\s*['"]OneSignalSDKWorker\.js['"]/.test(client), false)
+    assert.match(client, /register\(ONESIGNAL_SW_PATH,\s*\{\s*scope:\s*ONESIGNAL_SW_SCOPE\s*\}\)/)
+    assert.equal(/serviceWorkerOverrideForTypical:\s*true/.test(client), false)
+    assert.equal(/serviceWorkerPath:\s*['"]sw\.js['"]/.test(client), false)
+    assert.equal(client.includes('unregisterStagingScopedOneSignalWorker'), false)
+    assert.equal(client.includes("pathname !== '/onesignal/'"), false)
   })
 
   it('installed PWA scope includes the root service worker and opens the company dashboard', () => {

@@ -8,18 +8,15 @@ export const ONESIGNAL_SW_SCOPE = '/'
 export const PRODUCTION_PUSH_ORIGIN = 'https://www.taxio.be'
 
 /**
- * OneSignal v16 Typical Site ignores serviceWorkerPath unless this override is set,
- * then registers /OneSignalSDKWorker.js. That URL is the SPA HTML rewrite (not JS),
- * so PushManager.subscribe never runs. Custom Code still receives the same path.
- * Path has no leading slash: the SDK joins it onto `path`.
+ * Production OneSignal is a Typical Site. The dashboard already sets
+ * path /onesignal/, OneSignalSDKWorker.js, OneSignalSDKUpdaterWorker.js,
+ * and scope /onesignal/. Do not pass serviceWorkerPath, serviceWorkerParam,
+ * or serviceWorkerOverrideForTypical — those replace the dashboard config.
+ * /sw.js stays the TAXIO PWA worker (ONESIGNAL_SW_PATH) and is not this config.
+ * Staging uses the same init; its own OneSignal app id selects its dashboard config.
  */
 export function oneSignalInitWorkerOptions() {
-  return {
-    path: '/',
-    serviceWorkerPath: 'sw.js',
-    serviceWorkerParam: { scope: ONESIGNAL_SW_SCOPE },
-    serviceWorkerOverrideForTypical: true,
-  }
+  return {}
 }
 
 /**
