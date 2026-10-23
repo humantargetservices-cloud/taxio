@@ -121,6 +121,7 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     driver_on_way_at: booking.driver_on_way_at || null,
     driver_arrived_at: booking.driver_arrived_at || null,
     completed_at: booking.completed_at || null,
+    completion_confirmation_status: booking.completed_at ? (booking.completion_confirmation_status || 'LEGACY_COMPLETED') : null,
   }
 
   const companyAName = companyA?.name || 'your taxi company'
@@ -148,12 +149,18 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
     }
   }
 
-  // Completed trip — token remains valid (never INVALID)
+  // Company completion declaration is separate from passenger acknowledgement.
   if (isCompleted) {
     const rescueConfirmed = pcs === 'CONFIRMED' && rescueStatus === 'ACCEPTED'
     return {
       ...base,
-      state: 'COMPLETED',
+      state: booking.completion_confirmation_status === 'AWAITING_PASSENGER'
+        ? (Date.now() - new Date(booking.completed_at).getTime() >= 86400000 ? 'CLOSED_UNCONFIRMED' : 'AWAITING_TRIP_CONFIRMATION')
+        : booking.completion_confirmation_status === 'ISSUE_REPORTED'
+          ? 'ISSUE_REPORTED'
+          : booking.completion_confirmation_status === 'CLOSED_UNCONFIRMED'
+            ? 'CLOSED_UNCONFIRMED'
+            : 'COMPLETED',
       headline_company: rescueConfirmed
         ? winnerCompany?.name || companyAName
         : companyAName,
@@ -296,7 +303,7 @@ export function mapPassengerTripState({ booking, companyA, winnerCompany, rescue
 }
 
 const TRIP_SELECT_WITH_PICKUP =
-  'id, company_id, status, booking_reference, pickup_address, dropoff_address, ride_datetime, car_type, service_type, estimated_price_eur, price_currency, decision_deadline_at, passenger_trip_token, created_at, completed_at, driver_pickup_status, driver_on_way_at, driver_arrived_at, driver_eta_minutes, driver_eta_updated_at, pickup_lat, pickup_lng'
+  'id, company_id, status, booking_reference, pickup_address, dropoff_address, ride_datetime, car_type, service_type, estimated_price_eur, price_currency, decision_deadline_at, passenger_trip_token, created_at, completed_at, completion_confirmation_status, driver_pickup_status, driver_on_way_at, driver_arrived_at, driver_eta_minutes, driver_eta_updated_at, pickup_lat, pickup_lng'
 
 async function attachTripCompanies(supabase, booking) {
   const { data: companyA } = await supabase
