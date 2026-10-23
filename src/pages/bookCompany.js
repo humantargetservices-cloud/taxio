@@ -1970,6 +1970,25 @@ Estimate price: ${estimatePrice}${refLine}`
     estUnavail?.classList.add('flex')
     estHint?.classList.add('hidden')
     estHint?.classList.remove('flex')
+    // Staging diagnostic only: show sanitized Google service status, never keys or coordinates.
+    if (window.location.hostname === 'staging.taxio.be' && estUnavail) {
+      const status = String(reason || '').match(/^ROUTE_ESTIMATE_UNAVAILABLE:([A-Z0-9_]{1,48})$/i)?.[1]
+      const description = ({
+        MISSING_GOOGLE_SERVER_KEY: 'Staging server Maps API key is missing.',
+        REQUEST_DENIED: 'Google Maps rejected the server key or API restrictions.',
+        OVER_QUERY_LIMIT: 'Google Maps quota or billing limit reached.',
+        ZERO_RESULTS: 'Google Maps returned no driving route.',
+        INVALID_COORDINATES: 'Selected address coordinates are invalid.'
+      })[status] || (status ? 'Route service returned: ' + status : 'Route estimate failed.')
+      let diagnostic = estUnavail.querySelector('[data-estimate-diagnostic]')
+      if (!diagnostic) {
+        diagnostic = document.createElement('p')
+        diagnostic.dataset.estimateDiagnostic = 'true'
+        diagnostic.className = 'mt-2 text-xs font-semibold text-rose-700'
+        estUnavail.appendChild(diagnostic)
+      }
+      diagnostic.textContent = 'Staging diagnostic: ' + description
+    }
     console.warn('[taxio-booking] Route estimate unavailable:', reason || 'unknown', detail || '')
   }
 
