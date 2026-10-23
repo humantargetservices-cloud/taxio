@@ -69,7 +69,8 @@ async function fetchRouteEstimate({ pickup, dropoff }) {
       response.status,
       responseStatus
     )
-    throw new Error('ROUTE_ESTIMATE_UNAVAILABLE')
+    const safeStatus = String(responseStatus).replace(/[^A-Z0-9_]/gi, '').slice(0,48) || 'UNKNOWN'
+    throw new Error(`ROUTE_ESTIMATE_UNAVAILABLE:${safeStatus}`)
   }
 
   if (
