@@ -1807,8 +1807,26 @@ export async function mountDashboardCompany(root, opts = {}) {
 
   root.querySelectorAll('[data-complete-trip]').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const confirmMsg = td.activeTripsCompleteConfirm || 'Mark this trip as completed?'
-      if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) return
+      // Small in-app confirmation sheet: no changes are sent until user confirms.
+      const overlay = document.createElement('div')
+      overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4'
+      overlay.innerHTML = `<section role="dialog" aria-modal="true" aria-labelledby="finish-trip-title" class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900">
+        <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">✓</div>
+        <h2 id="finish-trip-title" class="text-xl font-bold text-slate-900 dark:text-white">Finish this journey?</h2>
+        <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">Confirm the passenger has been dropped off. TAXIO will ask the passenger to confirm arrival or report a problem. Payment stays directly between passenger and taxi company.</p>
+        <p class="mt-3 text-xs text-slate-500">The trip leaves Active trips and appears in history as Awaiting passenger.</p>
+        <div class="mt-6 grid gap-2">
+          <button type="button" data-finish-confirm class="min-h-[48px] rounded-xl bg-emerald-600 px-4 font-bold text-white">Mark journey finished</button>
+          <button type="button" data-finish-cancel class="min-h-[48px] rounded-xl border border-slate-300 px-4 font-semibold text-slate-700 dark:text-slate-200">Not yet</button>
+        </div>
+      </section>`
+      document.body.appendChild(overlay)
+      const accepted = await new Promise(resolve=>{
+        overlay.querySelector('[data-finish-confirm]').addEventListener('click',()=>resolve(true),{once:true})
+        overlay.querySelector('[data-finish-cancel]').addEventListener('click',()=>resolve(false),{once:true})
+      })
+      overlay.remove()
+      if(!accepted) return
       const { bookingRequestId, rescueRequestId } = readTripActionIds(btn)
       btn.disabled = true
       try {
