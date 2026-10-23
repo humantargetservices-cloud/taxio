@@ -341,6 +341,7 @@ export async function enrichActiveTripsWithWinnerDetails(trips, opts = {}) {
               dropoff: preferRouteLabel(b.dropoff_address, t.dropoff),
               whenIso: b.ride_datetime || b.completed_at || t.whenIso || null,
               completedAt: b.completed_at,
+              completionStatus: b.completion_confirmation_status || 'LEGACY_COMPLETED',
               priceLabel: tripPriceLabelFromBooking(b) || t.priceLabel || null,
               passengerName: String(b.customer_name || t.passengerName || '').trim() || null,
               sortAt: new Date(b.completed_at || 0).getTime() || 0,
@@ -648,6 +649,7 @@ export function deriveCompletedTrips({ companyId, bookings, opportunities }) {
       dropoff: preferRouteLabel(b.dropoff_address),
       whenIso: b.ride_datetime || b.completed_at || null,
       completedAt: b.completed_at,
+              completionStatus: b.completion_confirmation_status || 'LEGACY_COMPLETED',
       priceLabel: tripPriceLabelFromBooking(b) || null,
       passengerName: String(b.customer_name || '').trim() || null,
       sortAt: new Date(b.completed_at || 0).getTime() || 0,
@@ -663,6 +665,12 @@ export function renderCompletedTripItemHtml(trip, td) {
   const dropoff = escapeHtml(trip.dropoff || '—')
   const when = escapeHtml(formatActiveTripWhen(trip.whenIso || trip.completedAt))
   const price = trip.priceLabel ? escapeHtml(trip.priceLabel) : ''
+  const rawStatus = String(trip.completionStatus || 'LEGACY_COMPLETED')
+  const effectiveStatus = rawStatus === 'AWAITING_PASSENGER' && trip.completedAt &&
+    Date.now() - new Date(trip.completedAt).getTime() >= 86400000 ? 'CLOSED_UNCONFIRMED' : rawStatus
+  const label = ({AWAITING_PASSENGER:'Awaiting passenger',PASSENGER_CONFIRMED:'Passenger confirmed',
+    ISSUE_REPORTED:'Issue reported',CLOSED_UNCONFIRMED:'Closed — unconfirmed',
+    LEGACY_COMPLETED:'Completed'})[effectiveStatus] || 'Completed'
   const name = String(trip.passengerName || '').trim()
   const ref = String(trip.bookingReference || '').trim()
   return `<article class="rounded-xl border border-gray-100/80 bg-white/80 px-3 py-2.5 dark:border-slate-700/40 dark:bg-slate-900/40">
@@ -672,7 +680,7 @@ export function renderCompletedTripItemHtml(trip, td) {
     </div>
     <div class="mt-1 space-y-0.5 text-[11px] text-gray-500 dark:text-slate-400">
       ${name ? `<p class="font-medium text-gray-700 dark:text-slate-300">${escapeHtml(name)}</p>` : ''}
-      <p>${when}</p>
+      <p>${when} · <span class="font-semibold">${escapeHtml(label)}</span></p>
       ${ref ? `<p>${escapeHtml(td.refLabel || 'Reference')}: ${escapeHtml(ref)}</p>` : ''}
     </div>
   </article>`
