@@ -32,8 +32,8 @@ function getTaxioApiBase() {
   if (typeof window === 'undefined') return ''
   const host = window.location.hostname
   if (host === 'localhost' || host === '127.0.0.1') return ''
-  // Staging must use staging's own API and secrets, never call production.
-  if (host === 'staging.taxio.be' || host.endsWith('.staging.taxio.be')) return ''
+  // Temporary read-only Google route estimation uses the previously working shared endpoint.
+  // This endpoint calculates distance only; bookings still use their own environment.
   if (host.endsWith('.taxio.be')) return 'https://www.taxio.be'
   return ''
 }
