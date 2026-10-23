@@ -2638,10 +2638,15 @@ Estimate price: ${estimatePrice}${refLine}`
           refreshWaState()
           return
         }
-        try {
-          await refreshEstimate()
-        } catch {
-          /* review still allowed; price may be unavailable */
+        // Do not discard an already valid fare when opening the passenger-contact review.
+        // Address changes clear latestEstimate in onAddressFieldsUpdated; if it remains,
+        // the current selected route already has a successful estimate.
+        if (!latestEstimate || latestEstimate.source !== 'google_distance_matrix') {
+          try {
+            await refreshEstimate()
+          } catch {
+            /* review still allowed; price may be unavailable */
+          }
         }
         openReview()
       } finally {
