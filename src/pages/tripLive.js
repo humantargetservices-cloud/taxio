@@ -291,6 +291,9 @@ function isBusinessTripState(state) {
     'RESCUE_WINNER_FOUND',
     'CONFIRMED',
     'COMPLETED',
+    'AWAITING_TRIP_CONFIRMATION',
+    'ISSUE_REPORTED',
+    'CLOSED_UNCONFIRMED',
     'CANCELLED',
     'OFFER_EXPIRED',
     'NO_TAXI_AVAILABLE',
@@ -355,6 +358,29 @@ function renderState(data) {
     `)
   }
 
+  if (state === 'AWAITING_TRIP_CONFIRMATION') {
+    return card(`
+      <p class="text-xs font-bold uppercase tracking-wide text-amber-700">JOURNEY FINISHED</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">Have you arrived?</h1>
+      <p class="mt-2 text-sm text-gray-600">Your taxi company marked the journey as finished. Please confirm or report a problem within 24 hours.</p>
+      ${summary}
+      <div class="mt-4 grid gap-2">
+        <button id="trip-finish-yes" class="min-h-[48px] rounded-xl bg-emerald-600 px-4 font-semibold text-white">Yes, trip completed</button>
+        <button id="trip-finish-issue" class="min-h-[48px] rounded-xl border border-slate-300 px-4 font-semibold text-slate-800">No, report a problem</button>
+        <p id="trip-finish-msg" class="text-sm text-red-600" role="alert"></p>
+      </div>
+      ${contactButtonsHtml(data.contacts, company, trip, tl)}
+    `)
+  }
+  if (state === 'ISSUE_REPORTED' || state === 'CLOSED_UNCONFIRMED') {
+    return card(`
+      <p class="text-xs font-bold uppercase tracking-wide text-slate-600">JOURNEY CLOSED</p>
+      <h1 class="mt-2 text-xl font-bold text-gray-900">${state === 'ISSUE_REPORTED' ? 'Problem reported' : 'Closed without passenger confirmation'}</h1>
+      <p class="mt-2 text-sm text-gray-600">${state === 'ISSUE_REPORTED' ? 'Please contact your taxi company to resolve the issue.' : 'The company marked this journey finished, but you did not confirm arrival.'}</p>
+      ${summary}
+      ${contactButtonsHtml(data.contacts, company, trip, tl)}
+    `)
+  }
   if (state === 'COMPLETED') {
     return card(`
       <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">${escapeHtml(
@@ -552,6 +578,32 @@ export async function mountTripLive(root, secureToken) {
 
   const bindActions = () => {
     bindCopyRef()
+    for (const [selector,action] of [['#trip-finish-yes','CONFIRM'],['#trip-finish-issue','ISSUE']]) {
+      root.querySelector(selector)?.addEventListener('click',async () => {
+        if(busy) return
+        busy=true
+        const yes=root.querySelector('#trip-finish-yes'),issue=root.querySelector('#trip-finish-issue')
+        if(yes)yes.disabled=true
+        if(issue)issue.disabled=true
+        try {
+          const response=await fetch(apiUrl('/api/trip-completion'),{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({token,action})
+          })
+          const data=await response.json().catch(()=>({}))
+          if(!response.ok || !data.ok) throw Error(data.code||'Could not save response')
+          lastState=''
+          await refresh({force:true})
+        } catch(err) {
+          const msg=root.querySelector('#trip-finish-msg')
+          if(msg)msg.textContent=String(err?.message||'Please try again')
+        } finally {
+          busy=false
+          if(yes?.isConnected)yes.disabled=false
+          if(issue?.isConnected)issue.disabled=false
+        }
+      })
+    }
     root.querySelector('#trip-retry')?.addEventListener('click', () => {
       void refresh({ force: true })
     })
@@ -638,7 +690,7 @@ export async function mountTripLive(root, secureToken) {
     if (pollTimer) return
     const state = String(latest?.state || (softRefreshFail ? 'LOAD_ERROR' : ''))
     if (
-      ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED', 'COMPLETED'].includes(
+      ['CANCELLED', 'NO_TAXI_AVAILABLE', 'INVALID', 'EXPIRED', 'OFFER_EXPIRED', 'COMPLETED', 'ISSUE_REPORTED', 'CLOSED_UNCONFIRMED'].includes(
         state
       )
     ) {
@@ -681,7 +733,7 @@ export async function mountTripLive(root, secureToken) {
     const pickupStatus = String(data?.trip?.driver_pickup_status || '').toUpperCase()
     const eta = data?.trip?.driver_eta_minutes
     // Include completed_at so completion always re-paints; pickup status must force re-render
-    const progressKey = `${state}:${pickupStatus}:${eta ?? ''}:${data?.trip?.driver_arrived_at || ''}:${data?.trip?.completed_at || ''}`
+    const progressKey = `${state}:${pickupStatus}:${eta ?? ''}:${data?.trip?.driver_arrived_at || ''}:${data?.trip?.completed_at || ''}:${data?.trip?.completion_confirmation_status || ''}`
     const terminal = [
       'CANCELLED',
       'NO_TAXI_AVAILABLE',
@@ -689,6 +741,8 @@ export async function mountTripLive(root, secureToken) {
       'EXPIRED',
       'OFFER_EXPIRED',
       'COMPLETED',
+      'ISSUE_REPORTED',
+      'CLOSED_UNCONFIRMED',
     ].includes(state)
     // Keep polling through ON_THE_WAY / ARRIVED until COMPLETED; also poll LOAD_ERROR for recovery
     if (terminal) stopPoll()
@@ -698,7 +752,8 @@ export async function mountTripLive(root, secureToken) {
       state === 'REQUESTING_COMPANY_A' ||
       state === 'SEARCHING_RESCUE' ||
       state === 'RESCUE_WINNER_FOUND' ||
-      state === 'LOAD_ERROR'
+      state === 'LOAD_ERROR' ||
+      state === 'AWAITING_TRIP_CONFIRMATION'
     ) {
       startPoll()
     }
