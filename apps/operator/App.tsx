@@ -35,7 +35,7 @@ export default function App() {
   async function refreshBookings() {
     if (!company || demo || refreshing) return
     setRefreshing(true)
-    try { setBookings(await readCompanyBookings(company.id));setRescueOffers(await readCompanyRescueOffers(company.id)); setActionMessage('Bookings updated') }
+    try { setBookings(await readCompanyBookings(company.id));try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* Rescue availability is independent of bookings. */} setActionMessage('Bookings updated') }
     catch(e) {setActionMessage(e instanceof Error ? e.message : 'Unable to refresh bookings')}
     finally{setRefreshing(false)}
   }
