@@ -1,3 +1,4 @@
+import { demoIdentities, canOperate } from './src/mockAccess'
 import React, { useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 
@@ -12,12 +13,16 @@ const DEMO_COMPANY = { name: 'ABC Taxi', initials: 'AT', city: 'Leuven' }
 export default function App() {
   const [companyName, setCompanyName] = useState(DEMO_COMPANY.name)
   const [loggedIn, setLoggedIn] = useState(false)
+  const [identity, setIdentity] = useState(demoIdentities[0])
+  const [available, setAvailable] = useState(true)
+  const authorized = canOperate(identity, 'company-a')
   const [offers, setOffers] = useState(SAMPLE_OFFERS)
   const [history, setHistory] = useState<string[]>([])
   const [view, setView] = useState<'dashboard' | 'trips' | 'history' | 'profile'>('dashboard')
   const [activeTrip, setActiveTrip] = useState<Offer | null>(null)
   const [tripStep, setTripStep] = useState<'accepted' | 'on_way' | 'arrived'>('accepted')
   const decide = (offer: Offer, decision: 'Accepted' | 'Declined') => {
+    if (!authorized || !available) return
     setOffers(current => current.filter(x => x.id !== offer.id))
     if (decision === 'Accepted') { setActiveTrip(offer); setTripStep('accepted'); setView('trips') }
     setHistory(current => [`${decision} · ${offer.from} → ${offer.to} (demo only)`, ...current])
@@ -31,6 +36,8 @@ export default function App() {
         <Text style={styles.muted}>Preview company-specific branding without connecting to TAXIO servers.</Text>
         <Text style={styles.label}>Company name (demo)</Text>
         <TextInput style={styles.input} value={companyName} onChangeText={setCompanyName} maxLength={60} placeholder="Company name" />
+        <Text style={styles.label}>Select mock driver</Text>
+        {demoIdentities.map(d => <TouchableOpacity key={d.id} style={styles.card} onPress={() => setIdentity(d)}><Text style={styles.route}>{identity.id === d.id ? '● ' : '○ '}{d.label} · {d.status}</Text></TouchableOpacity>)}
         <TouchableOpacity accessibilityRole="button" style={styles.primary} onPress={() => setLoggedIn(true)}>
           <Text style={styles.primaryText}>Open demo dashboard</Text>
         </TouchableOpacity>
@@ -40,7 +47,9 @@ export default function App() {
           <View style={styles.mark}><Text style={styles.markText}>{(companyName.trim() || 'Taxi').slice(0, 2).toUpperCase()}</Text></View>
           <View style={styles.headerCopy}><Text style={styles.title}>{companyName.trim() || DEMO_COMPANY.name}</Text><Text style={styles.muted}>Driver dashboard · {DEMO_COMPANY.city}</Text></View>
         </View>
-        <View style={styles.tabs}>
+        <Text style={styles.muted}>{identity.label} · {identity.role} · {identity.status}</Text>
+        {authorized ? <TouchableOpacity style={styles.secondary} onPress={() => setAvailable(v => !v)}><Text style={styles.secondaryText}>{available ? 'Available for offers · tap to go offline' : 'Unavailable · tap to go online'}</Text></TouchableOpacity> : <View style={styles.card}><Text style={styles.route}>Access restricted</Text><Text style={styles.muted}>Demo membership is not approved for this company. Real authorization must be enforced by the server.</Text></View>}
+        {authorized ? <View style={styles.tabs}>
           {(['dashboard','trips','history','profile'] as const).map(tab => <TouchableOpacity key={tab} accessibilityRole="button" accessibilityState={{ selected: view === tab }} onPress={() => setView(tab)} style={[styles.tab, view === tab && styles.selectedTab]}><Text style={[styles.tabText, view === tab && styles.selectedTabText]}>{tab === 'trips' ? 'Current trip' : tab[0].toUpperCase()+tab.slice(1)}</Text></TouchableOpacity>)}
         </View>
         {view === 'dashboard' ? <>
@@ -55,8 +64,8 @@ export default function App() {
             <Text style={styles.route}>{offer.from} → {offer.to}</Text>
             <Text style={styles.muted}>Demonstration only. No timer, server acceptance or dispatch.</Text>
             <View style={styles.actions}>
-              <TouchableOpacity accessibilityRole="button" style={[styles.primary, styles.action]} onPress={() => decide(offer, 'Accepted')}><Text style={styles.primaryText}>Accept demo</Text></TouchableOpacity>
-              <TouchableOpacity accessibilityRole="button" style={[styles.secondary, styles.action]} onPress={() => decide(offer, 'Declined')}><Text style={styles.secondaryText}>Decline demo</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" style={[styles.primary, styles.action]} disabled={!available} onPress={() => decide(offer, 'Accepted')}><Text style={styles.primaryText}>Accept demo</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" style={[styles.secondary, styles.action]} disabled={!available} onPress={() => decide(offer, 'Declined')}><Text style={styles.secondaryText}>Decline demo</Text></TouchableOpacity>
             </View>
           </View>
         )}
@@ -76,6 +85,7 @@ export default function App() {
         </> : null}
         <TouchableOpacity accessibilityRole="button" style={styles.secondary} onPress={() => { setOffers(SAMPLE_OFFERS); setHistory([]); setActiveTrip(null); setTripStep('accepted'); setView('dashboard') }}><Text style={styles.secondaryText}>Reset demo requests</Text></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" style={styles.link} onPress={() => setLoggedIn(false)}><Text style={styles.linkText}>Change company</Text></TouchableOpacity>
+        </> : null}
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </>}
     </ScrollView>
