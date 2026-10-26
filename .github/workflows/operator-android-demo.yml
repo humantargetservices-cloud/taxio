@@ -1,0 +1,48 @@
+name: TAXIO Operator Android Demo
+on:
+  push:
+    branches: [staging]
+    paths:
+      - 'apps/operator/**'
+      - '.github/workflows/operator-android-demo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/operator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/operator/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install JavaScript dependencies
+        run: npm ci
+      - name: Validate TypeScript
+        run: npx tsc --noEmit
+      - name: Generate Android project offline (no remote TAXIO backend)
+        run: npx expo prebuild --platform android --no-install
+      - name: Build Android debug APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleDebug --no-daemon
+      - name: Upload installable demo APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxio-operator-offline-demo-apk
+          path: apps/operator/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
