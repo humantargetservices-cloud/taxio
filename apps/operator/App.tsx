@@ -35,12 +35,13 @@ export default function App() {
   const [refreshing,setRefreshing] = useState(false)
   const seenBookingIds=useRef<Set<string>|null>(null)
   const [incomingTrip,setIncomingTrip]=useState<Booking|null>(null)
+  const [selectedBookingId,setSelectedBookingId]=useState<string|null>(null)
   const [clockNow,setClockNow]=useState(Date.now())
   useEffect(()=>{const timer=setInterval(()=>setClockNow(Date.now()),1000);return()=>clearInterval(timer)},[])
   useEffect(()=>{
     const listener=Notifications.addNotificationResponseReceivedListener(response=>{
       const id=response.notification.request.content.data?.bookingId
-      if(typeof id==='string'){setScreen('bookings');setIncomingTrip(bookings.find(b=>b.id===id)||null)}
+      if(typeof id==='string'){setScreen('bookings');setSelectedBookingId(id);setIncomingTrip(bookings.find(b=>b.id===id)||null)}
     })
     return()=>listener.remove()
   },[bookings])
@@ -109,7 +110,7 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
+      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch {/* Manual refresh exposes network errors. */}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
@@ -138,14 +139,14 @@ export default function App() {
 
   async function signOut() {
     if (!demo) await operatorDb?.auth.signOut()
-    setCompany(null);setIncomingTrip(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
+    setCompany(null);setIncomingTrip(null);setSelectedBookingId(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
   }
 
   const myBookings = bookings.filter(b => (b.status === 'new' || b.status === 'accepted') && !b.completed_at)
   const historyBookings = bookings.filter(b => b.completed_at || (b.status !== 'new' && b.status !== 'accepted'))
   const formatTripDate = (date?:string|null) => date ? new Date(date).toLocaleString('en-BE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Time not specified'
   const currentTrip = bookings.find(b => b.status === 'accepted' && !b.completed_at)
-  const pendingCount = bookings.filter(b => b.status === 'new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at) > clockNow).length
+  const pendingCount = bookings.filter(b => b.status === 'new' && !b.completed_at).length
   const acceptedCount = bookings.filter(b => b.status === 'accepted' && !b.completed_at).length
   return <SafeAreaView style={styles.page}>
     <StatusBar barStyle="dark-content" />
@@ -220,12 +221,13 @@ export default function App() {
           <Text style={styles.section}>My Bookings</Text>
           {!demo ? <TouchableOpacity style={styles.secondary} disabled={refreshing} onPress={refreshBookings}><Text style={styles.secondaryText}>{refreshing?'Refreshing…':'↻ Refresh bookings'}</Text></TouchableOpacity> : null}
           <Text style={styles.subtitle}>Requests and journeys for your company</Text>
-          {myBookings.length ? myBookings.map(b => <View key={b.id} style={styles.card}>
+          {myBookings.length ? myBookings.map(b => <View key={b.id} style={[styles.card,selectedBookingId===b.id && styles.highlightedBooking]}>
             <View style={styles.cardHeader}><Text style={[styles.pill,b.status==='accepted'?styles.pillAccepted:styles.pillNew]}>{b.status==='accepted'?'ACCEPTED':'NEW REQUEST'}</Text><Text style={styles.reference}>{b.booking_reference||'Trip'}</Text></View>
             <Text style={styles.tripMeta}>{b.customer_name ? b.customer_name+'  ·  ' : ''}{formatTripDate(b.ride_datetime || b.created_at)}</Text>
             <View style={styles.routeRow}><View style={styles.pickupDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{b.pickup_address}</Text></View></View>
             <View style={styles.routeDivider}/>
             <View style={styles.routeRow}><View style={styles.destinationDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{b.dropoff_address}</Text></View></View>
+            <TouchableOpacity style={styles.secondary} onPress={()=>{setSelectedBookingId(b.id);setIncomingTrip(b)}}><Text style={styles.secondaryText}>Open trip details ›</Text></TouchableOpacity>
             <View style={styles.cardFooter}><Text style={styles.note}>{demo?'Preview only · no booking changes':mobileActionsEnabled()?'TAXIO server verifies acceptance':'Read only · booking actions disabled'}</Text></View>
             {!demo && mobileActionsEnabled() && b.status==='new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at)>Date.now() ? confirmBookingId===b.id ? <View style={styles.card}><Text style={styles.note}>Accept this real trip? This will notify the passenger and affect live operations.</Text><TouchableOpacity disabled={actionBusy} style={styles.primary} onPress={()=>acceptBooking(b.id)}><Text style={styles.primaryText}>{actionBusy?'Confirming…':'Confirm acceptance'}</Text></TouchableOpacity><TouchableOpacity onPress={()=>setConfirmBookingId(null)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View> : <TouchableOpacity style={styles.primary} onPress={()=>setConfirmBookingId(b.id)}><Text style={styles.primaryText}>Accept booking</Text></TouchableOpacity> : null}
           </View>) : <Text style={styles.note}>No active bookings. Pull down to check for new requests.</Text>}
@@ -326,6 +328,7 @@ const styles = StyleSheet.create({
   spotlightArrow:{height:35,width:35,borderRadius:18,backgroundColor:'#fff7db',alignItems:'center',justifyContent:'center'},
   spotlightArrowText:{fontSize:29,fontWeight:'700',color:'#715c2b'},
   navIcon:{fontSize:19,fontWeight:'800',color:'#51617a'},
+  highlightedBooking:{borderColor:'#e9b949',borderWidth:2,backgroundColor:'#fffdf3'},
   navigationRow:{flexDirection:'row',gap:10},navigationButton:{flex:1,backgroundColor:'#eaf0fb',borderRadius:13,paddingVertical:14,paddingHorizontal:6,alignItems:'center'},navigationText:{fontSize:13,fontWeight:'800',color:'#18376a'},
   shareBanner:{backgroundColor:'#fff',borderRadius:18,padding:17,borderWidth:1,borderColor:'#e5e9f1',flexDirection:'row',alignItems:'center',gap:12},shareOverline:{fontSize:10,fontWeight:'900',color:'#aa7908',letterSpacing:1},shareTitle:{fontSize:17,fontWeight:'900',color:'#151d30',marginTop:4},shareSubtitle:{fontSize:12,color:'#64748b',marginTop:3},qrBadge:{width:54,height:54,borderRadius:14,backgroundColor:'#fef3c7',alignItems:'center',justifyContent:'center'},qrBadgeText:{fontSize:35,color:'#111a30'},tripMeta:{fontSize:12,color:'#64748b',marginBottom:8},historyCard:{padding:14,backgroundColor:'#fff',borderWidth:1,borderColor:'#e5e9f1',borderRadius:14,flexDirection:'row'},historyStatus:{fontSize:10,color:'#64748b',fontWeight:'800'},historyRoute:{color:'#111827',fontWeight:'700',fontSize:13,marginTop:6},modalBackdrop:{flex:1,backgroundColor:'rgba(9,16,30,.7)',justifyContent:'flex-end'},modalCard:{backgroundColor:'#fff',padding:25,borderTopLeftRadius:26,borderTopRightRadius:26,gap:14,alignItems:'stretch'},modalTitle:{fontWeight:'900',fontSize:23,color:'#111827'},qrPanel:{alignItems:'center',padding:20,backgroundColor:'#fff',borderRadius:18},qrUrl:{textAlign:'center',color:'#34415a',fontSize:13,fontWeight:'700'},
   page:{flex:1,backgroundColor:'#f3f5f9'},content:{paddingHorizontal:18,paddingVertical:22,gap:12,flexGrow:1},
