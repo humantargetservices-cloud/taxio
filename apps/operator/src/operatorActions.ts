@@ -24,11 +24,27 @@ export async function sendOperatorAction(
     return { ok: false, code: 'INVALID_CONTEXT' }
   const { data, error: sessionErr } = await operatorDb.auth.getSession()
   if (sessionErr || !data.session?.access_token) return { ok: false, code: 'SESSION_EXPIRED' }
-  const response = await fetch(apiBaseUrl.replace(/\/$/, '') + '/api/rescue', {
+  let session = data.session
+  if (session.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
+    const refreshed = await operatorDb.auth.refreshSession()
+    if (refreshed.error || !refreshed.data.session) return { ok: false, code: 'SESSION_EXPIRED' }
+    session = refreshed.data.session
+  }
+  const post = (token:string) => fetch(apiBaseUrl.replace(/\/$/, '') + '/api/rescue', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + data.session.access_token },
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
     body: JSON.stringify(payload),
   })
-  const result = await response.json().catch(() => ({}))
-  return { ok: response.ok && result.ok === true, code: result.code, error: result.error }
+  try {
+    let response = await post(session.access_token)
+    if (response.status === 401) {
+      const refreshed = await operatorDb.auth.refreshSession()
+      if (refreshed.error || !refreshed.data.session) return { ok: false, code: 'SESSION_EXPIRED' }
+      response = await post(refreshed.data.session.access_token)
+    }
+    const result = await response.json().catch(() => ({}))
+    return { ok: response.ok && result.ok === true, code: result.code, error: result.error || (!response.ok ? 'Request failed' : undefined) }
+  } catch {
+    return { ok: false, code: 'NETWORK_ERROR', error: 'Unable to reach TAXIO. Check connection and refresh trip status before retrying.' }
+  }
 }
