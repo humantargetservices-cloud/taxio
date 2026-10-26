@@ -1,3 +1,4 @@
+import * as Notifications from 'expo-notifications'
 import QRCode from 'react-native-qrcode-svg'
 import { sendOperatorAction, mobileActionsEnabled } from './src/operatorActions'
 import React, { useEffect, useRef, useState } from 'react'
@@ -10,6 +11,7 @@ const DEMO_BOOKINGS: Booking[] = [
   { id: 'demo-booking-1', pickup_address: 'Leuven Station', dropoff_address: 'Brussels Airport', status: 'new' },
   { id: 'demo-trip-1', pickup_address: 'Aarschot', dropoff_address: 'Leuven', status: 'accepted' },
 ]
+Notifications.setNotificationHandler({handleNotification:async()=>({shouldShowBanner:true,shouldShowList:true,shouldPlaySound:true,shouldSetBadge:false})})
 const DEMO_COMPANY: OperatorCompany = { id: 'demo', name: 'ABC Taxi', logo_url: null, status: 'approved' }
 export default function App() {
   const [email, setEmail] = useState('')
@@ -32,6 +34,7 @@ export default function App() {
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
   const seenBookingIds=useRef<Set<string>|null>(null)
+  useEffect(()=>{void Notifications.setNotificationChannelAsync('taxio-trips',{name:'TAXIO Trips',importance:Notifications.AndroidImportance.HIGH,sound:'default'});void Notifications.requestPermissionsAsync()},[])
   const bookingUrl = company?.slug && /^[a-z0-9-]+$/.test(company.slug) ? `https://${company.slug}.taxio.be` : null
   async function navigateTo(address:string,provider:'waze'|'google') {
     if(!address?.trim()) {Alert.alert('Navigation unavailable','Trip destination is missing.');return}
@@ -96,7 +99,7 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address)}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
+      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch {/* Manual refresh exposes network errors. */}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
