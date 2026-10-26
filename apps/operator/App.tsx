@@ -1,6 +1,6 @@
 import QRCode from 'react-native-qrcode-svg'
 import { sendOperatorAction, mobileActionsEnabled } from './src/operatorActions'
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl, AppState, Linking, Alert } from 'react-native'
 import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, readCompanyRescueOffers, type RescueOffer, type OperatorCompany } from './src/backend'
 
@@ -31,6 +31,7 @@ export default function App() {
   const [tripOpen,setTripOpen] = useState(false)
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
+  const seenBookingIds=useRef<Set<string>|null>(null)
   const bookingUrl = company?.slug && /^[a-z0-9-]+$/.test(company.slug) ? `https://${company.slug}.taxio.be` : null
   async function navigateTo(address:string,provider:'waze'|'google') {
     if(!address?.trim()) {Alert.alert('Navigation unavailable','Trip destination is missing.');return}
@@ -82,7 +83,7 @@ export default function App() {
         const existing = await restoreOperatorCompany()
         if (existing && active) {
           const rows = await readCompanyBookings(existing.id)
-          if (active) {setCompany(existing);setBookings(rows);setDemo(false);try{setRescueOffers(await readCompanyRescueOffers(existing.id))}catch{/* rescue access may be unavailable */}}
+          if (active) {setCompany(existing);seenBookingIds.current=new Set(rows.map(b=>b.id));setBookings(rows);setDemo(false);try{setRescueOffers(await readCompanyRescueOffers(existing.id))}catch{/* rescue access may be unavailable */}}
         }
       } catch { /* Show login; never grant access without verified session. */ }
       finally {if(active)setRestoring(false)}
@@ -95,7 +96,7 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {const rows=await readCompanyBookings(company.id);if(active){setBookings(rows);try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
+      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address)}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch {/* Manual refresh exposes network errors. */}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
@@ -112,7 +113,7 @@ export default function App() {
       if (!ownerCompany || ownerCompany.status !== 'approved') throw Error('No approved company found for this account.')
       const rows = await readCompanyBookings(ownerCompany.id)
       setCompany(ownerCompany)
-      setBookings(rows)
+      seenBookingIds.current=new Set(rows.map(b=>b.id));setBookings(rows)
       try{setRescueOffers(await readCompanyRescueOffers(ownerCompany.id))}catch{/* rescue access may be unavailable */}
       setDemo(false)
       setPassword('')
@@ -124,7 +125,7 @@ export default function App() {
 
   async function signOut() {
     if (!demo) await operatorDb?.auth.signOut()
-    setCompany(null); setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
+    setCompany(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
   }
 
   const myBookings = bookings.filter(b => b.status === 'new' || b.status === 'accepted')
