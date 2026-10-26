@@ -14,8 +14,12 @@ export default function App() {
   const [loggedIn, setLoggedIn] = useState(false)
   const [offers, setOffers] = useState(SAMPLE_OFFERS)
   const [history, setHistory] = useState<string[]>([])
+  const [view, setView] = useState<'dashboard' | 'trips' | 'history' | 'profile'>('dashboard')
+  const [activeTrip, setActiveTrip] = useState<Offer | null>(null)
+  const [tripStep, setTripStep] = useState<'accepted' | 'on_way' | 'arrived'>('accepted')
   const decide = (offer: Offer, decision: 'Accepted' | 'Declined') => {
     setOffers(current => current.filter(x => x.id !== offer.id))
+    if (decision === 'Accepted') { setActiveTrip(offer); setTripStep('accepted'); setView('trips') }
     setHistory(current => [`${decision} · ${offer.from} → ${offer.to} (demo only)`, ...current])
   }
   return <SafeAreaView style={styles.page}>
@@ -36,6 +40,10 @@ export default function App() {
           <View style={styles.mark}><Text style={styles.markText}>{(companyName.trim() || 'Taxi').slice(0, 2).toUpperCase()}</Text></View>
           <View style={styles.headerCopy}><Text style={styles.title}>{companyName.trim() || DEMO_COMPANY.name}</Text><Text style={styles.muted}>Driver dashboard · {DEMO_COMPANY.city}</Text></View>
         </View>
+        <View style={styles.tabs}>
+          {(['dashboard','trips','history','profile'] as const).map(tab => <TouchableOpacity key={tab} accessibilityRole="button" accessibilityState={{ selected: view === tab }} onPress={() => setView(tab)} style={[styles.tab, view === tab && styles.selectedTab]}><Text style={[styles.tabText, view === tab && styles.selectedTabText]}>{tab === 'trips' ? 'Current trip' : tab[0].toUpperCase()+tab.slice(1)}</Text></TouchableOpacity>)}
+        </View>
+        {view === 'dashboard' ? <>
         <View style={styles.stats}>
           <View style={styles.stat}><Text style={styles.muted}>New bookings</Text><Text style={styles.statNumber}>{offers.filter(x => x.kind === 'booking').length}</Text></View>
           <View style={styles.stat}><Text style={styles.muted}>Rescue offers</Text><Text style={styles.statNumber}>{offers.filter(x => x.kind === 'rescue').length}</Text></View>
@@ -52,9 +60,21 @@ export default function App() {
             </View>
           </View>
         )}
+        </> : view === 'trips' ? <View style={styles.card}>
+          <Text style={styles.section}>Current trip</Text>
+          {activeTrip ? <>
+            <Text style={styles.route}>{activeTrip.from} → {activeTrip.to}</Text>
+            <Text style={styles.muted}>Local demonstration · stage: {tripStep.replace('_',' ')}</Text>
+            {tripStep === 'accepted' ? <TouchableOpacity style={styles.primary} onPress={() => setTripStep('on_way')}><Text style={styles.primaryText}>On my way (demo)</Text></TouchableOpacity> : null}
+            {tripStep === 'on_way' ? <TouchableOpacity style={styles.primary} onPress={() => setTripStep('arrived')}><Text style={styles.primaryText}>Arrived (demo)</Text></TouchableOpacity> : null}
+            {tripStep === 'arrived' ? <TouchableOpacity style={styles.primary} onPress={() => { setHistory(h => [`Finished · ${activeTrip.from} → ${activeTrip.to} (demo only)`, ...h]);setActiveTrip(null);setView('history') }}><Text style={styles.primaryText}>Finish journey (demo)</Text></TouchableOpacity> : null}
+          </> : <Text style={styles.muted}>Accept a demo booking from the dashboard to begin a simulated trip.</Text>}
+        </View> : view === 'profile' ? <View style={styles.card}><Text style={styles.section}>Company profile</Text><Text style={styles.route}>{companyName || DEMO_COMPANY.name}</Text><Text style={styles.muted}>Branding preview only. Real driver profile and logo come later after permission testing.</Text></View> : null}
+        {view === 'history' ? <>
         <Text style={styles.section}>Demo history</Text>
         <View style={styles.card}>{history.length ? history.map((entry, i) => <Text key={i} style={styles.history}>{entry}</Text>) : <Text style={styles.muted}>No demo actions yet.</Text>}</View>
-        <TouchableOpacity accessibilityRole="button" style={styles.secondary} onPress={() => { setOffers(SAMPLE_OFFERS); setHistory([]) }}><Text style={styles.secondaryText}>Reset demo requests</Text></TouchableOpacity>
+        </> : null}
+        <TouchableOpacity accessibilityRole="button" style={styles.secondary} onPress={() => { setOffers(SAMPLE_OFFERS); setHistory([]); setActiveTrip(null); setTripStep('accepted'); setView('dashboard') }}><Text style={styles.secondaryText}>Reset demo requests</Text></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" style={styles.link} onPress={() => setLoggedIn(false)}><Text style={styles.linkText}>Change company</Text></TouchableOpacity>
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </>}
@@ -80,5 +100,6 @@ const styles = StyleSheet.create({
   primaryText: { color: '#111827', fontWeight: '800' }, secondary: { borderWidth: 1, borderColor: '#cbd5e1', paddingVertical: 14, paddingHorizontal: 12, borderRadius: 12, alignItems: 'center' },
   secondaryText: { color: '#334155', fontWeight: '700' }, history: { color: '#334155', borderBottomWidth: 1, borderBottomColor: '#e2e8f0', paddingVertical: 6 },
   link: { alignItems: 'center', paddingVertical: 8 }, linkText: { color: '#334155', fontWeight: '700' },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 }, tab: { paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10, backgroundColor: '#e2e8f0' }, selectedTab: { backgroundColor: '#0f172a' }, tabText: { color: '#334155', fontWeight: '700', fontSize: 12 }, selectedTabText: { color: 'white' },
   footer: { textAlign: 'center', color: '#94a3b8', marginTop: 24, fontSize: 12 }
 })
