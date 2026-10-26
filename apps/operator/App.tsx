@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl, AppState, Linking, Alert } from 'react-native'
 import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, readCompanyRescueOffers, type RescueOffer, type OperatorCompany } from './src/backend'
 
-type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null; created_at?: string | null; ride_datetime?: string | null; customer_name?: string | null; completed_at?: string | null }
+type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null; created_at?: string | null; ride_datetime?: string | null; customer_name?: string | null; completed_at?: string | null; driver_pickup_status?: string | null; estimated_price_eur?: number | null; customer_phone?: string | null }
 type Screen = 'bookings' | 'rescue' | 'trip'
 const DEMO_BOOKINGS: Booking[] = [
   { id: 'demo-booking-1', pickup_address: 'Leuven Station', dropoff_address: 'Brussels Airport', status: 'new' },
@@ -32,6 +32,7 @@ export default function App() {
   const [actionBusy, setActionBusy] = useState(false)
   const [qrOpen,setQrOpen] = useState(false)
   const [tripOpen,setTripOpen] = useState(false)
+  const [navOpen,setNavOpen]=useState(false)
   const [confirmRescueId,setConfirmRescueId]=useState<string|null>(null)
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
@@ -296,39 +297,41 @@ export default function App() {
     </Modal>
         <Modal visible={tripOpen} transparent animationType="slide" onRequestClose={()=>setTripOpen(false)}>
       <View style={styles.modalBackdrop}><ScrollView contentContainerStyle={styles.modalCard}>
-        <View style={styles.cardHeader}><Text style={styles.modalTitle}>Active trip</Text><TouchableOpacity onPress={()=>setTripOpen(false)}><Text style={styles.secondaryText}>Close ✕</Text></TouchableOpacity></View>
+        <View style={styles.cardHeader}><Text style={styles.modalTitle}>Current trip</Text><TouchableOpacity onPress={()=>setTripOpen(false)}><Text style={styles.secondaryText}>✕</Text></TouchableOpacity></View>
         {currentTrip ? <>
-          <Text style={styles.status}>ACCEPTED · {currentTrip.booking_reference||'BOOKING'}</Text>
-          <Text style={styles.tripMeta}>{formatTripDate(currentTrip.ride_datetime || currentTrip.created_at)}</Text>
-          {currentTrip.customer_name?<Text style={styles.route}>{currentTrip.customer_name}</Text>:null}
-          <View style={styles.card}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{currentTrip.pickup_address}</Text></View>
-          <View style={styles.card}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{currentTrip.dropoff_address}</Text></View>
-          <Text style={styles.overviewTitle}>Navigation to pickup</Text>
+          <View style={styles.cardHeader}><Text style={[styles.pill,currentTrip.driver_pickup_status==='ARRIVED'?styles.pillArrived:currentTrip.driver_pickup_status==='ON_THE_WAY'?styles.pillOnWay:styles.pillAccepted]}>{currentTrip.driver_pickup_status==='ARRIVED'?'ARRIVED':currentTrip.driver_pickup_status==='ON_THE_WAY'?'ON THE WAY':'CONFIRMED'}</Text><Text style={styles.fare}>{currentTrip.estimated_price_eur!=null?'€'+Number(currentTrip.estimated_price_eur).toFixed(2):''}</Text></View>
+          <Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{currentTrip.pickup_address}</Text>
+          <Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{currentTrip.dropoff_address}</Text>
+          <Text style={styles.routeSmall}>TIME</Text><Text style={styles.route}>{formatTripDate(currentTrip.ride_datetime || currentTrip.created_at)}</Text>
+          {currentTrip.customer_name?<><Text style={styles.routeSmall}>PASSENGER</Text><Text style={styles.route}>{currentTrip.customer_name}</Text></>:null}
+          {currentTrip.driver_pickup_status==='ARRIVED'?<Text style={styles.note}>Driver has arrived at pickup.</Text>:null}
           <View style={styles.navigationRow}>
-            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.pickup_address,'waze')}><Text style={styles.navigationText}>↗ Waze</Text></TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.pickup_address,'google')}><Text style={styles.navigationText}>↗ Google Maps</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.navigationButton} onPress={()=>setNavOpen(true)}><Text style={styles.navigationText}>Navigate</Text></TouchableOpacity>
+            <TouchableOpacity disabled={!mobileActionsEnabled()||actionBusy} style={[styles.navigationButton,{backgroundColor:currentTrip.driver_pickup_status==='ARRIVED'?'#069a73':currentTrip.driver_pickup_status==='ON_THE_WAY'?'#8122eb':'#087fca'},!mobileActionsEnabled()&&styles.inactive]} onPress={()=>setTripConfirm(currentTrip.driver_pickup_status==='ARRIVED'?'complete_trip':currentTrip.driver_pickup_status==='ON_THE_WAY'?'mark_arrived':'mark_on_way')}><Text style={styles.primaryText}>{currentTrip.driver_pickup_status==='ARRIVED'?'Complete trip':currentTrip.driver_pickup_status==='ON_THE_WAY'?"I've arrived":"I'm on my way"}</Text></TouchableOpacity>
           </View>
-          <Text style={styles.overviewTitle}>Navigation to destination</Text>
           <View style={styles.navigationRow}>
-            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.dropoff_address,'waze')}><Text style={styles.navigationText}>↗ Waze</Text></TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.dropoff_address,'google')}><Text style={styles.navigationText}>↗ Google Maps</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.navigationButton} disabled={!currentTrip.customer_phone} onPress={()=>currentTrip.customer_phone&&Linking.openURL('https://wa.me/'+currentTrip.customer_phone.replace(/[^0-9]/g,''))}><Text style={styles.navigationText}>WhatsApp</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.navigationButton} disabled={!currentTrip.customer_phone} onPress={()=>currentTrip.customer_phone&&Linking.openURL('tel:'+currentTrip.customer_phone)}><Text style={styles.navigationText}>Call</Text></TouchableOpacity>
           </View>
-          <Text style={styles.note}>{demo?'Preview mode':mobileActionsEnabled()?'Updates are sent to the TAXIO server; passenger status changes follow existing server behavior.':'Passenger updates are disabled until live pilot verification.'}</Text>
-          {(['mark_on_way','mark_arrived','complete_trip'] as const).map(action =>
-            <TouchableOpacity key={action} disabled={demo||!mobileActionsEnabled()||actionBusy} style={[styles.primary,(demo||!mobileActionsEnabled())&&styles.inactive]} onPress={()=>setTripConfirm(action)}>
-              <Text style={styles.primaryText}>{action==='mark_on_way'?'On the way':action==='mark_arrived'?'I have arrived':'Complete trip'}</Text>
-            </TouchableOpacity>)}
-          {tripConfirm?<View style={styles.card}><Text style={styles.route}>Confirm status update?</Text><Text style={styles.note}>This will update the live trip status on TAXIO.</Text><TouchableOpacity style={styles.primary} disabled={actionBusy} onPress={()=>updateTrip(tripConfirm)}><Text style={styles.primaryText}>{actionBusy?'Updating…':'Confirm update'}</Text></TouchableOpacity><TouchableOpacity style={styles.secondary} onPress={()=>setTripConfirm(null)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View>:null}
+          <Text style={styles.note}>{mobileActionsEnabled()?'Progress changes require server confirmation.':'Read-only pilot: live trip updates are disabled until safe server testing.'}</Text>
+          {tripConfirm?<View style={styles.card}><Text style={styles.route}>Confirm trip update?</Text><TouchableOpacity style={styles.primary} disabled={actionBusy} onPress={()=>updateTrip(tripConfirm)}><Text style={styles.primaryText}>{actionBusy?'Updating…':'Confirm'}</Text></TouchableOpacity><TouchableOpacity style={styles.secondary} onPress={()=>setTripConfirm(null)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View>:null}
           {actionMessage?<Text style={styles.note}>{actionMessage}</Text>:null}
         </>:<Text style={styles.note}>No active trip found.</Text>}
       </ScrollView></View>
     </Modal>
+    <Modal visible={navOpen} transparent animationType="slide" onRequestClose={()=>setNavOpen(false)}><View style={styles.modalBackdrop}><View style={styles.modalCard}>
+      <Text style={styles.modalTitle}>Navigate to pickup</Text>
+      <TouchableOpacity style={styles.secondary} onPress={()=>{setNavOpen(false);if(currentTrip)void navigateTo(currentTrip.pickup_address,'google')}}><Text style={styles.secondaryText}>Google Maps</Text></TouchableOpacity>
+      <TouchableOpacity style={styles.secondary} onPress={()=>{setNavOpen(false);if(currentTrip)void navigateTo(currentTrip.pickup_address,'waze')}}><Text style={styles.secondaryText}>Waze</Text></TouchableOpacity>
+      <TouchableOpacity style={styles.secondary} onPress={()=>setNavOpen(false)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity>
+    </View></View></Modal>
     <Modal visible={qrOpen} transparent animationType="slide" onRequestClose={()=>setQrOpen(false)}><View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>Share your booking page</Text><Text style={styles.subtitle}>Passengers scan and book your taxi directly.</Text>{bookingUrl ? <><View style={styles.qrPanel}><QRCode value={bookingUrl} size={216} backgroundColor="#ffffff" color="#111a30" /></View><Text selectable style={styles.qrUrl}>{bookingUrl}</Text><TouchableOpacity style={styles.primary} onPress={()=>Share.share({message:`Book a taxi with ${company?.name}: ${bookingUrl}`,url:bookingUrl})}><Text style={styles.primaryText}>Share booking link</Text></TouchableOpacity></> : <Text style={styles.notice}>This company has no verified booking subdomain yet. Open the web dashboard to check its booking link.</Text>}<TouchableOpacity style={styles.secondary} onPress={()=>setQrOpen(false)}><Text style={styles.secondaryText}>Close</Text></TouchableOpacity></View></View></Modal>
   </SafeAreaView>
 }
 const styles = StyleSheet.create({
   // Driver-first dark palette inspired by the TAXIO web operator UI.
 
+  fare:{fontSize:22,fontWeight:'900',color:'#ffcc4b'},pillOnWay:{color:'#65d8ff',backgroundColor:'#153b5d'},pillArrived:{color:'#d4b7ff',backgroundColor:'#42316b'},
   hero:{backgroundColor:'#111b32',padding:20,borderRadius:24,marginTop:4,gap:18},
   heroTop:{flexDirection:'row',gap:14,alignItems:'center'},
   heroLogo:{width:58,height:58,borderRadius:15,backgroundColor:'#fff'},
