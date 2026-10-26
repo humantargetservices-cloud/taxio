@@ -48,7 +48,7 @@ export default function App() {
       if(typeof id==='string'){setScreen('bookings');setSelectedBookingId(id);setIncomingTrip(null);if(company && !demo){void readCompanyBookings(company.id).then(rows=>{setBookings(rows);const match=rows.find(b=>b.id===id);if(match?.status==='new' && match.decision_deadline_at && Date.parse(match.decision_deadline_at)>Date.now())setIncomingTrip(match)}).catch(e=>setSyncError(e instanceof Error?e.message:'Unable to load offer'))}}
     })
     return()=>listener.remove()
-  },[bookings])
+  },[company?.id,demo])
   useEffect(()=>{void Notifications.setNotificationChannelAsync('taxio-trips',{name:'TAXIO Trips',importance:Notifications.AndroidImportance.HIGH,sound:'default'});void Notifications.requestPermissionsAsync()},[])
   const bookingUrl = company?.slug && /^[a-z0-9-]+$/.test(company.slug) ? `https://${company.slug}.taxio.be` : null
   async function navigateTo(address:string,provider:'waze'|'google') {
@@ -60,7 +60,7 @@ export default function App() {
   async function refreshBookings() {
     if (!company || demo || refreshing) return
     setRefreshing(true)
-    try { setBookings(await readCompanyBookings(company.id));try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* Rescue availability is independent of bookings. */} setActionMessage('Bookings updated') }
+    try { setSyncError('');setBookings(await readCompanyBookings(company.id));try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* Rescue availability is independent of bookings. */} setActionMessage('Bookings updated') }
     catch(e) {const message=e instanceof Error ? e.message : 'Unable to refresh bookings';setSyncError(message);setActionMessage(message)}
     finally{setRefreshing(false)}
   }
