@@ -34,6 +34,16 @@ export default function App() {
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
   const seenBookingIds=useRef<Set<string>|null>(null)
+  const [incomingTrip,setIncomingTrip]=useState<Booking|null>(null)
+  const [clockNow,setClockNow]=useState(Date.now())
+  useEffect(()=>{const timer=setInterval(()=>setClockNow(Date.now()),1000);return()=>clearInterval(timer)},[])
+  useEffect(()=>{
+    const listener=Notifications.addNotificationResponseReceivedListener(response=>{
+      const id=response.notification.request.content.data?.bookingId
+      if(typeof id==='string'){setScreen('bookings');setIncomingTrip(bookings.find(b=>b.id===id)||null)}
+    })
+    return()=>listener.remove()
+  },[bookings])
   useEffect(()=>{void Notifications.setNotificationChannelAsync('taxio-trips',{name:'TAXIO Trips',importance:Notifications.AndroidImportance.HIGH,sound:'default'});void Notifications.requestPermissionsAsync()},[])
   const bookingUrl = company?.slug && /^[a-z0-9-]+$/.test(company.slug) ? `https://${company.slug}.taxio.be` : null
   async function navigateTo(address:string,provider:'waze'|'google') {
@@ -99,7 +109,7 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
+      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch {/* Manual refresh exposes network errors. */}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
@@ -128,7 +138,7 @@ export default function App() {
 
   async function signOut() {
     if (!demo) await operatorDb?.auth.signOut()
-    setCompany(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
+    setCompany(null);setIncomingTrip(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
   }
 
   const myBookings = bookings.filter(b => b.status === 'new' || b.status === 'accepted')
@@ -241,7 +251,20 @@ export default function App() {
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </>}
     </ScrollView>
-    <Modal visible={tripOpen} transparent animationType="slide" onRequestClose={()=>setTripOpen(false)}>
+    <Modal visible={!!incomingTrip} transparent animationType="slide" onRequestClose={()=>setIncomingTrip(null)}>
+      <View style={styles.modalBackdrop}><View style={styles.modalCard}>
+        <View style={styles.cardHeader}><Text style={styles.modalTitle}>Incoming trip</Text><TouchableOpacity onPress={()=>setIncomingTrip(null)}><Text style={styles.secondaryText}>Close ✕</Text></TouchableOpacity></View>
+        <Text style={styles.tripMeta}>{incomingTrip?.customer_name||'New passenger'} · {formatTripDate(incomingTrip?.ride_datetime)}</Text>
+        <View style={styles.card}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{incomingTrip?.pickup_address||''}</Text></View>
+        <View style={styles.card}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{incomingTrip?.dropoff_address||''}</Text></View>
+        <Text style={styles.note}>{incomingTrip?.decision_deadline_at && Date.parse(incomingTrip.decision_deadline_at)>clockNow ? `Offer expires in ${Math.ceil((Date.parse(incomingTrip.decision_deadline_at)-clockNow)/1000)} seconds`:'This booking has no active acceptance deadline. It may be historical or not yet activated.'}</Text>
+        {incomingTrip && !demo && mobileActionsEnabled() && !!incomingTrip.decision_deadline_at && Date.parse(incomingTrip.decision_deadline_at)>clockNow ?
+          <TouchableOpacity style={styles.primary} onPress={()=>{setIncomingTrip(null);setConfirmBookingId(incomingTrip.id);setScreen('bookings')}}><Text style={styles.primaryText}>Review & accept</Text></TouchableOpacity> :
+          <TouchableOpacity style={styles.secondary} onPress={()=>{setIncomingTrip(null);setScreen('bookings')}}><Text style={styles.secondaryText}>View in My Bookings</Text></TouchableOpacity>}
+        <TouchableOpacity style={styles.secondary} onPress={()=>setIncomingTrip(null)}><Text style={styles.secondaryText}>Dismiss</Text></TouchableOpacity>
+      </View></View>
+    </Modal>
+        <Modal visible={tripOpen} transparent animationType="slide" onRequestClose={()=>setTripOpen(false)}>
       <View style={styles.modalBackdrop}><ScrollView contentContainerStyle={styles.modalCard}>
         <View style={styles.cardHeader}><Text style={styles.modalTitle}>Active trip</Text><TouchableOpacity onPress={()=>setTripOpen(false)}><Text style={styles.secondaryText}>Close ✕</Text></TouchableOpacity></View>
         {currentTrip ? <>
