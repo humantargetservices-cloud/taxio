@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "TAXIO Operator",
+    "slug": "taxio-operator",
+    "scheme": "taxiooperator",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "be.taxio.operator",
+      "permissions": [
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "be.taxio.operator"
+    },
+    "plugins": []
+  }
+}
