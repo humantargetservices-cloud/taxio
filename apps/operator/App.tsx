@@ -49,7 +49,7 @@ export default function App() {
         </View>
         <Text style={styles.muted}>{identity.label} · {identity.role} · {identity.status}</Text>
         {authorized ? <TouchableOpacity style={styles.secondary} onPress={() => setAvailable(v => !v)}><Text style={styles.secondaryText}>{available ? 'Available for offers · tap to go offline' : 'Unavailable · tap to go online'}</Text></TouchableOpacity> : <View style={styles.card}><Text style={styles.route}>Access restricted</Text><Text style={styles.muted}>Demo membership is not approved for this company. Real authorization must be enforced by the server.</Text></View>}
-        {authorized ? <View style={styles.tabs}>
+        {authorized ? <><View style={styles.tabs}>
           {(['dashboard','trips','history','profile'] as const).map(tab => <TouchableOpacity key={tab} accessibilityRole="button" accessibilityState={{ selected: view === tab }} onPress={() => setView(tab)} style={[styles.tab, view === tab && styles.selectedTab]}><Text style={[styles.tabText, view === tab && styles.selectedTabText]}>{tab === 'trips' ? 'Current trip' : tab[0].toUpperCase()+tab.slice(1)}</Text></TouchableOpacity>)}
         </View>
         {view === 'dashboard' ? <>
