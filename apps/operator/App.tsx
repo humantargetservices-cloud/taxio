@@ -27,6 +27,7 @@ export default function App() {
   const [demoFinished, setDemoFinished] = useState(false)
   const [restoring, setRestoring] = useState(integrationConfigured)
   const [actionMessage, setActionMessage] = useState('')
+  const [syncError,setSyncError]=useState('')
   const [confirmBookingId, setConfirmBookingId] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [qrOpen,setQrOpen] = useState(false)
@@ -57,7 +58,7 @@ export default function App() {
     if (!company || demo || refreshing) return
     setRefreshing(true)
     try { setBookings(await readCompanyBookings(company.id));try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* Rescue availability is independent of bookings. */} setActionMessage('Bookings updated') }
-    catch(e) {setActionMessage(e instanceof Error ? e.message : 'Unable to refresh bookings')}
+    catch(e) {const message=e instanceof Error ? e.message : 'Unable to refresh bookings';setSyncError(message);setActionMessage(message)}
     finally{setRefreshing(false)}
   }
   async function updateTrip(action: 'mark_on_way'|'mark_arrived'|'complete_trip') {
@@ -110,12 +111,16 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!b.completed_at&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
-      catch {/* Manual refresh exposes network errors. */}
+      try {setSyncError('');const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!b.completed_at&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
+      catch(e) {if(active)setSyncError(e instanceof Error?e.message:'Unable to synchronize bookings')}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
+    const realtime=operatorDb?.channel('operator-'+company.id)
+      .on('postgres_changes',{event:'*',schema:'public',table:'booking_requests',filter:'company_id=eq.'+company.id},()=>{if(AppState.currentState==='active')void update()})
+      .on('postgres_changes',{event:'*',schema:'public',table:'rescue_opportunities',filter:'company_id=eq.'+company.id},()=>{if(AppState.currentState==='active')void update()})
+      .subscribe()
     const subscription=AppState.addEventListener('change',state=>{if(state==='active')void update()})
-    return()=>{active=false;clearInterval(timer);subscription.remove()}
+    return()=>{active=false;clearInterval(timer);subscription.remove();if(realtime)void operatorDb?.removeChannel(realtime)}
   },[company?.id,demo])
 
   async function signIn() {
@@ -216,7 +221,8 @@ export default function App() {
               <Text style={[styles.tabText, screen===t.key && styles.activeTabText]}>{t.label}</Text>
             </TouchableOpacity>)}
         </View>
-        {actionMessage ? <Text style={styles.notice}>{actionMessage}</Text> : null}
+        {syncError ? <View style={styles.card}><Text style={styles.status}>CONNECTION ISSUE</Text><Text style={styles.note}>{syncError}</Text><TouchableOpacity style={styles.secondary} onPress={refreshBookings}><Text style={styles.secondaryText}>Retry sync</Text></TouchableOpacity></View> : null}
+        {actionMessage && !syncError ? <Text style={styles.notice}>{actionMessage}</Text> : null}
         {screen==='bookings' ? <>
           <Text style={styles.section}>My Bookings</Text>
           {!demo ? <TouchableOpacity style={styles.secondary} disabled={refreshing} onPress={refreshBookings}><Text style={styles.secondaryText}>{refreshing?'Refreshing…':'↻ Refresh bookings'}</Text></TouchableOpacity> : null}
