@@ -1,7 +1,7 @@
 import QRCode from 'react-native-qrcode-svg'
 import { sendOperatorAction, mobileActionsEnabled } from './src/operatorActions'
 import React, { useEffect, useState } from 'react'
-import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl } from 'react-native'
+import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl, AppState } from 'react-native'
 import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, type OperatorCompany } from './src/backend'
 
 type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null; created_at?: string | null; ride_datetime?: string | null; customer_name?: string | null }
@@ -69,6 +69,18 @@ export default function App() {
     void run()
     return () => {active=false}
   }, [])
+
+  useEffect(() => {
+    if (!company || demo) return
+    let active = true
+    const update = async () => {
+      try {const rows=await readCompanyBookings(company.id);if(active)setBookings(rows)}
+      catch {/* Manual refresh exposes network errors. */}
+    }
+    const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
+    const subscription=AppState.addEventListener('change',state=>{if(state==='active')void update()})
+    return()=>{active=false;clearInterval(timer);subscription.remove()}
+  },[company?.id,demo])
 
   async function signIn() {
     if (!integrationConfigured || busy) return
