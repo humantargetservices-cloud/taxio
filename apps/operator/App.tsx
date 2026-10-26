@@ -23,8 +23,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [screen, setScreen] = useState<Screen>('bookings')
-  const [available, setAvailable] = useState(true)
-  const [demoFinished, setDemoFinished] = useState(false)
+    const [demoFinished, setDemoFinished] = useState(false)
   const [restoring, setRestoring] = useState(integrationConfigured)
   const [actionMessage, setActionMessage] = useState('')
   const [syncError,setSyncError]=useState('')
@@ -134,7 +133,7 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {setSyncError('');const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.filter(b=>b.status==='new'&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()).map(b=>b.id+':'+b.decision_deadline_at));const incoming=seenOfferKeys.current===null?null:rows.find(b=>b.status==='new'&&!b.completed_at&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()&&!seenOfferKeys.current?.has(b.id));seenOfferKeys.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
+      try {setSyncError('');const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.filter(b=>b.status==='new'&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()).map(b=>b.id+':'+b.decision_deadline_at));const incoming=seenOfferKeys.current===null?null:rows.find(b=>b.status==='new'&&!b.completed_at&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()&&!seenOfferKeys.current?.has(b.id));seenOfferKeys.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:'Open TAXIO Operator to review this time-limited offer',data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch(e) {if(active)setSyncError(e instanceof Error?e.message:'Unable to synchronize bookings')}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
@@ -192,7 +191,7 @@ export default function App() {
         </TouchableOpacity>
         {!integrationConfigured ? <Text style={styles.notice}>Secure login is not connected in this build. Production credentials are not embedded.</Text> : null}
         {message ? <Text style={styles.error}>{message}</Text> : null}
-        <TouchableOpacity accessibilityRole="button" style={styles.demoLink} onPress={() => { setCompany(DEMO_COMPANY); setBookings(DEMO_BOOKINGS); setDemo(true); setDemoFinished(false) }}>
+        <TouchableOpacity accessibilityRole="button" style={styles.demoLink} onPress={() => { setCompany(DEMO_COMPANY); setBookings(DEMO_BOOKINGS); setDemo(true);setDemoFinished(false) }}>
           <Text style={styles.demoLinkText}>Preview offline demo</Text>
         </TouchableOpacity>
         <Text style={styles.footer}>Powered by TAXIO</Text>
