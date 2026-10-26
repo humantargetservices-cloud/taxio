@@ -1,3 +1,4 @@
+import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, type OperatorCompany } from './src/backend'
 import { demoIdentities, canOperate } from './src/mockAccess'
 import React, { useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
@@ -13,6 +14,13 @@ const DEMO_COMPANY = { name: 'ABC Taxi', initials: 'AT', city: 'Leuven' }
 export default function App() {
   const [companyName, setCompanyName] = useState(DEMO_COMPANY.name)
   const [loggedIn, setLoggedIn] = useState(false)
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [liveCompany, setLiveCompany] = useState<OperatorCompany | null>(null)
+  const [liveBookings, setLiveBookings] = useState<Array<{id:string;pickup_address:string;dropoff_address:string;status:string}>>([])
+  const [readOnlyMode, setReadOnlyMode] = useState(false)
+  const [liveMessage, setLiveMessage] = useState('')
+  const [liveBusy, setLiveBusy] = useState(false)
   const [identity, setIdentity] = useState(demoIdentities[0])
   const [available, setAvailable] = useState(true)
   const authorized = canOperate(identity, 'company-a')
@@ -21,6 +29,22 @@ export default function App() {
   const [view, setView] = useState<'dashboard' | 'trips' | 'history' | 'profile'>('dashboard')
   const [activeTrip, setActiveTrip] = useState<Offer | null>(null)
   const [tripStep, setTripStep] = useState<'accepted' | 'on_way' | 'arrived'>('accepted')
+  const signInReadOnly = async () => {
+    if (!integrationConfigured || !operatorDb || liveBusy) return
+    setLiveBusy(true); setLiveMessage('')
+    try {
+      const session = await loginOperator(loginEmail, loginPassword)
+      const company = await resolveOperatorCompany(session.user.id)
+      if (!company || company.status !== 'approved') throw Error('No approved company membership')
+      const bookings = await readCompanyBookings(company.id)
+      setLiveCompany(company)
+      setLiveBookings(bookings)
+      setReadOnlyMode(true)
+      setLoginPassword('')
+    } catch (e) {
+      setLiveMessage(e instanceof Error ? e.message : 'Unable to connect')
+    } finally { setLiveBusy(false) }
+  }
   const decide = (offer: Offer, decision: 'Accepted' | 'Declined') => {
     if (!authorized || !available) return
     setOffers(current => current.filter(x => x.id !== offer.id))
@@ -31,11 +55,24 @@ export default function App() {
     <StatusBar barStyle="dark-content" />
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.demo}><Text style={styles.demoText}>OFFLINE DEMO · NO LIVE BOOKINGS</Text></View>
-      {!loggedIn ? <>
+      {readOnlyMode && liveCompany ? <>
+        <Text style={styles.title}>{liveCompany.name}</Text>
+        <Text style={styles.muted}>Connected read-only view. Real booking actions are disabled.</Text>
+        <Text style={styles.section}>Company bookings</Text>
+        {liveBookings.length ? liveBookings.map(b => <View key={b.id} style={styles.card}><Text style={styles.route}>{b.pickup_address} → {b.dropoff_address}</Text><Text style={styles.muted}>Status: {b.status}</Text></View>) : <Text style={styles.muted}>No accessible bookings.</Text>}
+        <TouchableOpacity style={styles.secondary} onPress={async () => { await operatorDb?.auth.signOut();setReadOnlyMode(false);setLiveCompany(null);setLiveBookings([]) }}><Text style={styles.secondaryText}>Sign out</Text></TouchableOpacity>
+      </> : !loggedIn ? <>
         <Text style={styles.title}>Your company's driver app</Text>
         <Text style={styles.muted}>Preview company-specific branding without connecting to TAXIO servers.</Text>
         <Text style={styles.label}>Company name (demo)</Text>
         <TextInput style={styles.input} value={companyName} onChangeText={setCompanyName} maxLength={60} placeholder="Company name" />
+        {integrationConfigured ? <>
+          <Text style={styles.label}>Optional connected read-only login</Text>
+          <TextInput style={styles.input} value={loginEmail} onChangeText={setLoginEmail} placeholder="Email" keyboardType="email-address" autoCapitalize="none" />
+          <TextInput style={styles.input} value={loginPassword} onChangeText={setLoginPassword} placeholder="Password" secureTextEntry />
+          <TouchableOpacity style={styles.secondary} disabled={liveBusy} onPress={signInReadOnly}><Text style={styles.secondaryText}>{liveBusy ? 'Connecting…' : 'Sign in (read only)'}</Text></TouchableOpacity>
+          {liveMessage ? <Text style={styles.muted}>{liveMessage}</Text> : null}
+        </> : null}
         <Text style={styles.label}>Select mock driver</Text>
         {demoIdentities.map(d => <TouchableOpacity key={d.id} style={styles.card} onPress={() => setIdentity(d)}><Text style={styles.route}>{identity.id === d.id ? '● ' : '○ '}{d.label} · {d.status}</Text></TouchableOpacity>)}
         <TouchableOpacity accessibilityRole="button" style={styles.primary} onPress={() => setLoggedIn(true)}>
