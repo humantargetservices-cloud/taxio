@@ -10,7 +10,7 @@ export type OperatorAction =
 export type OperatorActionResult = { ok: boolean; code?: string; error?: string }
 
 /** This remains off until the operator approves production integration and access tests pass. */
-const ACTIONS_ENABLED = false
+const ACTIONS_ENABLED = process.env.EXPO_PUBLIC_ENABLE_LIVE_ACTIONS === 'true'
 
 export function mobileActionsEnabled(): boolean { return ACTIONS_ENABLED }
 
