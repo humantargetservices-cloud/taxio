@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl, AppState, Linking, Alert } from 'react-native'
 import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, readCompanyRescueOffers, type RescueOffer, type OperatorCompany } from './src/backend'
 
-type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null; created_at?: string | null; ride_datetime?: string | null; customer_name?: string | null }
+type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null; created_at?: string | null; ride_datetime?: string | null; customer_name?: string | null; completed_at?: string | null }
 type Screen = 'bookings' | 'rescue' | 'trip'
 const DEMO_BOOKINGS: Booking[] = [
   { id: 'demo-booking-1', pickup_address: 'Leuven Station', dropoff_address: 'Brussels Airport', status: 'new' },
@@ -141,12 +141,12 @@ export default function App() {
     setCompany(null);setIncomingTrip(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
   }
 
-  const myBookings = bookings.filter(b => b.status === 'new' || b.status === 'accepted')
-  const historyBookings = bookings.filter(b => b.status !== 'new' && b.status !== 'accepted')
+  const myBookings = bookings.filter(b => (b.status === 'new' || b.status === 'accepted') && !b.completed_at)
+  const historyBookings = bookings.filter(b => b.completed_at || (b.status !== 'new' && b.status !== 'accepted'))
   const formatTripDate = (date?:string|null) => date ? new Date(date).toLocaleString('en-BE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Time not specified'
-  const currentTrip = bookings.find(b => b.status === 'accepted')
-  const pendingCount = bookings.filter(b => b.status === 'new').length
-  const acceptedCount = bookings.filter(b => b.status === 'accepted').length
+  const currentTrip = bookings.find(b => b.status === 'accepted' && !b.completed_at)
+  const pendingCount = bookings.filter(b => b.status === 'new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at) > clockNow).length
+  const acceptedCount = bookings.filter(b => b.status === 'accepted' && !b.completed_at).length
   return <SafeAreaView style={styles.page}>
     <StatusBar barStyle="dark-content" />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshBookings} enabled={!!company && !demo} />}>
@@ -188,11 +188,11 @@ export default function App() {
         <View style={styles.summary}>
           <TouchableOpacity style={styles.metric} onPress={() => setScreen('bookings')}>
             <View style={styles.metricIcon}><Text style={styles.metricGlyph}>◉</Text></View>
-            <Text style={styles.metricNumber}>{pendingCount}</Text><Text style={styles.metricLabel}>New requests</Text>
+            <Text style={styles.metricNumber}>{pendingCount}</Text><Text style={styles.metricLabel}>Live requests</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.metric} onPress={() => setScreen('bookings')}>
             <View style={styles.metricIcon}><Text style={styles.metricGlyph}>✓</Text></View>
-            <Text style={styles.metricNumber}>{acceptedCount}</Text><Text style={styles.metricLabel}>Accepted</Text>
+            <Text style={styles.metricNumber}>{acceptedCount}</Text><Text style={styles.metricLabel}>Active trips</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.metric} onPress={() => setScreen('rescue')}>
             <View style={styles.metricIcon}><Text style={styles.metricGlyph}>↗</Text></View>
