@@ -110,7 +110,7 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
+      try {const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!b.completed_at&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch {/* Manual refresh exposes network errors. */}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
@@ -142,11 +142,11 @@ export default function App() {
     setCompany(null);setIncomingTrip(null);setSelectedBookingId(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
   }
 
-  const myBookings = bookings.filter(b => (b.status === 'new' || b.status === 'accepted') && !b.completed_at)
-  const historyBookings = bookings.filter(b => b.completed_at || (b.status !== 'new' && b.status !== 'accepted'))
+  const myBookings = bookings.filter(b => (b.status === 'new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at)>clockNow || b.status === 'accepted') && !b.completed_at)
+  const historyBookings = bookings.filter(b => b.completed_at || (b.status === 'new' && (!b.decision_deadline_at || Date.parse(b.decision_deadline_at)<=clockNow)) || (b.status !== 'new' && b.status !== 'accepted'))
   const formatTripDate = (date?:string|null) => date ? new Date(date).toLocaleString('en-BE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Time not specified'
   const currentTrip = bookings.find(b => b.status === 'accepted' && !b.completed_at)
-  const pendingCount = bookings.filter(b => b.status === 'new' && !b.completed_at).length
+  const pendingCount = bookings.filter(b => b.status === 'new' && !b.completed_at && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at)>clockNow).length
   const acceptedCount = bookings.filter(b => b.status === 'accepted' && !b.completed_at).length
   return <SafeAreaView style={styles.page}>
     <StatusBar barStyle="dark-content" />
@@ -231,7 +231,7 @@ export default function App() {
             <View style={styles.cardFooter}><Text style={styles.note}>{demo?'Preview only · no booking changes':mobileActionsEnabled()?'TAXIO server verifies acceptance':'Read only · booking actions disabled'}</Text></View>
             {!demo && mobileActionsEnabled() && b.status==='new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at)>Date.now() ? confirmBookingId===b.id ? <View style={styles.card}><Text style={styles.note}>Accept this real trip? This will notify the passenger and affect live operations.</Text><TouchableOpacity disabled={actionBusy} style={styles.primary} onPress={()=>acceptBooking(b.id)}><Text style={styles.primaryText}>{actionBusy?'Confirming…':'Confirm acceptance'}</Text></TouchableOpacity><TouchableOpacity onPress={()=>setConfirmBookingId(null)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View> : <TouchableOpacity style={styles.primary} onPress={()=>setConfirmBookingId(b.id)}><Text style={styles.primaryText}>Accept booking</Text></TouchableOpacity> : null}
           </View>) : <Text style={styles.note}>No active bookings. Pull down to check for new requests.</Text>}
-          <Text style={styles.section}>Recent history</Text>
+          <Text style={styles.section}>History & inactive requests</Text>
           {historyBookings.length?historyBookings.slice(0,12).map(b=><View key={b.id} style={styles.historyCard}><View style={{flex:1}}><Text style={styles.historyStatus}>{b.status.toUpperCase()} · {formatTripDate(b.ride_datetime || b.created_at)}</Text><Text style={styles.historyRoute} numberOfLines={2}>{b.pickup_address} → {b.dropoff_address}</Text></View></View>):<Text style={styles.note}>No previous bookings.</Text>}
         </> : screen==='rescue' ? <>
           <Text style={styles.section}>Rescue</Text>
