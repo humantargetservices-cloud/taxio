@@ -183,13 +183,12 @@ export default function App() {
           </View>
           <View style={styles.heroSeparator}/>
           <View style={styles.heroBottom}>
-            <View style={{flex:1}}><Text style={styles.heroStatusTitle}>{available ? 'Ready for trips' : 'Not available'}</Text><Text style={styles.heroStatusSub}>{demo?'Demo availability': 'Local display only · not linked to dispatch'}</Text></View>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={available?'Set offline preview':'Set available preview'} style={[styles.heroAvailability,available?styles.heroAvailable:styles.heroOffline]} onPress={()=>setAvailable(v=>!v)}>
-              <Text style={styles.heroAvailabilityText}>{available?'● ONLINE':'○ OFFLINE'}</Text>
+            <View style={{flex:1}}><Text style={styles.heroStatusTitle}>Company workspace</Text><Text style={styles.heroStatusSub}>Availability is managed on the web dashboard</Text></View>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Availability is managed through TAXIO web dashboard" disabled style={[styles.heroAvailability,styles.heroOffline]}}>
+              <Text style={styles.heroAvailabilityText}>STATUS: WEB</Text>
             </TouchableOpacity>
           </View>
         </View>
-        <TouchableOpacity accessibilityRole="button" style={styles.shareBanner} onPress={()=>setQrOpen(true)}><View style={{flex:1}}><Text style={styles.shareOverline}>GROW YOUR BOOKINGS</Text><Text style={styles.shareTitle}>Share your booking QR</Text><Text style={styles.shareSubtitle}>Let passengers book directly with your company</Text></View><View style={styles.qrBadge}><Text style={styles.qrBadgeText}>▦</Text></View></TouchableOpacity>
         <View style={styles.overviewHead}><Text style={styles.overviewTitle}>Overview</Text><Text style={styles.overviewHint}>At a glance</Text></View>
         <View style={styles.summary}>
           <TouchableOpacity style={styles.metric} onPress={() => setScreen('bookings')}>
@@ -222,6 +221,7 @@ export default function App() {
             </TouchableOpacity>)}
         </View>
         {syncError ? <View style={styles.card}><Text style={styles.status}>CONNECTION ISSUE</Text><Text style={styles.note}>{syncError}</Text><TouchableOpacity style={styles.secondary} onPress={refreshBookings}><Text style={styles.secondaryText}>Retry sync</Text></TouchableOpacity></View> : null}
+        <TouchableOpacity accessibilityRole="button" style={styles.shareBanner} onPress={()=>setQrOpen(true)}><View style={{flex:1}}><Text style={styles.shareOverline}>GROW YOUR BOOKINGS</Text><Text style={styles.shareTitle}>Share your booking QR</Text><Text style={styles.shareSubtitle}>Let passengers book directly with your company</Text></View><View style={styles.qrBadge}><Text style={styles.qrBadgeText}>▦</Text></View></TouchableOpacity>
         {actionMessage && !syncError ? <Text style={styles.notice}>{actionMessage}</Text> : null}
         {screen==='bookings' ? <>
           <Text style={styles.section}>My Bookings</Text>
