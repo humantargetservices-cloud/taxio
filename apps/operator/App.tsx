@@ -108,28 +108,48 @@ export default function App() {
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </> : <>
         {demo ? <Text style={styles.demoBanner}>OFFLINE DEMO · NO LIVE BOOKINGS</Text> : <Text style={styles.readOnlyBanner}>READ ONLY · LIVE ACTIONS DISABLED</Text>}
-        <View style={styles.header}>
-          {company.logo_url && !demo ? <Image source={{uri:company.logo_url}} style={styles.logo}/> :
-            <View style={styles.logoFallback}><Text style={styles.logoText}>{company.name.trim().slice(0,2).toUpperCase()}</Text></View>}
-          <View style={styles.companyInfo}><Text style={styles.title}>{company.name}</Text><Text style={styles.subtitle}>Company driver dashboard</Text></View>
+        <View style={styles.hero}>
+          <View style={styles.heroTop}>
+            {company.logo_url && !demo ? <Image source={{uri:company.logo_url}} style={styles.heroLogo}/> :
+              <View style={styles.heroLogoFallback}><Text style={styles.heroLogoText}>{company.name.trim().slice(0,2).toUpperCase()}</Text></View>}
+            <View style={styles.heroIdentity}><Text style={styles.heroEyebrow}>YOUR COMPANY</Text><Text style={styles.heroName} numberOfLines={2}>{company.name}</Text><Text style={styles.heroSub}>Driver workspace</Text></View>
+          </View>
+          <View style={styles.heroSeparator}/>
+          <View style={styles.heroBottom}>
+            <View style={{flex:1}}><Text style={styles.heroStatusTitle}>{available ? 'Ready for trips' : 'Not available'}</Text><Text style={styles.heroStatusSub}>{demo?'Demo availability': 'Local display only · not linked to dispatch'}</Text></View>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={available?'Set offline preview':'Set available preview'} style={[styles.heroAvailability,available?styles.heroAvailable:styles.heroOffline]} onPress={()=>setAvailable(v=>!v)}>
+              <Text style={styles.heroAvailabilityText}>{available?'● ONLINE':'○ OFFLINE'}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <TouchableOpacity style={styles.onlineButton} onPress={() => setAvailable(v=>!v)}>
-          <Text style={styles.onlineText}>{available ? '● Available' : '○ Offline'} {demo ? '(demo)' : '(display only)'}</Text>
-        </TouchableOpacity>
+        <View style={styles.overviewHead}><Text style={styles.overviewTitle}>Overview</Text><Text style={styles.overviewHint}>At a glance</Text></View>
         <View style={styles.summary}>
-          <TouchableOpacity style={styles.summaryTile} onPress={() => setScreen('bookings')}>
-            <Text style={styles.summaryNumber}>{pendingCount}</Text><Text style={styles.summaryLabel}>New requests</Text>
+          <TouchableOpacity style={styles.metric} onPress={() => setScreen('bookings')}>
+            <View style={styles.metricIcon}><Text style={styles.metricGlyph}>◉</Text></View>
+            <Text style={styles.metricNumber}>{pendingCount}</Text><Text style={styles.metricLabel}>New requests</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.summaryTile} onPress={() => setScreen('bookings')}>
-            <Text style={styles.summaryNumber}>{acceptedCount}</Text><Text style={styles.summaryLabel}>Accepted</Text>
+          <TouchableOpacity style={styles.metric} onPress={() => setScreen('bookings')}>
+            <View style={styles.metricIcon}><Text style={styles.metricGlyph}>✓</Text></View>
+            <Text style={styles.metricNumber}>{acceptedCount}</Text><Text style={styles.metricLabel}>Accepted</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.summaryTile} onPress={() => setScreen('rescue')}>
-            <Text style={styles.summaryNumber}>—</Text><Text style={styles.summaryLabel}>Rescue</Text>
+          <TouchableOpacity style={styles.metric} onPress={() => setScreen('rescue')}>
+            <View style={styles.metricIcon}><Text style={styles.metricGlyph}>↗</Text></View>
+            <Text style={styles.metricNumber}>—</Text><Text style={styles.metricLabel}>Rescue</Text>
           </TouchableOpacity>
         </View>
+        <TouchableOpacity style={styles.spotlight} onPress={() => setScreen(currentTrip ? 'trip' : 'bookings')}>
+          <View style={styles.spotlightCopy}>
+            <Text style={styles.spotlightEyebrow}>{currentTrip?'CURRENT JOURNEY':'YOUR NEXT JOURNEY'}</Text>
+            <Text style={styles.spotlightTitle}>{currentTrip?'Trip in progress':pendingCount?'New booking waiting':'All caught up'}</Text>
+            <Text style={styles.spotlightText} numberOfLines={2}>{currentTrip?currentTrip.pickup_address+' → '+currentTrip.dropoff_address:pendingCount?'Open My Bookings to review requests':'New company bookings will appear here'}</Text>
+          </View>
+          <View style={styles.spotlightArrow}><Text style={styles.spotlightArrowText}>›</Text></View>
+        </TouchableOpacity>
+        <Text style={styles.overviewTitle}>Workspace</Text>
         <View style={styles.nav}>
-          {([{key:'bookings',label:'My Bookings'},{key:'rescue',label:'Rescue'},{key:'trip',label:'Current Trip'}] as const).map(t =>
-            <TouchableOpacity key={t.key} style={[styles.tab, screen===t.key && styles.activeTab]} onPress={() => setScreen(t.key)}>
+          {([{key:'bookings',label:'My Bookings',symbol:'▤'},{key:'rescue',label:'Rescue',symbol:'↗'},{key:'trip',label:'Current Trip',symbol:'◉'}] as const).map(t =>
+            <TouchableOpacity key={t.key} accessibilityRole="button" accessibilityState={{selected:screen===t.key}} style={[styles.tab, screen===t.key && styles.activeTab]} onPress={() => setScreen(t.key)}>
+              <Text style={[styles.navIcon, screen===t.key && styles.activeTabText]}>{t.symbol}</Text>
               <Text style={[styles.tabText, screen===t.key && styles.activeTabText]}>{t.label}</Text>
             </TouchableOpacity>)}
         </View>
@@ -165,7 +185,36 @@ export default function App() {
   </SafeAreaView>
 }
 const styles = StyleSheet.create({
-  page:{flex:1,backgroundColor:'#f7f9fc'},content:{padding:24,gap:12,flexGrow:1},
+  hero:{backgroundColor:'#121b32',padding:20,borderRadius:24,marginTop:4,gap:18},
+  heroTop:{flexDirection:'row',gap:14,alignItems:'center'},
+  heroLogo:{width:58,height:58,borderRadius:15,backgroundColor:'#fff'},
+  heroLogoFallback:{width:58,height:58,borderRadius:15,backgroundColor:'#facc15',alignItems:'center',justifyContent:'center'},
+  heroLogoText:{fontWeight:'900',fontSize:23,color:'#10182a'},
+  heroIdentity:{flex:1,gap:3},
+  heroEyebrow:{fontSize:10,fontWeight:'800',letterSpacing:1.5,color:'#9aa9c8'},
+  heroName:{fontWeight:'900',fontSize:24,color:'#fff'},
+  heroSub:{fontSize:12,color:'#b9c7de'},
+  heroSeparator:{height:1,backgroundColor:'#34415a'},
+  heroBottom:{flexDirection:'row',gap:12,alignItems:'center'},
+  heroStatusTitle:{color:'#fff',fontSize:15,fontWeight:'800'},
+  heroStatusSub:{color:'#a5b4cd',fontSize:11,marginTop:4},
+  heroAvailability:{borderRadius:25,paddingHorizontal:13,paddingVertical:11,borderWidth:1},
+  heroAvailable:{backgroundColor:'#153f34',borderColor:'#388568'},heroOffline:{backgroundColor:'#374151',borderColor:'#667085'},
+  heroAvailabilityText:{fontWeight:'900',fontSize:11,color:'#fff'},
+  overviewHead:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginTop:8},
+  overviewTitle:{fontSize:19,fontWeight:'900',color:'#111827'},overviewHint:{color:'#94a3b8',fontSize:12},
+  metric:{flex:1,borderWidth:1,borderColor:'#e5e9f1',backgroundColor:'#fff',borderRadius:18,padding:13,alignItems:'flex-start',gap:5},
+  metricIcon:{height:28,width:28,backgroundColor:'#fff5ce',borderRadius:8,alignItems:'center',justifyContent:'center'},
+  metricGlyph:{fontSize:18,color:'#9a6700',fontWeight:'800'},
+  metricNumber:{fontSize:28,color:'#121b32',fontWeight:'900'},
+  metricLabel:{fontSize:11,color:'#64748b',fontWeight:'700'},
+  spotlight:{backgroundColor:'#ffedb3',borderColor:'#f2d876',borderWidth:1,borderRadius:20,padding:17,flexDirection:'row',alignItems:'center',gap:8},
+  spotlightCopy:{flex:1,gap:5},spotlightEyebrow:{fontSize:10,color:'#8a6109',fontWeight:'900',letterSpacing:1.1},
+  spotlightTitle:{fontSize:18,color:'#302913',fontWeight:'900'},spotlightText:{fontSize:12,color:'#715c2b',lineHeight:18},
+  spotlightArrow:{height:35,width:35,borderRadius:18,backgroundColor:'#fff7db',alignItems:'center',justifyContent:'center'},
+  spotlightArrowText:{fontSize:29,fontWeight:'700',color:'#715c2b'},
+  navIcon:{fontSize:19,fontWeight:'800',color:'#51617a'},
+  page:{flex:1,backgroundColor:'#f3f5f9'},content:{paddingHorizontal:18,paddingVertical:22,gap:12,flexGrow:1},
   heading:{fontSize:14,fontWeight:'800',color:'#64748b',textTransform:'uppercase',letterSpacing:1,marginTop:20},
   title:{fontSize:26,fontWeight:'800',color:'#111827'},subtitle:{fontSize:14,color:'#64748b',lineHeight:21},
   label:{fontWeight:'700',fontSize:15,color:'#1f2937',marginTop:12},
@@ -181,7 +230,7 @@ const styles = StyleSheet.create({
   logoText:{color:'#facc15',fontSize:24,fontWeight:'800'},companyInfo:{flex:1},
   onlineButton:{borderRadius:12,borderWidth:1,borderColor:'#cad4e0',padding:12,alignItems:'center',marginVertical:7},
   onlineText:{color:'#334155',fontWeight:'700'},
-  nav:{flexDirection:'row',gap:5},tab:{flex:1,borderRadius:11,paddingVertical:12,paddingHorizontal:3,backgroundColor:'#e8edf3',alignItems:'center'},
+  nav:{flexDirection:'row',gap:7},tab:{flex:1,borderRadius:15,paddingVertical:14,paddingHorizontal:3,backgroundColor:'#fff',borderWidth:1,borderColor:'#e5e9f1',alignItems:'center',gap:5},
   activeTab:{backgroundColor:'#111a30'},tabText:{color:'#475569',fontWeight:'700',fontSize:12},
   activeTabText:{color:'#fff'},section:{fontSize:21,fontWeight:'800',color:'#111827',marginTop:15},
   card:{backgroundColor:'#fff',borderWidth:1,borderColor:'#e2e8f0',borderRadius:17,padding:17,gap:7,marginTop:6},
