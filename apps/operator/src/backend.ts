@@ -1,5 +1,5 @@
 import 'react-native-url-polyfill/auto'
-import AsyncStorage from '@react-native-async-storage/async-storage'
+import * as SecureStore from 'expo-secure-store'
 import { createClient, type Session } from '@supabase/supabase-js'
 
 // No defaults: neither staging nor production is accessed unless explicitly configured.
@@ -8,7 +8,7 @@ const url = process.env.EXPO_PUBLIC_SUPABASE_URL || ''
 const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || ''
 export const integrationConfigured = Boolean(url && key)
 export const operatorDb = integrationConfigured ? createClient(url, key, {
-  auth: { storage: AsyncStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  auth: { storage: { getItem: (k: string) => SecureStore.getItemAsync(k), setItem: (k: string,v: string) => SecureStore.setItemAsync(k,v), removeItem: (k: string) => SecureStore.deleteItemAsync(k) }, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
 }) : null
 
 export type OperatorCompany = { id: string; name: string; logo_url: string | null; status: string }
