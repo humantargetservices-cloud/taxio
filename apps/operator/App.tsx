@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, type OperatorCompany } from './src/backend'
 
-type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null }
+type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null }
 type Screen = 'bookings' | 'rescue' | 'trip'
 const DEMO_BOOKINGS: Booking[] = [
   { id: 'demo-booking-1', pickup_address: 'Leuven Station', dropoff_address: 'Brussels Airport', status: 'new' },
@@ -27,6 +27,12 @@ export default function App() {
   const [actionBusy, setActionBusy] = useState(false)
   async function acceptBooking(id: string) {
     if (!company || demo || !mobileActionsEnabled() || actionBusy) return
+    const target = bookings.find(b=>b.id===id)
+    if (!target || target.status!=='new' || !target.decision_deadline_at || Date.parse(target.decision_deadline_at)<=Date.now()) {
+      setActionMessage('This offer is expired or no longer available. Refresh bookings.')
+      setConfirmBookingId(null)
+      return
+    }
     setActionBusy(true); setActionMessage('')
     try {
       const result = await sendOperatorAction('https://www.taxio.be',company.id,{action:'accept_booking',companyId:company.id,bookingRequestId:id})
@@ -138,7 +144,7 @@ export default function App() {
             <View style={styles.routeDivider}/>
             <View style={styles.routeRow}><View style={styles.destinationDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{b.dropoff_address}</Text></View></View>
             <View style={styles.cardFooter}><Text style={styles.note}>{demo?'Preview only · no booking changes':mobileActionsEnabled()?'TAXIO server verifies acceptance':'Read only · booking actions disabled'}</Text></View>
-            {!demo && mobileActionsEnabled() && b.status==='new' ? confirmBookingId===b.id ? <View style={styles.card}><Text style={styles.note}>Accept this real trip? This will notify the passenger and affect live operations.</Text><TouchableOpacity disabled={actionBusy} style={styles.primary} onPress={()=>acceptBooking(b.id)}><Text style={styles.primaryText}>{actionBusy?'Confirming…':'Confirm acceptance'}</Text></TouchableOpacity><TouchableOpacity onPress={()=>setConfirmBookingId(null)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View> : <TouchableOpacity style={styles.primary} onPress={()=>setConfirmBookingId(b.id)}><Text style={styles.primaryText}>Accept booking</Text></TouchableOpacity> : null}
+            {!demo && mobileActionsEnabled() && b.status==='new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at)>Date.now() ? confirmBookingId===b.id ? <View style={styles.card}><Text style={styles.note}>Accept this real trip? This will notify the passenger and affect live operations.</Text><TouchableOpacity disabled={actionBusy} style={styles.primary} onPress={()=>acceptBooking(b.id)}><Text style={styles.primaryText}>{actionBusy?'Confirming…':'Confirm acceptance'}</Text></TouchableOpacity><TouchableOpacity onPress={()=>setConfirmBookingId(null)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View> : <TouchableOpacity style={styles.primary} onPress={()=>setConfirmBookingId(b.id)}><Text style={styles.primaryText}>Accept booking</Text></TouchableOpacity> : null}
           </View>) : <Text style={styles.note}>No active bookings found.</Text>}
         </> : screen==='rescue' ? <>
           <Text style={styles.section}>Rescue</Text>
