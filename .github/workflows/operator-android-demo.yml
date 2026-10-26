@@ -29,10 +29,19 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
       - name: Validate TypeScript
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
         run: npx tsc --noEmit
-      - name: Generate Android project offline (no remote TAXIO backend)
+      - name: Generate Android project (production read-only login)
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
         run: npx expo prebuild --platform android --no-install
       - name: Build standalone Android release APK
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
         run: |
           chmod +x android/gradlew
           cd android
