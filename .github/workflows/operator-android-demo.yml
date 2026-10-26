@@ -30,7 +30,7 @@ jobs:
           java-version: '17'
       - name: Confirm live actions remain disabled
         run: |
-          if grep -q 'EXPO_PUBLIC_ENABLE_LIVE_ACTIONS: true' ../../.github/workflows/operator-android-demo.yml; then
+          if [ "${EXPO_PUBLIC_ENABLE_LIVE_ACTIONS:-false}" = "true" ]; then
             echo 'Live actions cannot be enabled in unverified pilot builds.'
             exit 1
           fi
