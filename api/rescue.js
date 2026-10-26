@@ -162,6 +162,9 @@ export default async function handler(req, res) {
         .eq('id', bookingRequestId)
         .eq('company_id', companyId)
         .eq('status', 'new')
+        // Atomic server-side expiry guard. Never trust client timers.
+        // Legacy rows with NULL deadlines must not be accepted.
+        .gt('decision_deadline_at', new Date().toISOString())
         .select('id')
         .maybeSingle()
 
@@ -173,7 +176,7 @@ export default async function handler(req, res) {
         return json(res, 409, {
           ok: false,
           code: 'NO_LONGER_AVAILABLE',
-          error: 'Booking is no longer available to accept.',
+          error: 'Booking is expired, not activated, or no longer available to accept.',
         })
       }
 
