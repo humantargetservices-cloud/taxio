@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
-import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, type OperatorCompany } from './src/backend'
+import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, type OperatorCompany } from './src/backend'
 
 type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null }
 type Screen = 'bookings' | 'rescue' | 'trip'
@@ -20,6 +20,23 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('bookings')
   const [available, setAvailable] = useState(true)
   const [demoFinished, setDemoFinished] = useState(false)
+  const [restoring, setRestoring] = useState(integrationConfigured)
+
+  useEffect(() => {
+    let active = true
+    const run = async () => {
+      try {
+        const existing = await restoreOperatorCompany()
+        if (existing && active) {
+          const rows = await readCompanyBookings(existing.id)
+          if (active) {setCompany(existing);setBookings(rows);setDemo(false)}
+        }
+      } catch { /* Show login; never grant access without verified session. */ }
+      finally {if(active)setRestoring(false)}
+    }
+    void run()
+    return () => {active=false}
+  }, [])
 
   async function signIn() {
     if (!integrationConfigured || busy) return
@@ -51,7 +68,7 @@ export default function App() {
   return <SafeAreaView style={styles.page}>
     <StatusBar barStyle="dark-content" />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-      {!company ? <>
+      {restoring ? <Text style={styles.subtitle}>Checking company session…</Text> : !company ? <>
         <Text style={styles.heading}>Company access</Text>
         <Text style={styles.title}>Sign in</Text>
         <Text style={styles.subtitle}>Use the same email and password as your TAXIO company dashboard.</Text>
