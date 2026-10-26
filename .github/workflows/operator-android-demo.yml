@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  android-demo:
+  android-pilot:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -28,42 +28,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Confirm pilot remains read-only until production API verification
+      - name: Confirm live actions remain disabled
         run: |
-          if grep -Eq '^\s*EXPO_PUBLIC_ENABLE_LIVE_ACTIONS:\s*(true|["\x27]true["\x27])\s*
-        run: node --test ../../scripts/test_operator_accept_guard.mjs
-      - name: Install JavaScript dependencies
-        run: npm install --no-audit --no-fund
-      - name: Validate TypeScript
-        env:
-          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
-        run: npx tsc --noEmit
-      - name: Generate Android project (production read-only login)
-        env:
-          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
-        run: npx expo prebuild --platform android --no-install
-      - name: Build standalone Android release APK
-        env:
-          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
-        run: |
-          chmod +x android/gradlew
-          cd android
-          ./gradlew assembleRelease --no-daemon
-      - name: Upload installable demo APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: taxio-operator-pilot-apk
-          path: apps/operator/android/app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
-          retention-days: 7
- .github/workflows/operator-android-demo.yml; then
-            echo 'Refusing to build: live actions may not be enabled without server verification.'
+          if grep -q 'EXPO_PUBLIC_ENABLE_LIVE_ACTIONS: true' ../../.github/workflows/operator-android-demo.yml; then
+            echo 'Live actions cannot be enabled in unverified pilot builds.'
             exit 1
           fi
-        working-directory: .
       - name: Check server acceptance guard
         run: node --test ../../scripts/test_operator_accept_guard.mjs
       - name: Install JavaScript dependencies
@@ -73,12 +43,12 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
           EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
         run: npx tsc --noEmit
-      - name: Generate Android project (production read-only login)
+      - name: Generate Android project
         env:
           EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
           EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
         run: npx expo prebuild --platform android --no-install
-      - name: Build standalone Android release APK
+      - name: Build standalone Android APK
         env:
           EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
           EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
@@ -86,7 +56,7 @@ jobs:
           chmod +x android/gradlew
           cd android
           ./gradlew assembleRelease --no-daemon
-      - name: Upload installable demo APK
+      - name: Upload pilot APK
         uses: actions/upload-artifact@v4
         with:
           name: taxio-operator-pilot-apk
