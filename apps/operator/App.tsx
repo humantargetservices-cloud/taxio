@@ -1,3 +1,4 @@
+import { sendOperatorAction, mobileActionsEnabled } from './src/operatorActions'
 import React, { useEffect, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, type OperatorCompany } from './src/backend'
@@ -21,6 +22,20 @@ export default function App() {
   const [available, setAvailable] = useState(true)
   const [demoFinished, setDemoFinished] = useState(false)
   const [restoring, setRestoring] = useState(integrationConfigured)
+  const [actionMessage, setActionMessage] = useState('')
+  const [confirmBookingId, setConfirmBookingId] = useState<string | null>(null)
+  const [actionBusy, setActionBusy] = useState(false)
+  async function acceptBooking(id: string) {
+    if (!company || demo || !mobileActionsEnabled() || actionBusy) return
+    setActionBusy(true); setActionMessage('')
+    try {
+      const result = await sendOperatorAction('https://www.taxio.be',company.id,{action:'accept_booking',companyId:company.id,bookingRequestId:id})
+      if (!result.ok) throw Error(result.error || result.code || 'Booking no longer available')
+      setBookings(await readCompanyBookings(company.id))
+      setScreen('trip')
+      setActionMessage('Booking accepted by TAXIO server.')
+    } catch(e) {setActionMessage(e instanceof Error?e.message:'Unable to accept trip')} finally {setActionBusy(false);setConfirmBookingId(null)}
+  }
 
   useEffect(() => {
     let active = true
@@ -112,15 +127,18 @@ export default function App() {
               <Text style={[styles.tabText, screen===t.key && styles.activeTabText]}>{t.label}</Text>
             </TouchableOpacity>)}
         </View>
+        {actionMessage ? <Text style={styles.notice}>{actionMessage}</Text> : null}
         {screen==='bookings' ? <>
           <Text style={styles.section}>My Bookings</Text>
+          {!demo ? <TouchableOpacity style={styles.secondary} disabled={actionBusy} onPress={async()=>{if(company){try{setBookings(await readCompanyBookings(company.id));setActionMessage('Bookings refreshed')}catch{setActionMessage('Unable to refresh bookings')}}}}><Text style={styles.secondaryText}>Refresh bookings</Text></TouchableOpacity> : null}
           <Text style={styles.subtitle}>Requests and journeys for your company</Text>
           {myBookings.length ? myBookings.map(b => <View key={b.id} style={styles.card}>
             <View style={styles.cardHeader}><Text style={[styles.pill,b.status==='accepted'?styles.pillAccepted:styles.pillNew]}>{b.status==='accepted'?'ACCEPTED':'NEW REQUEST'}</Text><Text style={styles.reference}>{b.booking_reference||'Trip'}</Text></View>
             <View style={styles.routeRow}><View style={styles.pickupDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{b.pickup_address}</Text></View></View>
             <View style={styles.routeDivider}/>
             <View style={styles.routeRow}><View style={styles.destinationDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{b.dropoff_address}</Text></View></View>
-            <View style={styles.cardFooter}><Text style={styles.note}>{demo?'Preview only · no booking changes':'Read only · booking actions disabled'}</Text></View>
+            <View style={styles.cardFooter}><Text style={styles.note}>{demo?'Preview only · no booking changes':mobileActionsEnabled()?'TAXIO server verifies acceptance':'Read only · booking actions disabled'}</Text></View>
+            {!demo && mobileActionsEnabled() && b.status==='new' ? confirmBookingId===b.id ? <View style={styles.card}><Text style={styles.note}>Accept this real trip? This will notify the passenger and affect live operations.</Text><TouchableOpacity disabled={actionBusy} style={styles.primary} onPress={()=>acceptBooking(b.id)}><Text style={styles.primaryText}>{actionBusy?'Confirming…':'Confirm acceptance'}</Text></TouchableOpacity><TouchableOpacity onPress={()=>setConfirmBookingId(null)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View> : <TouchableOpacity style={styles.primary} onPress={()=>setConfirmBookingId(b.id)}><Text style={styles.primaryText}>Accept booking</Text></TouchableOpacity> : null}
           </View>) : <Text style={styles.note}>No active bookings found.</Text>}
         </> : screen==='rescue' ? <>
           <Text style={styles.section}>Rescue</Text>
