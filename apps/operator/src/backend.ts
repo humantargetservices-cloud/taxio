@@ -46,3 +46,13 @@ export async function restoreOperatorCompany(): Promise<OperatorCompany | null> 
   if(error || !data.user) return null
   return resolveOperatorCompany(data.user.id)
 }
+
+export type RescueOffer = { id:string; rescue_request_id:string; expires_at:string|null; status:string; rescue?: {id:string;status:string;preview_pickup_label:string|null;preview_dropoff_label:string|null;preview_ride_datetime:string|null} | null }
+export async function readCompanyRescueOffers(companyId:string):Promise<RescueOffer[]> {
+  if(!operatorDb) throw Error('Integration not configured')
+  const {data,error}=await operatorDb.from('rescue_opportunities')
+    .select('id,rescue_request_id,expires_at,status,rescue:rescue_requests(id,status,preview_pickup_label,preview_dropoff_label,preview_ride_datetime)')
+    .eq('company_id',companyId).order('created_at',{ascending:false}).limit(30)
+  if(error) throw Error('Rescue offers unavailable or permission denied')
+  return (data||[]).map((row:any)=>({...row,rescue:Array.isArray(row.rescue)?row.rescue[0]||null:row.rescue})) as RescueOffer[]
+}
