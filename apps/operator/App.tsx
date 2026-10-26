@@ -43,7 +43,7 @@ export default function App() {
   useEffect(()=>{
     const listener=Notifications.addNotificationResponseReceivedListener(response=>{
       const id=response.notification.request.content.data?.bookingId
-      if(typeof id==='string'){setScreen('bookings');setSelectedBookingId(id);const match=bookings.find(b=>b.id===id);if(match?.status==='new' && match.decision_deadline_at && Date.parse(match.decision_deadline_at)>Date.now())setIncomingTrip(match);else void refreshBookings()}
+      if(typeof id==='string'){setScreen('bookings');setSelectedBookingId(id);setIncomingTrip(null);if(company && !demo){void readCompanyBookings(company.id).then(rows=>{setBookings(rows);const match=rows.find(b=>b.id===id);if(match?.status==='new' && match.decision_deadline_at && Date.parse(match.decision_deadline_at)>Date.now())setIncomingTrip(match)}).catch(e=>setSyncError(e instanceof Error?e.message:'Unable to load offer'))}}
     })
     return()=>listener.remove()
   },[bookings])
