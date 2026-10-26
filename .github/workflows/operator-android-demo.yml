@@ -1,7 +1,7 @@
-name: TAXIO Operator Android Demo
+name: TAXIO Operator Android Pilot
 on:
   push:
-    branches: [staging]
+    branches: [operator-mobile]
     paths:
       - 'apps/operator/**'
       - '.github/workflows/operator-android-demo.yml'
@@ -49,7 +49,7 @@ jobs:
       - name: Upload installable demo APK
         uses: actions/upload-artifact@v4
         with:
-          name: taxio-operator-offline-demo-apk
+          name: taxio-operator-pilot-apk
           path: apps/operator/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 7
