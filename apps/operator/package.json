@@ -16,7 +16,9 @@
     "@supabase/supabase-js": "^2.70.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "react-native-url-polyfill": "^2.0.0",
-    "expo-secure-store": "~15.0.7"
+    "expo-secure-store": "~15.0.7",
+    "react-native-qrcode-svg": "^6.3.15",
+    "react-native-svg": "15.12.1"
   },
   "devDependencies": {
     "typescript": "~5.9.2",
