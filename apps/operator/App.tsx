@@ -1,9 +1,10 @@
+import QRCode from 'react-native-qrcode-svg'
 import { sendOperatorAction, mobileActionsEnabled } from './src/operatorActions'
 import React, { useEffect, useState } from 'react'
-import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl } from 'react-native'
 import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, type OperatorCompany } from './src/backend'
 
-type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null }
+type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null; created_at?: string | null; ride_datetime?: string | null; customer_name?: string | null }
 type Screen = 'bookings' | 'rescue' | 'trip'
 const DEMO_BOOKINGS: Booking[] = [
   { id: 'demo-booking-1', pickup_address: 'Leuven Station', dropoff_address: 'Brussels Airport', status: 'new' },
@@ -25,6 +26,16 @@ export default function App() {
   const [actionMessage, setActionMessage] = useState('')
   const [confirmBookingId, setConfirmBookingId] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
+  const [qrOpen,setQrOpen] = useState(false)
+  const [refreshing,setRefreshing] = useState(false)
+  const bookingUrl = company?.slug && /^[a-z0-9-]+$/.test(company.slug) ? `https://${company.slug}.taxio.be` : null
+  async function refreshBookings() {
+    if (!company || demo || refreshing) return
+    setRefreshing(true)
+    try { setBookings(await readCompanyBookings(company.id)); setActionMessage('Bookings updated') }
+    catch(e) {setActionMessage(e instanceof Error ? e.message : 'Unable to refresh bookings')}
+    finally{setRefreshing(false)}
+  }
   async function acceptBooking(id: string) {
     if (!company || demo || !mobileActionsEnabled() || actionBusy) return
     const target = bookings.find(b=>b.id===id)
@@ -83,12 +94,14 @@ export default function App() {
   }
 
   const myBookings = bookings.filter(b => b.status === 'new' || b.status === 'accepted')
+  const historyBookings = bookings.filter(b => b.status !== 'new' && b.status !== 'accepted')
+  const formatTripDate = (date?:string|null) => date ? new Date(date).toLocaleString('en-BE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : 'Time not specified'
   const currentTrip = bookings.find(b => b.status === 'accepted')
   const pendingCount = bookings.filter(b => b.status === 'new').length
   const acceptedCount = bookings.filter(b => b.status === 'accepted').length
   return <SafeAreaView style={styles.page}>
     <StatusBar barStyle="dark-content" />
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshBookings} enabled={!!company && !demo} />}>
       {restoring ? <Text style={styles.subtitle}>Checking company session…</Text> : !company ? <>
         <Text style={styles.heading}>Company access</Text>
         <Text style={styles.title}>Sign in</Text>
@@ -122,6 +135,7 @@ export default function App() {
             </TouchableOpacity>
           </View>
         </View>
+        <TouchableOpacity accessibilityRole="button" style={styles.shareBanner} onPress={()=>setQrOpen(true)}><View style={{flex:1}}><Text style={styles.shareOverline}>GROW YOUR BOOKINGS</Text><Text style={styles.shareTitle}>Share your booking QR</Text><Text style={styles.shareSubtitle}>Let passengers book directly with your company</Text></View><View style={styles.qrBadge}><Text style={styles.qrBadgeText}>▦</Text></View></TouchableOpacity>
         <View style={styles.overviewHead}><Text style={styles.overviewTitle}>Overview</Text><Text style={styles.overviewHint}>At a glance</Text></View>
         <View style={styles.summary}>
           <TouchableOpacity style={styles.metric} onPress={() => setScreen('bookings')}>
@@ -156,16 +170,19 @@ export default function App() {
         {actionMessage ? <Text style={styles.notice}>{actionMessage}</Text> : null}
         {screen==='bookings' ? <>
           <Text style={styles.section}>My Bookings</Text>
-          {!demo ? <TouchableOpacity style={styles.secondary} disabled={actionBusy} onPress={async()=>{if(company){try{setBookings(await readCompanyBookings(company.id));setActionMessage('Bookings refreshed')}catch{setActionMessage('Unable to refresh bookings')}}}}><Text style={styles.secondaryText}>Refresh bookings</Text></TouchableOpacity> : null}
+          {!demo ? <TouchableOpacity style={styles.secondary} disabled={refreshing} onPress={refreshBookings}><Text style={styles.secondaryText}>{refreshing?'Refreshing…':'↻ Refresh bookings'}</Text></TouchableOpacity> : null}
           <Text style={styles.subtitle}>Requests and journeys for your company</Text>
           {myBookings.length ? myBookings.map(b => <View key={b.id} style={styles.card}>
             <View style={styles.cardHeader}><Text style={[styles.pill,b.status==='accepted'?styles.pillAccepted:styles.pillNew]}>{b.status==='accepted'?'ACCEPTED':'NEW REQUEST'}</Text><Text style={styles.reference}>{b.booking_reference||'Trip'}</Text></View>
+            <Text style={styles.tripMeta}>{b.customer_name ? b.customer_name+'  ·  ' : ''}{formatTripDate(b.ride_datetime || b.created_at)}</Text>
             <View style={styles.routeRow}><View style={styles.pickupDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{b.pickup_address}</Text></View></View>
             <View style={styles.routeDivider}/>
             <View style={styles.routeRow}><View style={styles.destinationDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{b.dropoff_address}</Text></View></View>
             <View style={styles.cardFooter}><Text style={styles.note}>{demo?'Preview only · no booking changes':mobileActionsEnabled()?'TAXIO server verifies acceptance':'Read only · booking actions disabled'}</Text></View>
             {!demo && mobileActionsEnabled() && b.status==='new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at)>Date.now() ? confirmBookingId===b.id ? <View style={styles.card}><Text style={styles.note}>Accept this real trip? This will notify the passenger and affect live operations.</Text><TouchableOpacity disabled={actionBusy} style={styles.primary} onPress={()=>acceptBooking(b.id)}><Text style={styles.primaryText}>{actionBusy?'Confirming…':'Confirm acceptance'}</Text></TouchableOpacity><TouchableOpacity onPress={()=>setConfirmBookingId(null)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View> : <TouchableOpacity style={styles.primary} onPress={()=>setConfirmBookingId(b.id)}><Text style={styles.primaryText}>Accept booking</Text></TouchableOpacity> : null}
-          </View>) : <Text style={styles.note}>No active bookings found.</Text>}
+          </View>) : <Text style={styles.note}>No active bookings. Pull down to check for new requests.</Text>}
+          <Text style={styles.section}>Recent history</Text>
+          {historyBookings.length?historyBookings.slice(0,12).map(b=><View key={b.id} style={styles.historyCard}><View style={{flex:1}}><Text style={styles.historyStatus}>{b.status.toUpperCase()} · {formatTripDate(b.ride_datetime || b.created_at)}</Text><Text style={styles.historyRoute} numberOfLines={2}>{b.pickup_address} → {b.dropoff_address}</Text></View></View>):<Text style={styles.note}>No previous bookings.</Text>}
         </> : screen==='rescue' ? <>
           <Text style={styles.section}>Rescue</Text>
           <View style={styles.card}><Text style={styles.route}>No rescue offers available</Text><Text style={styles.note}>When connected, offers eligible for your company will appear here with an actual server deadline. The app will not invent sample offers.</Text></View>
@@ -182,6 +199,7 @@ export default function App() {
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </>}
     </ScrollView>
+    <Modal visible={qrOpen} transparent animationType="slide" onRequestClose={()=>setQrOpen(false)}><View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>Share your booking page</Text><Text style={styles.subtitle}>Passengers scan and book your taxi directly.</Text>{bookingUrl ? <><View style={styles.qrPanel}><QRCode value={bookingUrl} size={216} backgroundColor="#ffffff" color="#111a30" /></View><Text selectable style={styles.qrUrl}>{bookingUrl}</Text><TouchableOpacity style={styles.primary} onPress={()=>Share.share({message:`Book a taxi with ${company?.name}: ${bookingUrl}`,url:bookingUrl})}><Text style={styles.primaryText}>Share booking link</Text></TouchableOpacity></> : <Text style={styles.notice}>This company has no verified booking subdomain yet. Open the web dashboard to check its booking link.</Text>}<TouchableOpacity style={styles.secondary} onPress={()=>setQrOpen(false)}><Text style={styles.secondaryText}>Close</Text></TouchableOpacity></View></View></Modal>
   </SafeAreaView>
 }
 const styles = StyleSheet.create({
@@ -214,6 +232,7 @@ const styles = StyleSheet.create({
   spotlightArrow:{height:35,width:35,borderRadius:18,backgroundColor:'#fff7db',alignItems:'center',justifyContent:'center'},
   spotlightArrowText:{fontSize:29,fontWeight:'700',color:'#715c2b'},
   navIcon:{fontSize:19,fontWeight:'800',color:'#51617a'},
+  shareBanner:{backgroundColor:'#fff',borderRadius:18,padding:17,borderWidth:1,borderColor:'#e5e9f1',flexDirection:'row',alignItems:'center',gap:12},shareOverline:{fontSize:10,fontWeight:'900',color:'#aa7908',letterSpacing:1},shareTitle:{fontSize:17,fontWeight:'900',color:'#151d30',marginTop:4},shareSubtitle:{fontSize:12,color:'#64748b',marginTop:3},qrBadge:{width:54,height:54,borderRadius:14,backgroundColor:'#fef3c7',alignItems:'center',justifyContent:'center'},qrBadgeText:{fontSize:35,color:'#111a30'},tripMeta:{fontSize:12,color:'#64748b',marginBottom:8},historyCard:{padding:14,backgroundColor:'#fff',borderWidth:1,borderColor:'#e5e9f1',borderRadius:14,flexDirection:'row'},historyStatus:{fontSize:10,color:'#64748b',fontWeight:'800'},historyRoute:{color:'#111827',fontWeight:'700',fontSize:13,marginTop:6},modalBackdrop:{flex:1,backgroundColor:'rgba(9,16,30,.7)',justifyContent:'flex-end'},modalCard:{backgroundColor:'#fff',padding:25,borderTopLeftRadius:26,borderTopRightRadius:26,gap:14,alignItems:'stretch'},modalTitle:{fontWeight:'900',fontSize:23,color:'#111827'},qrPanel:{alignItems:'center',padding:20,backgroundColor:'#fff',borderRadius:18},qrUrl:{textAlign:'center',color:'#34415a',fontSize:13,fontWeight:'700'},
   page:{flex:1,backgroundColor:'#f3f5f9'},content:{paddingHorizontal:18,paddingVertical:22,gap:12,flexGrow:1},
   heading:{fontSize:14,fontWeight:'800',color:'#64748b',textTransform:'uppercase',letterSpacing:1,marginTop:20},
   title:{fontSize:26,fontWeight:'800',color:'#111827'},subtitle:{fontSize:14,color:'#64748b',lineHeight:21},
