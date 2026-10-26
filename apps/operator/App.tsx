@@ -46,6 +46,8 @@ export default function App() {
 
   const myBookings = bookings.filter(b => b.status === 'new' || b.status === 'accepted')
   const currentTrip = bookings.find(b => b.status === 'accepted')
+  const pendingCount = bookings.filter(b => b.status === 'new').length
+  const acceptedCount = bookings.filter(b => b.status === 'accepted').length
   return <SafeAreaView style={styles.page}>
     <StatusBar barStyle="dark-content" />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
@@ -76,6 +78,17 @@ export default function App() {
         <TouchableOpacity style={styles.onlineButton} onPress={() => setAvailable(v=>!v)}>
           <Text style={styles.onlineText}>{available ? '● Available' : '○ Offline'} {demo ? '(demo)' : '(display only)'}</Text>
         </TouchableOpacity>
+        <View style={styles.summary}>
+          <TouchableOpacity style={styles.summaryTile} onPress={() => setScreen('bookings')}>
+            <Text style={styles.summaryNumber}>{pendingCount}</Text><Text style={styles.summaryLabel}>New requests</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.summaryTile} onPress={() => setScreen('bookings')}>
+            <Text style={styles.summaryNumber}>{acceptedCount}</Text><Text style={styles.summaryLabel}>Accepted</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.summaryTile} onPress={() => setScreen('rescue')}>
+            <Text style={styles.summaryNumber}>—</Text><Text style={styles.summaryLabel}>Rescue</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.nav}>
           {([{key:'bookings',label:'My Bookings'},{key:'rescue',label:'Rescue'},{key:'trip',label:'Current Trip'}] as const).map(t =>
             <TouchableOpacity key={t.key} style={[styles.tab, screen===t.key && styles.activeTab]} onPress={() => setScreen(t.key)}>
@@ -84,18 +97,20 @@ export default function App() {
         </View>
         {screen==='bookings' ? <>
           <Text style={styles.section}>My Bookings</Text>
+          <Text style={styles.subtitle}>Requests and journeys for your company</Text>
           {myBookings.length ? myBookings.map(b => <View key={b.id} style={styles.card}>
-            <Text style={styles.status}>{b.status==='accepted'?'ACCEPTED':'NEW REQUEST'}</Text>
-            <Text style={styles.route}>{b.pickup_address}</Text>
-            <Text style={styles.arrow}>↓</Text>
-            <Text style={styles.route}>{b.dropoff_address}</Text>
-            <Text style={styles.note}>{demo?'Sample booking · actions disabled':'Read only · actions not yet enabled'}</Text>
+            <View style={styles.cardHeader}><Text style={[styles.pill,b.status==='accepted'?styles.pillAccepted:styles.pillNew]}>{b.status==='accepted'?'ACCEPTED':'NEW REQUEST'}</Text><Text style={styles.reference}>{b.booking_reference||'Trip'}</Text></View>
+            <View style={styles.routeRow}><View style={styles.pickupDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{b.pickup_address}</Text></View></View>
+            <View style={styles.routeDivider}/>
+            <View style={styles.routeRow}><View style={styles.destinationDot}/><View style={styles.routeCopy}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{b.dropoff_address}</Text></View></View>
+            <View style={styles.cardFooter}><Text style={styles.note}>{demo?'Preview only · no booking changes':'Read only · booking actions disabled'}</Text></View>
           </View>) : <Text style={styles.note}>No active bookings found.</Text>}
         </> : screen==='rescue' ? <>
           <Text style={styles.section}>Rescue</Text>
-          <View style={styles.card}><Text style={styles.route}>Rescue offers</Text><Text style={styles.note}>Rescue offers and 45-second server deadlines will appear here after the authorized rescue API integration. No offers are fabricated.</Text></View>
+          <View style={styles.card}><Text style={styles.route}>No rescue offers available</Text><Text style={styles.note}>When connected, offers eligible for your company will appear here with an actual server deadline. The app will not invent sample offers.</Text></View>
         </> : <>
           <Text style={styles.section}>Current Trip</Text>
+          <Text style={styles.subtitle}>Your active journey at a glance</Text>
           {demo && demoFinished ? <Text style={styles.note}>Sample trip finished.</Text> : currentTrip ? <View style={styles.card}>
             <Text style={styles.status}>ACCEPTED</Text><Text style={styles.route}>{currentTrip.pickup_address} → {currentTrip.dropoff_address}</Text>
             <Text style={styles.note}>Trip changes are disabled until backend permissions are verified.</Text>
@@ -133,5 +148,7 @@ const styles = StyleSheet.create({
   arrow:{color:'#94a3b8'},note:{color:'#64748b',fontSize:13,lineHeight:21},
   secondary:{padding:12,borderRadius:10,borderWidth:1,borderColor:'#cbd5e1',alignItems:'center',marginTop:8},
   secondaryText:{color:'#334155',fontWeight:'700'},signOut:{alignItems:'center',padding:13,marginTop:18},
-  signOutText:{color:'#64748b',fontWeight:'700'},footer:{textAlign:'center',color:'#94a3b8',fontSize:12,marginTop:20}
+  signOutText:{color:'#64748b',fontWeight:'700'},footer:{textAlign:'center',color:'#94a3b8',fontSize:12,marginTop:20},
+  summary:{flexDirection:'row',gap:8,marginTop:8},summaryTile:{flex:1,backgroundColor:'#fff',borderWidth:1,borderColor:'#e2e8f0',paddingVertical:14,paddingHorizontal:8,borderRadius:14,alignItems:'center',gap:4},summaryNumber:{fontSize:25,fontWeight:'800',color:'#111a30'},summaryLabel:{fontSize:11,fontWeight:'700',color:'#64748b',textAlign:'center'},
+  cardHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8},pill:{fontSize:10,fontWeight:'800',paddingHorizontal:10,paddingVertical:6,borderRadius:20,overflow:'hidden'},pillAccepted:{color:'#166534',backgroundColor:'#dcfce7'},pillNew:{color:'#92400e',backgroundColor:'#fef3c7'},reference:{fontSize:11,color:'#64748b'},routeRow:{flexDirection:'row',alignItems:'flex-start',gap:12},routeCopy:{flex:1},routeSmall:{fontSize:10,color:'#94a3b8',fontWeight:'800',letterSpacing:1,marginBottom:3},pickupDot:{width:12,height:12,borderRadius:6,backgroundColor:'#16a34a',marginTop:7},destinationDot:{width:12,height:12,borderRadius:3,backgroundColor:'#111a30',marginTop:7},routeDivider:{width:2,height:17,backgroundColor:'#cbd5e1',marginLeft:5},cardFooter:{borderTopWidth:1,borderTopColor:'#e2e8f0',paddingTop:10,marginTop:5}
 })
