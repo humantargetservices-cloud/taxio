@@ -123,6 +123,7 @@ export default function App() {
         <TouchableOpacity accessibilityRole="button" style={styles.secondary} onPress={() => { setOffers(SAMPLE_OFFERS); setHistory([]); setActiveTrip(null); setTripStep('accepted'); setView('dashboard') }}><Text style={styles.secondaryText}>Reset demo requests</Text></TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" style={styles.link} onPress={() => setLoggedIn(false)}><Text style={styles.linkText}>Change company</Text></TouchableOpacity>
         </> : null}
+        {!authorized ? <TouchableOpacity accessibilityRole="button" style={styles.primary} onPress={() => { setLoggedIn(false); setView('dashboard') }}><Text style={styles.primaryText}>Choose another driver</Text></TouchableOpacity> : null}
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </>}
     </ScrollView>
