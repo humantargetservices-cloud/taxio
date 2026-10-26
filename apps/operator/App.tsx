@@ -37,7 +37,7 @@ export default function App() {
   const [confirmRescueId,setConfirmRescueId]=useState<string|null>(null)
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
-  const seenBookingIds=useRef<Set<string>|null>(null)
+  const seenOfferKeys=useRef<Set<string>|null>(null)
   const [incomingTrip,setIncomingTrip]=useState<Booking|null>(null)
   const [selectedBookingId,setSelectedBookingId]=useState<string|null>(null)
   const [clockNow,setClockNow]=useState(Date.now())
@@ -121,7 +121,7 @@ export default function App() {
         const existing = await restoreOperatorCompany()
         if (existing && active) {
           const rows = await readCompanyBookings(existing.id)
-          if (active) {setCompany(existing);seenBookingIds.current=new Set(rows.map(b=>b.id));setBookings(rows);setDemo(false);try{setRescueOffers(await readCompanyRescueOffers(existing.id))}catch{/* rescue access may be unavailable */}}
+          if (active) {setCompany(existing);seenOfferKeys.current=new Set(rows.filter(b=>b.status==='new'&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()).map(b=>b.id+':'+b.decision_deadline_at));setBookings(rows);setDemo(false);try{setRescueOffers(await readCompanyRescueOffers(existing.id))}catch{/* rescue access may be unavailable */}}
         }
       } catch { /* Show login; never grant access without verified session. */ }
       finally {if(active)setRestoring(false)}
@@ -134,7 +134,7 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {setSyncError('');const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.map(b=>b.id));const incoming=seenBookingIds.current===null?null:rows.find(b=>b.status==='new'&&!b.completed_at&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()&&!seenBookingIds.current?.has(b.id));seenBookingIds.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
+      try {setSyncError('');const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.filter(b=>b.status==='new'&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()).map(b=>b.id+':'+b.decision_deadline_at));const incoming=seenOfferKeys.current===null?null:rows.find(b=>b.status==='new'&&!b.completed_at&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()&&!seenOfferKeys.current?.has(b.id));seenOfferKeys.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);void Notifications.scheduleNotificationAsync({content:{title:'New TAXIO booking',body:incoming.pickup_address+' → '+incoming.dropoff_address,data:{bookingId:incoming.id}},trigger:null}).catch(()=>Alert.alert('New TAXIO booking',incoming.pickup_address+' → '+incoming.dropoff_address))}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch(e) {if(active)setSyncError(e instanceof Error?e.message:'Unable to synchronize bookings')}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
@@ -155,7 +155,7 @@ export default function App() {
       if (!ownerCompany || ownerCompany.status !== 'approved') throw Error('No approved company found for this account.')
       const rows = await readCompanyBookings(ownerCompany.id)
       setCompany(ownerCompany)
-      seenBookingIds.current=new Set(rows.map(b=>b.id));setBookings(rows)
+      seenOfferKeys.current=new Set(rows.filter(b=>b.status==='new'&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()).map(b=>b.id+':'+b.decision_deadline_at));setBookings(rows)
       try{setRescueOffers(await readCompanyRescueOffers(ownerCompany.id))}catch{/* rescue access may be unavailable */}
       setDemo(false)
       setPassword('')
@@ -167,7 +167,7 @@ export default function App() {
 
   async function signOut() {
     if (!demo) await operatorDb?.auth.signOut()
-    setCompany(null);setCompletedTrip(null);setIncomingTrip(null);setSelectedBookingId(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
+    setCompany(null);setCompletedTrip(null);setIncomingTrip(null);setSelectedBookingId(null);seenOfferKeys.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
   }
 
   const myBookings = bookings.filter(b => (b.status === 'new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at)>clockNow || b.status === 'accepted') && !b.completed_at)
