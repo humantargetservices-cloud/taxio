@@ -20,14 +20,14 @@ export async function loginOperator(email: string, password: string): Promise<Se
 }
 export async function resolveOperatorCompany(userId: string): Promise<OperatorCompany | null> {
   if (!operatorDb) throw Error('Integration is not configured')
-  const [a,b] = await Promise.all([
-    operatorDb.from('companies').select('id,name,logo_url,status').eq('owner_user_id',userId),
-    operatorDb.from('company_members').select('role,company:companies(id,name,logo_url,status)').eq('user_id',userId),
-  ])
-  if(a.error || b.error) throw Error('Unable to verify company membership')
-  const companies = [...(a.data||[]), ...(b.data||[]).flatMap((m:any)=>Array.isArray(m.company)?m.company:m.company?[m.company]:[])] as OperatorCompany[]
-  const unique = companies.filter((c,i)=>c?.id && companies.findIndex(v=>v.id===c.id)===i)
-  return unique.find(c=>c.status==='approved') || unique[0] || null
+  // Version 1: a single approved company operator/owner account per app session.
+  // Future driver roles must be separately authorized by server-side policies.
+  const {data,error} = await operatorDb.from('companies')
+    .select('id,name,logo_url,status').eq('owner_user_id',userId)
+    .eq('status','approved').limit(2)
+  if(error) throw Error('Unable to verify your company')
+  if (!data || data.length !== 1) throw Error('Expected one approved company for this operator')
+  return data[0] as OperatorCompany
 }
 export async function readCompanyBookings(companyId: string) {
   if (!operatorDb) throw Error('Integration is not configured')
@@ -39,3 +39,10 @@ export async function readCompanyBookings(companyId: string) {
 }
 // Intentionally NO booking writes or rescue RPC calls.
 // Integration requires verified role permissions and owner approval before any production use.
+
+export async function restoreOperatorCompany(): Promise<OperatorCompany | null> {
+  if (!operatorDb) return null
+  const {data,error} = await operatorDb.auth.getUser()
+  if(error || !data.user) return null
+  return resolveOperatorCompany(data.user.id)
+}
