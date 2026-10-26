@@ -1,147 +1,137 @@
-import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, type OperatorCompany } from './src/backend'
 import React, { useState } from 'react'
-import { SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, type OperatorCompany } from './src/backend'
 
-// Offline prototype only. No Supabase, API requests, push registrations or real booking actions.
-// Replace with authenticated, tenant-authorized endpoints after integration testing.
-type Offer = { id: string; from: string; to: string; kind: 'booking' | 'rescue'; remaining: number }
-const SAMPLE_OFFERS: Offer[] = [
-  { id: 'demo-001', from: 'Leuven Station', to: 'Brussels Airport', kind: 'booking', remaining: 45 },
-  { id: 'demo-002', from: 'Aarschot', to: 'Leuven', kind: 'rescue', remaining: 45 },
+type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null }
+type Screen = 'bookings' | 'rescue' | 'trip'
+const DEMO_BOOKINGS: Booking[] = [
+  { id: 'demo-booking-1', pickup_address: 'Leuven Station', dropoff_address: 'Brussels Airport', status: 'new' },
+  { id: 'demo-trip-1', pickup_address: 'Aarschot', dropoff_address: 'Leuven', status: 'accepted' },
 ]
-const DEMO_COMPANY = { name: 'ABC Taxi', initials: 'AT', city: 'Leuven' }
+const DEMO_COMPANY: OperatorCompany = { id: 'demo', name: 'ABC Taxi', logo_url: null, status: 'approved' }
 export default function App() {
-  const [companyName, setCompanyName] = useState(DEMO_COMPANY.name)
-  const [loggedIn, setLoggedIn] = useState(false)
-  const [loginEmail, setLoginEmail] = useState('')
-  const [loginPassword, setLoginPassword] = useState('')
-  const [liveCompany, setLiveCompany] = useState<OperatorCompany | null>(null)
-  const [liveBookings, setLiveBookings] = useState<Array<{id:string;pickup_address:string;dropoff_address:string;status:string}>>([])
-  const [readOnlyMode, setReadOnlyMode] = useState(false)
-  const [liveMessage, setLiveMessage] = useState('')
-  const [liveBusy, setLiveBusy] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [company, setCompany] = useState<OperatorCompany | null>(null)
+  const [bookings, setBookings] = useState<Booking[]>([])
+  const [demo, setDemo] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [screen, setScreen] = useState<Screen>('bookings')
   const [available, setAvailable] = useState(true)
-  const authorized = true
-  const [offers, setOffers] = useState(SAMPLE_OFFERS)
-  const [history, setHistory] = useState<string[]>([])
-  const [view, setView] = useState<'dashboard' | 'trips' | 'history' | 'profile'>('dashboard')
-  const [activeTrip, setActiveTrip] = useState<Offer | null>(null)
-  const [tripStep, setTripStep] = useState<'accepted' | 'on_way' | 'arrived'>('accepted')
-  const signInReadOnly = async () => {
-    if (!integrationConfigured || !operatorDb || liveBusy) return
-    setLiveBusy(true); setLiveMessage('')
+  const [demoFinished, setDemoFinished] = useState(false)
+
+  async function signIn() {
+    if (!integrationConfigured || busy) return
+    setBusy(true); setMessage('')
     try {
-      const session = await loginOperator(loginEmail, loginPassword)
-      const company = await resolveOperatorCompany(session.user.id)
-      if (!company || company.status !== 'approved') throw Error('No approved company membership')
-      const bookings = await readCompanyBookings(company.id)
-      setLiveCompany(company)
-      setLiveBookings(bookings)
-      setReadOnlyMode(true)
-      setLoginPassword('')
+      const session = await loginOperator(email, password)
+      const ownerCompany = await resolveOperatorCompany(session.user.id)
+      if (!ownerCompany || ownerCompany.status !== 'approved') throw Error('No approved company found for this account.')
+      const rows = await readCompanyBookings(ownerCompany.id)
+      setCompany(ownerCompany)
+      setBookings(rows)
+      setDemo(false)
+      setPassword('')
     } catch (e) {
-      setLiveMessage(e instanceof Error ? e.message : 'Unable to connect')
-    } finally { setLiveBusy(false) }
+      setMessage(e instanceof Error ? e.message : 'Unable to sign in')
+      await operatorDb?.auth.signOut()
+    } finally { setBusy(false) }
   }
-  const decide = (offer: Offer, decision: 'Accepted' | 'Declined') => {
-    if (!authorized || !available) return
-    setOffers(current => current.filter(x => x.id !== offer.id))
-    if (decision === 'Accepted') { setActiveTrip(offer); setTripStep('accepted'); setView('trips') }
-    setHistory(current => [`${decision} · ${offer.from} → ${offer.to} (demo only)`, ...current])
+
+  async function signOut() {
+    if (!demo) await operatorDb?.auth.signOut()
+    setCompany(null); setBookings([]); setDemo(false); setScreen('bookings')
   }
+
+  const myBookings = bookings.filter(b => b.status === 'new' || b.status === 'accepted')
+  const currentTrip = bookings.find(b => b.status === 'accepted')
   return <SafeAreaView style={styles.page}>
     <StatusBar barStyle="dark-content" />
-    <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.demo}><Text style={styles.demoText}>OFFLINE DEMO · NO LIVE BOOKINGS</Text></View>
-      {readOnlyMode && liveCompany ? <>
-        <Text style={styles.title}>{liveCompany.name}</Text>
-        <Text style={styles.muted}>Connected read-only view. Real booking actions are disabled.</Text>
-        <Text style={styles.section}>Company bookings</Text>
-        {liveBookings.length ? liveBookings.map(b => <View key={b.id} style={styles.card}><Text style={styles.route}>{b.pickup_address} → {b.dropoff_address}</Text><Text style={styles.muted}>Status: {b.status}</Text></View>) : <Text style={styles.muted}>No accessible bookings.</Text>}
-        <TouchableOpacity style={styles.secondary} onPress={async () => { await operatorDb?.auth.signOut();setReadOnlyMode(false);setLiveCompany(null);setLiveBookings([]) }}><Text style={styles.secondaryText}>Sign out</Text></TouchableOpacity>
-      </> : !loggedIn ? <>
-        <Text style={styles.title}>Your company's driver app</Text>
-        <Text style={styles.muted}>Preview company-specific branding without connecting to TAXIO servers.</Text>
-        <Text style={styles.label}>Company name (demo)</Text>
-        <TextInput style={styles.input} value={companyName} onChangeText={setCompanyName} maxLength={60} placeholder="Company name" />
-        {integrationConfigured ? <>
-          <Text style={styles.label}>Optional connected read-only login</Text>
-          <TextInput style={styles.input} value={loginEmail} onChangeText={setLoginEmail} placeholder="Email" keyboardType="email-address" autoCapitalize="none" />
-          <TextInput style={styles.input} value={loginPassword} onChangeText={setLoginPassword} placeholder="Password" secureTextEntry />
-          <TouchableOpacity style={styles.secondary} disabled={liveBusy} onPress={signInReadOnly}><Text style={styles.secondaryText}>{liveBusy ? 'Connecting…' : 'Sign in (read only)'}</Text></TouchableOpacity>
-          {liveMessage ? <Text style={styles.muted}>{liveMessage}</Text> : null}
-        </> : null}
-        <TouchableOpacity accessibilityRole="button" style={styles.primary} onPress={() => setLoggedIn(true)}>
-          <Text style={styles.primaryText}>Open demo dashboard</Text>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+      {!company ? <>
+        <Text style={styles.heading}>Company access</Text>
+        <Text style={styles.title}>Sign in</Text>
+        <Text style={styles.subtitle}>Use the same email and password as your TAXIO company dashboard.</Text>
+        <Text style={styles.label}>Email address</Text>
+        <TextInput style={styles.input} placeholder="company@example.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} value={email} onChangeText={setEmail} />
+        <Text style={styles.label}>Password</Text>
+        <TextInput style={styles.input} placeholder="Enter your password" secureTextEntry value={password} onChangeText={setPassword} />
+        <TouchableOpacity accessibilityRole="button" style={[styles.primary, !integrationConfigured && styles.inactive]} disabled={!integrationConfigured || busy} onPress={signIn}>
+          <Text style={styles.primaryText}>{busy ? 'Signing in…' : 'Log in'}</Text>
+        </TouchableOpacity>
+        {!integrationConfigured ? <Text style={styles.notice}>Secure login is not connected in this build. Production credentials are not embedded.</Text> : null}
+        {message ? <Text style={styles.error}>{message}</Text> : null}
+        <TouchableOpacity accessibilityRole="button" style={styles.demoLink} onPress={() => { setCompany(DEMO_COMPANY); setBookings(DEMO_BOOKINGS); setDemo(true); setDemoFinished(false) }}>
+          <Text style={styles.demoLinkText}>Preview offline demo</Text>
         </TouchableOpacity>
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </> : <>
+        {demo ? <Text style={styles.demoBanner}>OFFLINE DEMO · NO LIVE BOOKINGS</Text> : <Text style={styles.readOnlyBanner}>READ ONLY · LIVE ACTIONS DISABLED</Text>}
         <View style={styles.header}>
-          <View style={styles.mark}><Text style={styles.markText}>{(companyName.trim() || 'Taxi').slice(0, 2).toUpperCase()}</Text></View>
-          <View style={styles.headerCopy}><Text style={styles.title}>{companyName.trim() || DEMO_COMPANY.name}</Text><Text style={styles.muted}>Driver dashboard · {DEMO_COMPANY.city}</Text></View>
+          {company.logo_url && !demo ? <Image source={{uri:company.logo_url}} style={styles.logo}/> :
+            <View style={styles.logoFallback}><Text style={styles.logoText}>{company.name.trim().slice(0,2).toUpperCase()}</Text></View>}
+          <View style={styles.companyInfo}><Text style={styles.title}>{company.name}</Text><Text style={styles.subtitle}>Company driver dashboard</Text></View>
         </View>
-        <TouchableOpacity style={styles.secondary} onPress={() => setAvailable(v => !v)}><Text style={styles.secondaryText}>{available ? 'Available for offers · tap to go offline' : 'Unavailable · tap to go online'}</Text></TouchableOpacity>
-        <><View style={styles.tabs}>
-          {(['dashboard','trips','history','profile'] as const).map(tab => <TouchableOpacity key={tab} accessibilityRole="button" accessibilityState={{ selected: view === tab }} onPress={() => setView(tab)} style={[styles.tab, view === tab && styles.selectedTab]}><Text style={[styles.tabText, view === tab && styles.selectedTabText]}>{tab === 'trips' ? 'Current trip' : tab[0].toUpperCase()+tab.slice(1)}</Text></TouchableOpacity>)}
+        <TouchableOpacity style={styles.onlineButton} onPress={() => setAvailable(v=>!v)}>
+          <Text style={styles.onlineText}>{available ? '● Available' : '○ Offline'} {demo ? '(demo)' : '(display only)'}</Text>
+        </TouchableOpacity>
+        <View style={styles.nav}>
+          {([{key:'bookings',label:'My Bookings'},{key:'rescue',label:'Rescue'},{key:'trip',label:'Current Trip'}] as const).map(t =>
+            <TouchableOpacity key={t.key} style={[styles.tab, screen===t.key && styles.activeTab]} onPress={() => setScreen(t.key)}>
+              <Text style={[styles.tabText, screen===t.key && styles.activeTabText]}>{t.label}</Text>
+            </TouchableOpacity>)}
         </View>
-        {view === 'dashboard' ? <>
-        <View style={styles.stats}>
-          <View style={styles.stat}><Text style={styles.muted}>New bookings</Text><Text style={styles.statNumber}>{offers.filter(x => x.kind === 'booking').length}</Text></View>
-          <View style={styles.stat}><Text style={styles.muted}>Rescue offers</Text><Text style={styles.statNumber}>{offers.filter(x => x.kind === 'rescue').length}</Text></View>
-        </View>
-        <Text style={styles.section}>Incoming requests</Text>
-        {offers.length === 0 ? <View style={styles.card}><Text style={styles.muted}>No demo offers left. Reset to preview again.</Text></View> : offers.map(offer =>
-          <View key={offer.id} style={styles.card}>
-            <View style={styles.offerTop}><Text style={styles.kind}>{offer.kind === 'rescue' ? 'RESCUE OFFER' : 'NEW BOOKING'}</Text><Text style={styles.time}>{offer.remaining}s sample window</Text></View>
-            <Text style={styles.route}>{offer.from} → {offer.to}</Text>
-            <Text style={styles.muted}>Demonstration only. No timer, server acceptance or dispatch.</Text>
-            <View style={styles.actions}>
-              <TouchableOpacity accessibilityRole="button" style={[styles.primary, styles.action]} disabled={!available} onPress={() => decide(offer, 'Accepted')}><Text style={styles.primaryText}>Accept demo</Text></TouchableOpacity>
-              <TouchableOpacity accessibilityRole="button" style={[styles.secondary, styles.action]} disabled={!available} onPress={() => decide(offer, 'Declined')}><Text style={styles.secondaryText}>Decline demo</Text></TouchableOpacity>
-            </View>
-          </View>
-        )}
-        </> : view === 'trips' ? <View style={styles.card}>
-          <Text style={styles.section}>Current trip</Text>
-          {activeTrip ? <>
-            <Text style={styles.route}>{activeTrip.from} → {activeTrip.to}</Text>
-            <Text style={styles.muted}>Local demonstration · stage: {tripStep.replace('_',' ')}</Text>
-            {tripStep === 'accepted' ? <TouchableOpacity style={styles.primary} onPress={() => setTripStep('on_way')}><Text style={styles.primaryText}>On my way (demo)</Text></TouchableOpacity> : null}
-            {tripStep === 'on_way' ? <TouchableOpacity style={styles.primary} onPress={() => setTripStep('arrived')}><Text style={styles.primaryText}>Arrived (demo)</Text></TouchableOpacity> : null}
-            {tripStep === 'arrived' ? <TouchableOpacity style={styles.primary} onPress={() => { setHistory(h => [`Finished · ${activeTrip.from} → ${activeTrip.to} (demo only)`, ...h]);setActiveTrip(null);setView('history') }}><Text style={styles.primaryText}>Finish journey (demo)</Text></TouchableOpacity> : null}
-          </> : <Text style={styles.muted}>Accept a demo booking from the dashboard to begin a simulated trip.</Text>}
-        </View> : view === 'profile' ? <View style={styles.card}><Text style={styles.section}>Company profile</Text><Text style={styles.route}>{companyName || DEMO_COMPANY.name}</Text><Text style={styles.muted}>Branding preview only. Real driver profile and logo come later after permission testing.</Text></View> : null}
-        {view === 'history' ? <>
-        <Text style={styles.section}>Demo history</Text>
-        <View style={styles.card}>{history.length ? history.map((entry, i) => <Text key={i} style={styles.history}>{entry}</Text>) : <Text style={styles.muted}>No demo actions yet.</Text>}</View>
-        </> : null}
-        <TouchableOpacity accessibilityRole="button" style={styles.secondary} onPress={() => { setOffers(SAMPLE_OFFERS); setHistory([]); setActiveTrip(null); setTripStep('accepted'); setView('dashboard') }}><Text style={styles.secondaryText}>Reset demo requests</Text></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" style={styles.link} onPress={() => setLoggedIn(false)}><Text style={styles.linkText}>Change company</Text></TouchableOpacity>
-        </>
+        {screen==='bookings' ? <>
+          <Text style={styles.section}>My Bookings</Text>
+          {myBookings.length ? myBookings.map(b => <View key={b.id} style={styles.card}>
+            <Text style={styles.status}>{b.status==='accepted'?'ACCEPTED':'NEW REQUEST'}</Text>
+            <Text style={styles.route}>{b.pickup_address}</Text>
+            <Text style={styles.arrow}>↓</Text>
+            <Text style={styles.route}>{b.dropoff_address}</Text>
+            <Text style={styles.note}>{demo?'Sample booking · actions disabled':'Read only · actions not yet enabled'}</Text>
+          </View>) : <Text style={styles.note}>No active bookings found.</Text>}
+        </> : screen==='rescue' ? <>
+          <Text style={styles.section}>Rescue</Text>
+          <View style={styles.card}><Text style={styles.route}>Rescue offers</Text><Text style={styles.note}>Rescue offers and 45-second server deadlines will appear here after the authorized rescue API integration. No offers are fabricated.</Text></View>
+        </> : <>
+          <Text style={styles.section}>Current Trip</Text>
+          {demo && demoFinished ? <Text style={styles.note}>Sample trip finished.</Text> : currentTrip ? <View style={styles.card}>
+            <Text style={styles.status}>ACCEPTED</Text><Text style={styles.route}>{currentTrip.pickup_address} → {currentTrip.dropoff_address}</Text>
+            <Text style={styles.note}>Trip changes are disabled until backend permissions are verified.</Text>
+            {demo ? <TouchableOpacity style={styles.secondary} onPress={() => setDemoFinished(true)}><Text style={styles.secondaryText}>Finish sample trip (local only)</Text></TouchableOpacity> : null}
+          </View> : <Text style={styles.note}>No current trip.</Text>}
+        </>}
+        <TouchableOpacity style={styles.signOut} onPress={signOut}><Text style={styles.signOutText}>Sign out</Text></TouchableOpacity>
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </>}
     </ScrollView>
   </SafeAreaView>
 }
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: '#f8fafc' }, content: { padding: 20, gap: 16, flexGrow: 1 },
-  demo: { backgroundColor: '#fef3c7', padding: 10, borderRadius: 10, alignItems: 'center' },
-  demoText: { color: '#92400e', fontWeight: '800', fontSize: 11, letterSpacing: 0.5 },
-  title: { fontSize: 22, fontWeight: '800', color: '#111827' }, muted: { color: '#64748b', fontSize: 13, lineHeight: 20 },
-  label: { color: '#334155', fontWeight: '700' }, input: { padding: 14, backgroundColor: 'white', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 12, fontSize: 16 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12 }, headerCopy: { flex: 1 },
-  mark: { width: 60, height: 60, backgroundColor: '#0f172a', borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  markText: { fontSize: 21, fontWeight: '800', color: '#facc15' }, stats: { flexDirection: 'row', gap: 12 },
-  stat: { flex: 1, backgroundColor: 'white', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#e2e8f0' },
-  statNumber: { color: '#0f172a', fontSize: 28, fontWeight: '800' }, section: { fontSize: 18, fontWeight: '800', color: '#0f172a', marginTop: 12 },
-  card: { backgroundColor: 'white', borderRadius: 14, borderWidth: 1, borderColor: '#e2e8f0', padding: 16, gap: 12 },
-  offerTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 }, kind: { color: '#b45309', fontSize: 11, fontWeight: '800' },
-  time: { color: '#64748b', fontSize: 11 }, route: { color: '#0f172a', fontSize: 16, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 10 }, action: { flex: 1 },
-  primary: { backgroundColor: '#facc15', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 12, alignItems: 'center' },
-  primaryText: { color: '#111827', fontWeight: '800' }, secondary: { borderWidth: 1, borderColor: '#cbd5e1', paddingVertical: 14, paddingHorizontal: 12, borderRadius: 12, alignItems: 'center' },
-  secondaryText: { color: '#334155', fontWeight: '700' }, history: { color: '#334155', borderBottomWidth: 1, borderBottomColor: '#e2e8f0', paddingVertical: 6 },
-  link: { alignItems: 'center', paddingVertical: 8 }, linkText: { color: '#334155', fontWeight: '700' },
-  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 }, tab: { paddingVertical: 10, paddingHorizontal: 10, borderRadius: 10, backgroundColor: '#e2e8f0' }, selectedTab: { backgroundColor: '#0f172a' }, tabText: { color: '#334155', fontWeight: '700', fontSize: 12 }, selectedTabText: { color: 'white' },
-  footer: { textAlign: 'center', color: '#94a3b8', marginTop: 24, fontSize: 12 }
+  page:{flex:1,backgroundColor:'#f7f9fc'},content:{padding:24,gap:12,flexGrow:1},
+  heading:{fontSize:14,fontWeight:'800',color:'#64748b',textTransform:'uppercase',letterSpacing:1,marginTop:20},
+  title:{fontSize:26,fontWeight:'800',color:'#111827'},subtitle:{fontSize:14,color:'#64748b',lineHeight:21},
+  label:{fontWeight:'700',fontSize:15,color:'#1f2937',marginTop:12},
+  input:{backgroundColor:'#fff',padding:15,borderRadius:13,borderWidth:1,borderColor:'#d9dee7',fontSize:16,color:'#111827'},
+  primary:{backgroundColor:'#111a30',borderRadius:13,padding:17,alignItems:'center',marginTop:14},
+  inactive:{opacity:.65},primaryText:{color:'#fff',fontWeight:'800',fontSize:16},
+  notice:{color:'#92400e',fontSize:13,lineHeight:19},error:{color:'#b91c1c',fontSize:13},
+  demoLink:{padding:12,alignItems:'center'},demoLinkText:{color:'#4b5563',fontWeight:'700',textDecorationLine:'underline'},
+  demoBanner:{backgroundColor:'#fef3c7',color:'#92400e',fontSize:12,fontWeight:'800',textAlign:'center',padding:10,borderRadius:10},
+  readOnlyBanner:{backgroundColor:'#dbeafe',color:'#1e40af',fontSize:12,fontWeight:'800',textAlign:'center',padding:10,borderRadius:10},
+  header:{flexDirection:'row',alignItems:'center',gap:14,marginTop:8},logo:{width:66,height:66,borderRadius:15},
+  logoFallback:{width:66,height:66,borderRadius:15,backgroundColor:'#111a30',justifyContent:'center',alignItems:'center'},
+  logoText:{color:'#facc15',fontSize:24,fontWeight:'800'},companyInfo:{flex:1},
+  onlineButton:{borderRadius:12,borderWidth:1,borderColor:'#cad4e0',padding:12,alignItems:'center',marginVertical:7},
+  onlineText:{color:'#334155',fontWeight:'700'},
+  nav:{flexDirection:'row',gap:5},tab:{flex:1,borderRadius:11,paddingVertical:12,paddingHorizontal:3,backgroundColor:'#e8edf3',alignItems:'center'},
+  activeTab:{backgroundColor:'#111a30'},tabText:{color:'#475569',fontWeight:'700',fontSize:12},
+  activeTabText:{color:'#fff'},section:{fontSize:21,fontWeight:'800',color:'#111827',marginTop:15},
+  card:{backgroundColor:'#fff',borderWidth:1,borderColor:'#e2e8f0',borderRadius:17,padding:17,gap:7,marginTop:6},
+  status:{color:'#b45309',fontSize:11,fontWeight:'800'},route:{fontSize:17,fontWeight:'700',color:'#111827'},
+  arrow:{color:'#94a3b8'},note:{color:'#64748b',fontSize:13,lineHeight:21},
+  secondary:{padding:12,borderRadius:10,borderWidth:1,borderColor:'#cbd5e1',alignItems:'center',marginTop:8},
+  secondaryText:{color:'#334155',fontWeight:'700'},signOut:{alignItems:'center',padding:13,marginTop:18},
+  signOutText:{color:'#64748b',fontWeight:'700'},footer:{textAlign:'center',color:'#94a3b8',fontSize:12,marginTop:20}
 })
