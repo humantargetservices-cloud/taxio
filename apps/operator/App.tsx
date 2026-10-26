@@ -74,7 +74,7 @@ export default function App() {
       setBookings(latest)
       if(action==='complete_trip' && latest.some(b=>b.id===currentTrip.id&&!!b.completed_at))setCompletedTrip(currentTrip)
       else if(action==='complete_trip')throw Error('Completion not yet confirmed by server. Refresh and verify status.')
-      setActionMessage(action='mark_on_way'?'Passenger updated: on the way':action==='mark_arrived'?'Passenger updated: arrived':'Trip completed')
+      setActionMessage(action==='mark_on_way'?'Passenger updated: on the way':action==='mark_arrived'?'Passenger updated: arrived':'Trip completed')
       if(action==='complete_trip')setTripOpen(false)
     }catch(e){setActionMessage(e instanceof Error?e.message:'Update failed')}
     finally{setActionBusy(false);setTripConfirm(null)}
