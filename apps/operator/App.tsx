@@ -43,7 +43,7 @@ export default function App() {
   useEffect(()=>{
     const listener=Notifications.addNotificationResponseReceivedListener(response=>{
       const id=response.notification.request.content.data?.bookingId
-      if(typeof id==='string'){setScreen('bookings');setSelectedBookingId(id);setIncomingTrip(bookings.find(b=>b.id===id)||null)}
+      if(typeof id==='string'){setScreen('bookings');setSelectedBookingId(id);const match=bookings.find(b=>b.id===id);if(match?.status==='new' && match.decision_deadline_at && Date.parse(match.decision_deadline_at)>Date.now())setIncomingTrip(match);else void refreshBookings()}
     })
     return()=>listener.remove()
   },[bookings])
