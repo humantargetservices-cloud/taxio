@@ -33,6 +33,7 @@ export default function App() {
   const [qrOpen,setQrOpen] = useState(false)
   const [tripOpen,setTripOpen] = useState(false)
   const [navOpen,setNavOpen]=useState(false)
+  const [completedTrip,setCompletedTrip]=useState<Booking|null>(null)
   const [confirmRescueId,setConfirmRescueId]=useState<string|null>(null)
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
@@ -69,8 +70,11 @@ export default function App() {
     try {
       const result=await sendOperatorAction('https://www.taxio.be',company.id,{action,companyId:company.id,bookingRequestId:currentTrip.id})
       if(!result.ok) throw Error(result.error || result.code || 'Unable to update passenger')
-      setBookings(await readCompanyBookings(company.id))
-      setActionMessage(action==='mark_on_way'?'Passenger updated: on the way':action==='mark_arrived'?'Passenger updated: arrived':'Trip completed')
+      const latest=await readCompanyBookings(company.id)
+      setBookings(latest)
+      if(action==='complete_trip' && latest.some(b=>b.id===currentTrip.id&&!!b.completed_at))setCompletedTrip(currentTrip)
+      else if(action==='complete_trip')throw Error('Completion not yet confirmed by server. Refresh and verify status.')
+      setActionMessage(action='mark_on_way'?'Passenger updated: on the way':action==='mark_arrived'?'Passenger updated: arrived':'Trip completed')
       if(action==='complete_trip')setTripOpen(false)
     }catch(e){setActionMessage(e instanceof Error?e.message:'Update failed')}
     finally{setActionBusy(false);setTripConfirm(null)}
@@ -163,7 +167,7 @@ export default function App() {
 
   async function signOut() {
     if (!demo) await operatorDb?.auth.signOut()
-    setCompany(null);setIncomingTrip(null);setSelectedBookingId(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
+    setCompany(null);setCompletedTrip(null);setIncomingTrip(null);setSelectedBookingId(null);seenBookingIds.current=null;setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
   }
 
   const myBookings = bookings.filter(b => (b.status === 'new' && !!b.decision_deadline_at && Date.parse(b.decision_deadline_at)>clockNow || b.status === 'accepted') && !b.completed_at)
@@ -314,12 +318,21 @@ export default function App() {
             <TouchableOpacity style={styles.navigationButton} disabled={!currentTrip.customer_phone} onPress={()=>currentTrip.customer_phone&&Linking.openURL('tel:'+currentTrip.customer_phone)}><Text style={styles.navigationText}>Call</Text></TouchableOpacity>
           </View>
           <Text style={styles.note}>{mobileActionsEnabled()?'Progress changes require server confirmation.':'Read-only pilot: live trip updates are disabled until safe server testing.'}</Text>
-          {tripConfirm?<View style={styles.card}><Text style={styles.route}>Confirm trip update?</Text><TouchableOpacity style={styles.primary} disabled={actionBusy} onPress={()=>updateTrip(tripConfirm)}><Text style={styles.primaryText}>{actionBusy?'Updating…':'Confirm'}</Text></TouchableOpacity><TouchableOpacity style={styles.secondary} onPress={()=>setTripConfirm(null)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View>:null}
+          {tripConfirm?<View style={styles.card}><Text style={styles.route}>{tripConfirm==='complete_trip'?'Finish this journey?':'Confirm trip progress?'}</Text>{tripConfirm==='complete_trip'?<Text style={styles.note}>This will close the journey, remove it from Active Trips and move it to history. This cannot be undone in the app.</Text>:null}<TouchableOpacity style={styles.primary} disabled={actionBusy} onPress={()=>updateTrip(tripConfirm)}><Text style={styles.primaryText}>{actionBusy?'Updating…':'Confirm'}</Text></TouchableOpacity><TouchableOpacity style={styles.secondary} onPress={()=>setTripConfirm(null)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View>:null}
           {actionMessage?<Text style={styles.note}>{actionMessage}</Text>:null}
         </>:<Text style={styles.note}>No active trip found.</Text>}
       </ScrollView></View>
     </Modal>
-    <Modal visible={navOpen} transparent animationType="slide" onRequestClose={()=>setNavOpen(false)}><View style={styles.modalBackdrop}><View style={styles.modalCard}>
+    <Modal visible={!!completedTrip} transparent animationType="slide" onRequestClose={()=>setCompletedTrip(null)}>
+      <View style={styles.modalBackdrop}><View style={styles.modalCard}>
+        <Text style={styles.modalTitle}>✓ Journey completed</Text>
+        <Text style={styles.note}>TAXIO confirmed the completion and moved this journey to your history.</Text>
+        <Text style={styles.route}>{completedTrip?.pickup_address} → {completedTrip?.dropoff_address}</Text>
+        <TouchableOpacity style={styles.primary} onPress={()=>{setCompletedTrip(null);setScreen('bookings')}}><Text style={styles.primaryText}>View trip history</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.secondary} onPress={()=>setCompletedTrip(null)}><Text style={styles.secondaryText}>Back to dashboard</Text></TouchableOpacity>
+      </View></View>
+    </Modal>
+        <Modal visible={navOpen} transparent animationType="slide" onRequestClose={()=>setNavOpen(false)}><View style={styles.modalBackdrop}><View style={styles.modalCard}>
       <Text style={styles.modalTitle}>Navigate to pickup</Text>
       <TouchableOpacity style={styles.secondary} onPress={()=>{setNavOpen(false);if(currentTrip)void navigateTo(currentTrip.pickup_address,'google')}}><Text style={styles.secondaryText}>Google Maps</Text></TouchableOpacity>
       <TouchableOpacity style={styles.secondary} onPress={()=>{setNavOpen(false);if(currentTrip)void navigateTo(currentTrip.pickup_address,'waze')}}><Text style={styles.secondaryText}>Waze</Text></TouchableOpacity>
