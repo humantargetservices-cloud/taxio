@@ -27,6 +27,8 @@ export default function App() {
   const [confirmBookingId, setConfirmBookingId] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [qrOpen,setQrOpen] = useState(false)
+  const [tripOpen,setTripOpen] = useState(false)
+  const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
   const bookingUrl = company?.slug && /^[a-z0-9-]+$/.test(company.slug) ? `https://${company.slug}.taxio.be` : null
   async function refreshBookings() {
@@ -35,6 +37,18 @@ export default function App() {
     try { setBookings(await readCompanyBookings(company.id)); setActionMessage('Bookings updated') }
     catch(e) {setActionMessage(e instanceof Error ? e.message : 'Unable to refresh bookings')}
     finally{setRefreshing(false)}
+  }
+  async function updateTrip(action: 'mark_on_way'|'mark_arrived'|'complete_trip') {
+    if(!company || !currentTrip || demo || !mobileActionsEnabled() || actionBusy) return
+    setActionBusy(true);setActionMessage('')
+    try {
+      const result=await sendOperatorAction('https://www.taxio.be',company.id,{action,companyId:company.id,bookingRequestId:currentTrip.id})
+      if(!result.ok) throw Error(result.error || result.code || 'Unable to update passenger')
+      setBookings(await readCompanyBookings(company.id))
+      setActionMessage(action==='mark_on_way'?'Passenger updated: on the way':action==='mark_arrived'?'Passenger updated: arrived':'Trip completed')
+      if(action==='complete_trip')setTripOpen(false)
+    }catch(e){setActionMessage(e instanceof Error?e.message:'Update failed')}
+    finally{setActionBusy(false);setTripConfirm(null)}
   }
   async function acceptBooking(id: string) {
     if (!company || demo || !mobileActionsEnabled() || actionBusy) return
@@ -163,7 +177,7 @@ export default function App() {
             <Text style={styles.metricNumber}>—</Text><Text style={styles.metricLabel}>Rescue</Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.spotlight} onPress={() => setScreen(currentTrip ? 'trip' : 'bookings')}>
+        <TouchableOpacity style={styles.spotlight} onPress={() => currentTrip ? setTripOpen(true) : setScreen('bookings')}>
           <View style={styles.spotlightCopy}>
             <Text style={styles.spotlightEyebrow}>{currentTrip?'CURRENT JOURNEY':'YOUR NEXT JOURNEY'}</Text>
             <Text style={styles.spotlightTitle}>{currentTrip?'Trip in progress':pendingCount?'New booking waiting':'All caught up'}</Text>
@@ -201,6 +215,7 @@ export default function App() {
         </> : <>
           <Text style={styles.section}>Current Trip</Text>
           <Text style={styles.subtitle}>Your active journey at a glance</Text>
+          {currentTrip ? <TouchableOpacity style={styles.primary} onPress={()=>setTripOpen(true)}><Text style={styles.primaryText}>Open trip details  ›</Text></TouchableOpacity> : null}
           {demo && demoFinished ? <Text style={styles.note}>Sample trip finished.</Text> : currentTrip ? <View style={styles.card}>
             <Text style={styles.status}>ACCEPTED</Text><Text style={styles.route}>{currentTrip.pickup_address} → {currentTrip.dropoff_address}</Text>
             <Text style={styles.note}>Trip changes are disabled until backend permissions are verified.</Text>
@@ -211,6 +226,25 @@ export default function App() {
         <Text style={styles.footer}>Powered by TAXIO</Text>
       </>}
     </ScrollView>
+    <Modal visible={tripOpen} transparent animationType="slide" onRequestClose={()=>setTripOpen(false)}>
+      <View style={styles.modalBackdrop}><ScrollView contentContainerStyle={styles.modalCard}>
+        <View style={styles.cardHeader}><Text style={styles.modalTitle}>Active trip</Text><TouchableOpacity onPress={()=>setTripOpen(false)}><Text style={styles.secondaryText}>Close ✕</Text></TouchableOpacity></View>
+        {currentTrip ? <>
+          <Text style={styles.status}>ACCEPTED · {currentTrip.booking_reference||'BOOKING'}</Text>
+          <Text style={styles.tripMeta}>{formatTripDate(currentTrip.ride_datetime || currentTrip.created_at)}</Text>
+          {currentTrip.customer_name?<Text style={styles.route}>{currentTrip.customer_name}</Text>:null}
+          <View style={styles.card}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{currentTrip.pickup_address}</Text></View>
+          <View style={styles.card}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{currentTrip.dropoff_address}</Text></View>
+          <Text style={styles.note}>{demo?'Preview mode':mobileActionsEnabled()?'Updates are sent to the TAXIO server; passenger status changes follow existing server behavior.':'Passenger updates are disabled until live pilot verification.'}</Text>
+          {(['mark_on_way','mark_arrived','complete_trip'] as const).map(action =>
+            <TouchableOpacity key={action} disabled={demo||!mobileActionsEnabled()||actionBusy} style={[styles.primary,(demo||!mobileActionsEnabled())&&styles.inactive]} onPress={()=>setTripConfirm(action)}>
+              <Text style={styles.primaryText}>{action==='mark_on_way'?'On the way':action==='mark_arrived'?'I have arrived':'Complete trip'}</Text>
+            </TouchableOpacity>)}
+          {tripConfirm?<View style={styles.card}><Text style={styles.route}>Confirm status update?</Text><Text style={styles.note}>This will update the live trip status on TAXIO.</Text><TouchableOpacity style={styles.primary} disabled={actionBusy} onPress={()=>updateTrip(tripConfirm)}><Text style={styles.primaryText}>{actionBusy?'Updating…':'Confirm update'}</Text></TouchableOpacity><TouchableOpacity style={styles.secondary} onPress={()=>setTripConfirm(null)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View>:null}
+          {actionMessage?<Text style={styles.note}>{actionMessage}</Text>:null}
+        </>:<Text style={styles.note}>No active trip found.</Text>}
+      </ScrollView></View>
+    </Modal>
     <Modal visible={qrOpen} transparent animationType="slide" onRequestClose={()=>setQrOpen(false)}><View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>Share your booking page</Text><Text style={styles.subtitle}>Passengers scan and book your taxi directly.</Text>{bookingUrl ? <><View style={styles.qrPanel}><QRCode value={bookingUrl} size={216} backgroundColor="#ffffff" color="#111a30" /></View><Text selectable style={styles.qrUrl}>{bookingUrl}</Text><TouchableOpacity style={styles.primary} onPress={()=>Share.share({message:`Book a taxi with ${company?.name}: ${bookingUrl}`,url:bookingUrl})}><Text style={styles.primaryText}>Share booking link</Text></TouchableOpacity></> : <Text style={styles.notice}>This company has no verified booking subdomain yet. Open the web dashboard to check its booking link.</Text>}<TouchableOpacity style={styles.secondary} onPress={()=>setQrOpen(false)}><Text style={styles.secondaryText}>Close</Text></TouchableOpacity></View></View></Modal>
   </SafeAreaView>
 }
