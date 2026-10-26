@@ -1,7 +1,7 @@
 import QRCode from 'react-native-qrcode-svg'
 import { sendOperatorAction, mobileActionsEnabled } from './src/operatorActions'
 import React, { useEffect, useState } from 'react'
-import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl, AppState } from 'react-native'
+import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl, AppState, Linking, Alert } from 'react-native'
 import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, readCompanyRescueOffers, type RescueOffer, type OperatorCompany } from './src/backend'
 
 type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null; created_at?: string | null; ride_datetime?: string | null; customer_name?: string | null }
@@ -32,6 +32,12 @@ export default function App() {
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
   const bookingUrl = company?.slug && /^[a-z0-9-]+$/.test(company.slug) ? `https://${company.slug}.taxio.be` : null
+  async function navigateTo(address:string,provider:'waze'|'google') {
+    if(!address?.trim()) {Alert.alert('Navigation unavailable','Trip destination is missing.');return}
+    const encoded=encodeURIComponent(address.trim())
+    const url=provider==='waze'? `https://waze.com/ul?q=${encoded}&navigate=yes`:`https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`
+    try{await Linking.openURL(url)}catch{Alert.alert('Unable to open navigation','Please install Waze or Google Maps, or check your internet connection.')}
+  }
   async function refreshBookings() {
     if (!company || demo || refreshing) return
     setRefreshing(true)
@@ -240,6 +246,16 @@ export default function App() {
           {currentTrip.customer_name?<Text style={styles.route}>{currentTrip.customer_name}</Text>:null}
           <View style={styles.card}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{currentTrip.pickup_address}</Text></View>
           <View style={styles.card}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{currentTrip.dropoff_address}</Text></View>
+          <Text style={styles.overviewTitle}>Navigation to pickup</Text>
+          <View style={styles.navigationRow}>
+            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.pickup_address,'waze')}><Text style={styles.navigationText}>↗ Waze</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.pickup_address,'google')}><Text style={styles.navigationText}>↗ Google Maps</Text></TouchableOpacity>
+          </View>
+          <Text style={styles.overviewTitle}>Navigation to destination</Text>
+          <View style={styles.navigationRow}>
+            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.dropoff_address,'waze')}><Text style={styles.navigationText}>↗ Waze</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.dropoff_address,'google')}><Text style={styles.navigationText}>↗ Google Maps</Text></TouchableOpacity>
+          </View>
           <Text style={styles.note}>{demo?'Preview mode':mobileActionsEnabled()?'Updates are sent to the TAXIO server; passenger status changes follow existing server behavior.':'Passenger updates are disabled until live pilot verification.'}</Text>
           {(['mark_on_way','mark_arrived','complete_trip'] as const).map(action =>
             <TouchableOpacity key={action} disabled={demo||!mobileActionsEnabled()||actionBusy} style={[styles.primary,(demo||!mobileActionsEnabled())&&styles.inactive]} onPress={()=>setTripConfirm(action)}>
@@ -283,6 +299,7 @@ const styles = StyleSheet.create({
   spotlightArrow:{height:35,width:35,borderRadius:18,backgroundColor:'#fff7db',alignItems:'center',justifyContent:'center'},
   spotlightArrowText:{fontSize:29,fontWeight:'700',color:'#715c2b'},
   navIcon:{fontSize:19,fontWeight:'800',color:'#51617a'},
+  navigationRow:{flexDirection:'row',gap:10},navigationButton:{flex:1,backgroundColor:'#eaf0fb',borderRadius:13,paddingVertical:14,paddingHorizontal:6,alignItems:'center'},navigationText:{fontSize:13,fontWeight:'800',color:'#18376a'},
   shareBanner:{backgroundColor:'#fff',borderRadius:18,padding:17,borderWidth:1,borderColor:'#e5e9f1',flexDirection:'row',alignItems:'center',gap:12},shareOverline:{fontSize:10,fontWeight:'900',color:'#aa7908',letterSpacing:1},shareTitle:{fontSize:17,fontWeight:'900',color:'#151d30',marginTop:4},shareSubtitle:{fontSize:12,color:'#64748b',marginTop:3},qrBadge:{width:54,height:54,borderRadius:14,backgroundColor:'#fef3c7',alignItems:'center',justifyContent:'center'},qrBadgeText:{fontSize:35,color:'#111a30'},tripMeta:{fontSize:12,color:'#64748b',marginBottom:8},historyCard:{padding:14,backgroundColor:'#fff',borderWidth:1,borderColor:'#e5e9f1',borderRadius:14,flexDirection:'row'},historyStatus:{fontSize:10,color:'#64748b',fontWeight:'800'},historyRoute:{color:'#111827',fontWeight:'700',fontSize:13,marginTop:6},modalBackdrop:{flex:1,backgroundColor:'rgba(9,16,30,.7)',justifyContent:'flex-end'},modalCard:{backgroundColor:'#fff',padding:25,borderTopLeftRadius:26,borderTopRightRadius:26,gap:14,alignItems:'stretch'},modalTitle:{fontWeight:'900',fontSize:23,color:'#111827'},qrPanel:{alignItems:'center',padding:20,backgroundColor:'#fff',borderRadius:18},qrUrl:{textAlign:'center',color:'#34415a',fontSize:13,fontWeight:'700'},
   page:{flex:1,backgroundColor:'#f3f5f9'},content:{paddingHorizontal:18,paddingVertical:22,gap:12,flexGrow:1},
   heading:{fontSize:14,fontWeight:'800',color:'#64748b',textTransform:'uppercase',letterSpacing:1,marginTop:20},
