@@ -32,6 +32,7 @@ export default function App() {
   const [actionBusy, setActionBusy] = useState(false)
   const [qrOpen,setQrOpen] = useState(false)
   const [tripOpen,setTripOpen] = useState(false)
+  const [confirmRescueId,setConfirmRescueId]=useState<string|null>(null)
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
   const seenBookingIds=useRef<Set<string>|null>(null)
@@ -72,6 +73,23 @@ export default function App() {
       if(action==='complete_trip')setTripOpen(false)
     }catch(e){setActionMessage(e instanceof Error?e.message:'Update failed')}
     finally{setActionBusy(false);setTripConfirm(null)}
+  }
+  async function acceptRescue(rescueRequestId:string) {
+    if (!company || demo || !mobileActionsEnabled() || actionBusy) return
+    const offer=rescueOffers.find(o=>o.rescue_request_id===rescueRequestId && o.status==='pending')
+    if(!offer?.expires_at || Date.parse(offer.expires_at)<=Date.now()) {
+      setActionMessage('This rescue offer has expired. Please refresh.')
+      setConfirmRescueId(null);return
+    }
+    setActionBusy(true);setActionMessage('')
+    try {
+      const result=await sendOperatorAction('https://www.taxio.be',company.id,{action:'accept',companyId:company.id,rescueRequestId})
+      if(!result.ok) throw Error(result.error || result.code || 'Rescue no longer available')
+      setRescueOffers(await readCompanyRescueOffers(company.id))
+      setActionMessage('Rescue claimed. Await passenger confirmation before accessing passenger details.')
+      setScreen('rescue')
+    } catch(e) {setActionMessage(e instanceof Error?e.message:'Unable to claim rescue')}
+    finally{setActionBusy(false);setConfirmRescueId(null)}
   }
   async function acceptBooking(id: string) {
     if (!company || demo || !mobileActionsEnabled() || actionBusy) return
@@ -243,7 +261,11 @@ export default function App() {
           <Text style={styles.section}>Rescue</Text>
           {rescueOffers.filter(o=>o.status==='pending' && !!o.expires_at && Date.parse(o.expires_at)>Date.now()).length ?
             rescueOffers.filter(o=>o.status==='pending' && !!o.expires_at && Date.parse(o.expires_at)>Date.now()).map(o=>
-              <View key={o.id} style={styles.card}><Text style={styles.status}>RESCUE OFFER · EXPIRES {formatTripDate(o.expires_at)}</Text><Text style={styles.route}>{o.rescue?.preview_pickup_label||'Pickup unavailable'} → {o.rescue?.preview_dropoff_label||'Destination unavailable'}</Text><Text style={styles.note}>Acceptance will be enabled only after secure API testing. Server deadline is authoritative.</Text></View>)
+              <View key={o.id} style={styles.card}><Text style={styles.status}>RESCUE OFFER · EXPIRES {formatTripDate(o.expires_at)}</Text><Text style={styles.route}>{o.rescue?.preview_pickup_label||'Pickup unavailable'} → {o.rescue?.preview_dropoff_label||'Destination unavailable'}</Text><Text style={styles.note}>Server deadline is authoritative. Passenger details remain locked until confirmation.</Text>
+              {!demo&&mobileActionsEnabled()?confirmRescueId===o.rescue_request_id ?
+              <View style={styles.card}><Text style={styles.note}>Claim this live rescue offer?</Text><TouchableOpacity style={styles.primary} disabled={actionBusy} onPress={()=>acceptRescue(o.rescue_request_id)}><Text style={styles.primaryText}>{actionBusy?'Claiming…':'Confirm rescue'}</Text></TouchableOpacity><TouchableOpacity style={styles.secondary} onPress={()=>setConfirmRescueId(null)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View>:
+              <TouchableOpacity style={styles.primary} onPress={()=>setConfirmRescueId(o.rescue_request_id)}><Text style={styles.primaryText}>Accept rescue</Text></TouchableOpacity>:null}
+              </View>)
             :<View style={styles.card}><Text style={styles.route}>No active rescue offers</Text><Text style={styles.note}>Eligible company offers will appear here automatically while the app is open.</Text></View>}
         </> : <>
           <Text style={styles.section}>Current Trip</Text>
