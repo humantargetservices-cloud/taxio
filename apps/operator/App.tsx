@@ -2,7 +2,7 @@ import QRCode from 'react-native-qrcode-svg'
 import { sendOperatorAction, mobileActionsEnabled } from './src/operatorActions'
 import React, { useEffect, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Image, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal, Share, RefreshControl, AppState } from 'react-native'
-import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, type OperatorCompany } from './src/backend'
+import { integrationConfigured, operatorDb, loginOperator, resolveOperatorCompany, readCompanyBookings, restoreOperatorCompany, readCompanyRescueOffers, type RescueOffer, type OperatorCompany } from './src/backend'
 
 type Booking = { id: string; pickup_address: string; dropoff_address: string; status: string; booking_reference?: string | null; decision_deadline_at?: string | null; created_at?: string | null; ride_datetime?: string | null; customer_name?: string | null }
 type Screen = 'bookings' | 'rescue' | 'trip'
@@ -16,6 +16,7 @@ export default function App() {
   const [password, setPassword] = useState('')
   const [company, setCompany] = useState<OperatorCompany | null>(null)
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [rescueOffers,setRescueOffers] = useState<RescueOffer[]>([])
   const [demo, setDemo] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -34,7 +35,7 @@ export default function App() {
   async function refreshBookings() {
     if (!company || demo || refreshing) return
     setRefreshing(true)
-    try { setBookings(await readCompanyBookings(company.id)); setActionMessage('Bookings updated') }
+    try { setBookings(await readCompanyBookings(company.id));setRescueOffers(await readCompanyRescueOffers(company.id)); setActionMessage('Bookings updated') }
     catch(e) {setActionMessage(e instanceof Error ? e.message : 'Unable to refresh bookings')}
     finally{setRefreshing(false)}
   }
@@ -75,7 +76,7 @@ export default function App() {
         const existing = await restoreOperatorCompany()
         if (existing && active) {
           const rows = await readCompanyBookings(existing.id)
-          if (active) {setCompany(existing);setBookings(rows);setDemo(false)}
+          if (active) {setCompany(existing);setBookings(rows);setDemo(false);try{setRescueOffers(await readCompanyRescueOffers(existing.id))}catch{/* rescue access may be unavailable */}}
         }
       } catch { /* Show login; never grant access without verified session. */ }
       finally {if(active)setRestoring(false)}
@@ -88,7 +89,7 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
-      try {const rows=await readCompanyBookings(company.id);if(active)setBookings(rows)}
+      try {const rows=await readCompanyBookings(company.id);if(active){setBookings(rows);try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch {/* Manual refresh exposes network errors. */}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
@@ -106,6 +107,7 @@ export default function App() {
       const rows = await readCompanyBookings(ownerCompany.id)
       setCompany(ownerCompany)
       setBookings(rows)
+      try{setRescueOffers(await readCompanyRescueOffers(ownerCompany.id))}catch{/* rescue access may be unavailable */}
       setDemo(false)
       setPassword('')
     } catch (e) {
@@ -116,7 +118,7 @@ export default function App() {
 
   async function signOut() {
     if (!demo) await operatorDb?.auth.signOut()
-    setCompany(null); setBookings([]); setDemo(false); setScreen('bookings')
+    setCompany(null); setBookings([]);setRescueOffers([]); setDemo(false); setScreen('bookings')
   }
 
   const myBookings = bookings.filter(b => b.status === 'new' || b.status === 'accepted')
@@ -174,7 +176,7 @@ export default function App() {
           </TouchableOpacity>
           <TouchableOpacity style={styles.metric} onPress={() => setScreen('rescue')}>
             <View style={styles.metricIcon}><Text style={styles.metricGlyph}>↗</Text></View>
-            <Text style={styles.metricNumber}>—</Text><Text style={styles.metricLabel}>Rescue</Text>
+            <Text style={styles.metricNumber}>{rescueOffers.filter(o=>o.status==='pending'&&!!o.expires_at&&Date.parse(o.expires_at)>Date.now()).length}</Text><Text style={styles.metricLabel}>Rescue</Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity style={styles.spotlight} onPress={() => currentTrip ? setTripOpen(true) : setScreen('bookings')}>
@@ -211,7 +213,10 @@ export default function App() {
           {historyBookings.length?historyBookings.slice(0,12).map(b=><View key={b.id} style={styles.historyCard}><View style={{flex:1}}><Text style={styles.historyStatus}>{b.status.toUpperCase()} · {formatTripDate(b.ride_datetime || b.created_at)}</Text><Text style={styles.historyRoute} numberOfLines={2}>{b.pickup_address} → {b.dropoff_address}</Text></View></View>):<Text style={styles.note}>No previous bookings.</Text>}
         </> : screen==='rescue' ? <>
           <Text style={styles.section}>Rescue</Text>
-          <View style={styles.card}><Text style={styles.route}>No rescue offers available</Text><Text style={styles.note}>When connected, offers eligible for your company will appear here with an actual server deadline. The app will not invent sample offers.</Text></View>
+          {rescueOffers.filter(o=>o.status==='pending' && !!o.expires_at && Date.parse(o.expires_at)>Date.now()).length ?
+            rescueOffers.filter(o=>o.status==='pending' && !!o.expires_at && Date.parse(o.expires_at)>Date.now()).map(o=>
+              <View key={o.id} style={styles.card}><Text style={styles.status}>RESCUE OFFER · EXPIRES {formatTripDate(o.expires_at)}</Text><Text style={styles.route}>{o.rescue?.preview_pickup_label||'Pickup unavailable'} → {o.rescue?.preview_dropoff_label||'Destination unavailable'}</Text><Text style={styles.note}>Acceptance will be enabled only after secure API testing. Server deadline is authoritative.</Text></View>)
+            :<View style={styles.card}><Text style={styles.route}>No active rescue offers</Text><Text style={styles.note}>Eligible company offers will appear here automatically while the app is open.</Text></View>}
         </> : <>
           <Text style={styles.section}>Current Trip</Text>
           <Text style={styles.subtitle}>Your active journey at a glance</Text>
