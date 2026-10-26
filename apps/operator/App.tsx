@@ -207,7 +207,7 @@ export default function App() {
           <View style={styles.heroSeparator}/>
           <View style={styles.heroBottom}>
             <View style={{flex:1}}><Text style={styles.heroStatusTitle}>Company workspace</Text><Text style={styles.heroStatusSub}>Availability is managed on the web dashboard</Text></View>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Availability is managed through TAXIO web dashboard" disabled style={[styles.heroAvailability,styles.heroOffline]}}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Availability is managed through TAXIO web dashboard" disabled style={[styles.heroAvailability,styles.heroOffline]}>
               <Text style={styles.heroAvailabilityText}>STATUS: WEB</Text>
             </TouchableOpacity>
           </View>
