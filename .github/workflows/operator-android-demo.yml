@@ -32,15 +32,15 @@ jobs:
         run: npx tsc --noEmit
       - name: Generate Android project offline (no remote TAXIO backend)
         run: npx expo prebuild --platform android --no-install
-      - name: Build Android debug APK
+      - name: Build standalone Android release APK
         run: |
           chmod +x android/gradlew
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
       - name: Upload installable demo APK
         uses: actions/upload-artifact@v4
         with:
           name: taxio-operator-offline-demo-apk
-          path: apps/operator/android/app/build/outputs/apk/debug/app-debug.apk
+          path: apps/operator/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 7
