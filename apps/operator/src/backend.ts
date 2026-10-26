@@ -32,7 +32,7 @@ export async function resolveOperatorCompany(userId: string): Promise<OperatorCo
 export async function readCompanyBookings(companyId: string) {
   if (!operatorDb) throw Error('Integration is not configured')
   const { data, error } = await operatorDb.from('booking_requests')
-    .select('id,booking_reference,pickup_address,dropoff_address,status,ride_datetime,decision_deadline_at,created_at,customer_name,completed_at')
+    .select('id,booking_reference,pickup_address,dropoff_address,status,ride_datetime,decision_deadline_at,created_at,customer_name,completed_at,driver_pickup_status,estimated_price_eur,customer_phone')
     .eq('company_id',companyId).neq('status','draft').order('created_at',{ascending:false}).limit(100)
   if(error) throw Error('Bookings unavailable or permission denied')
   return data || []
