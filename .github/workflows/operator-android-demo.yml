@@ -6,6 +6,7 @@ on:
       - 'apps/operator/**'
       - 'api/rescue.js'
       - 'scripts/test_operator_accept_guard.mjs'
+      - 'scripts/test_operator_notification_guard.mjs'
       - '.github/workflows/operator-android-demo.yml'
   workflow_dispatch:
 
@@ -40,6 +41,8 @@ jobs:
           fi
       - name: Check server acceptance guard
         run: node --test ../../scripts/test_operator_accept_guard.mjs
+      - name: Verify notification deduplication
+        run: node --test ../../scripts/test_operator_notification_guard.mjs
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
       - name: Verify client-only release policy
