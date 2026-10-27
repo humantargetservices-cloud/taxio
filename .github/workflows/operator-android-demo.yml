@@ -38,6 +38,12 @@ jobs:
         run: node --test ../../scripts/test_operator_accept_guard.mjs
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
+      - name: Verify client-only release policy
+        run: |
+          if grep -R -n -E 'service_role|SUPABASE_SERVICE_ROLE|EXPO_PUBLIC_ENABLE_LIVE_ACTIONS[[:space:]]*=[[:space:]]*true' src App.tsx; then
+            echo 'Disallowed secret or live-action flag found in client source'
+            exit 1
+          fi
       - name: Validate TypeScript
         env:
           EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
