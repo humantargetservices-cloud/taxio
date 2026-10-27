@@ -110,6 +110,7 @@ export default function App() {
       setBookings(await readCompanyBookings(company.id))
       setScreen('trip')
       setActionMessage('Booking accepted by TAXIO server.')
+      setTripOpen(true)
     } catch(e) {setActionMessage(e instanceof Error?e.message:'Unable to accept trip')} finally {setActionBusy(false);setConfirmBookingId(null)}
   }
 
