@@ -37,6 +37,7 @@ export default function App() {
   const [tripConfirm,setTripConfirm] = useState<'mark_on_way'|'mark_arrived'|'complete_trip'|null>(null)
   const [refreshing,setRefreshing] = useState(false)
   const seenOfferKeys=useRef<Set<string>|null>(null)
+  const syncInFlight=useRef(false)
   const [incomingTrip,setIncomingTrip]=useState<Booking|null>(null)
   const [selectedBookingId,setSelectedBookingId]=useState<string|null>(null)
   const [clockNow,setClockNow]=useState(Date.now())
@@ -134,8 +135,11 @@ export default function App() {
     if (!company || demo) return
     let active = true
     const update = async () => {
+      if(syncInFlight.current) return
+      syncInFlight.current=true
       try {setSyncError('');const rows=await readCompanyBookings(company.id);if(active){const ids=new Set(rows.filter(b=>b.status==='new'&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()).map(b=>b.id+':'+b.decision_deadline_at));const incoming=seenOfferKeys.current===null?null:rows.find(b=>b.status==='new'&&!b.completed_at&&!!b.decision_deadline_at&&Date.parse(b.decision_deadline_at)>Date.now()&&!seenOfferKeys.current?.has(b.id+':'+b.decision_deadline_at));seenOfferKeys.current=ids;setBookings(rows);if(incoming){setScreen('bookings');setSelectedBookingId(incoming.id);setIncomingTrip(incoming);}try{setRescueOffers(await readCompanyRescueOffers(company.id))}catch{/* permission may not allow rescue */}}}
       catch(e) {if(active)setSyncError(e instanceof Error?e.message:'Unable to synchronize bookings')}
+      finally {syncInFlight.current=false}
     }
     const timer=setInterval(()=>{if(AppState.currentState==='active')void update()},10000)
     const realtime=operatorDb?.channel('operator-'+company.id)
