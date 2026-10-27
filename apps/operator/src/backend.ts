@@ -31,11 +31,26 @@ export async function resolveOperatorCompany(userId: string): Promise<OperatorCo
 }
 export async function readCompanyBookings(companyId: string) {
   if (!operatorDb) throw Error('Integration is not configured')
-  const { data, error } = await operatorDb.from('booking_requests')
-    .select('id,booking_reference,pickup_address,dropoff_address,status,ride_datetime,decision_deadline_at,created_at,customer_name,completed_at,driver_pickup_status,estimated_price_eur,customer_phone')
-    .eq('company_id',companyId).neq('status','draft').order('created_at',{ascending:false}).limit(100)
-  if(error) throw Error('Bookings unavailable or permission denied')
-  return data || []
+  const columns='id,booking_reference,pickup_address,dropoff_address,status,ride_datetime,decision_deadline_at,created_at,customer_name,completed_at,driver_pickup_status,estimated_price_eur,customer_phone'
+  // Fetch accepted and new records independently: a busy company's history
+  // must not push an active booking beyond a single global LIMIT 100.
+  const [active, newRequests, history] = await Promise.all([
+    operatorDb.from('booking_requests').select(columns)
+      .eq('company_id',companyId).eq('status','accepted').is('completed_at',null)
+      .order('created_at',{ascending:false}).limit(100),
+    operatorDb.from('booking_requests').select(columns)
+      .eq('company_id',companyId).eq('status','new')
+      .order('created_at',{ascending:false}).limit(100),
+    operatorDb.from('booking_requests').select(columns)
+      .eq('company_id',companyId).neq('status','draft')
+      .order('created_at',{ascending:false}).limit(50),
+  ])
+  if (active.error || newRequests.error || history.error)
+    throw Error('Bookings unavailable or permission denied')
+  const byId=new Map<string,(typeof active.data)[number]>()
+  for(const row of [...(history.data||[]),...(newRequests.data||[]),...(active.data||[])]) byId.set(row.id,row)
+  return Array.from(byId.values()).sort((a,b)=>
+    Date.parse(b.created_at||'')-Date.parse(a.created_at||''))
 }
 // Intentionally NO booking writes or rescue RPC calls.
 // Integration requires verified role permissions and owner approval before any production use.
