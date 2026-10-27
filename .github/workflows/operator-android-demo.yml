@@ -9,6 +9,10 @@ on:
       - '.github/workflows/operator-android-demo.yml'
   workflow_dispatch:
 
+concurrency:
+  group: taxio-operator-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
