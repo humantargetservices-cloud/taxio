@@ -296,7 +296,7 @@ export default function App() {
         <Text style={styles.incomingRoute} numberOfLines={2}>{incomingTrip?.pickup_address||'Pickup'} → {incomingTrip?.dropoff_address||'Destination'}</Text>
         {incomingTrip?.estimated_price_eur!=null?<Text style={styles.incomingPrice}>Trip price: €{Number(incomingTrip.estimated_price_eur).toFixed(2)}</Text>:<Text style={styles.incomingPriceMissing}>Price not available — review booking details</Text>}
         <Text style={styles.incomingWhen}>When: {formatTripDate(incomingTrip?.ride_datetime || incomingTrip?.created_at)}</Text>
-        <View style={styles.incomingTrack}><View style={[styles.incomingProgress,{width:incomingTrip?.decision_deadline_at ? `${Math.max(0,Math.min(100,(Date.parse(incomingTrip.decision_deadline_at)-clockNow)/45000*100))}%`:'0%'}]}/></View>
+        <View style={styles.incomingTrack}><View style={[styles.incomingProgress,{width:incomingTrip?.decision_deadline_at ? `${Math.max(0,Math.min(100,(Date.parse(incomingTrip.decision_deadline_at)-clockNow)/45000*100))}%` as `${number}%`:'0%'}]}/></View>
         <Text style={styles.incomingCountdown}>{incomingTrip?.decision_deadline_at && Date.parse(incomingTrip.decision_deadline_at)>clockNow ? `${Math.ceil((Date.parse(incomingTrip.decision_deadline_at)-clockNow)/1000)}s`:'Offer expired'}</Text>
         {incomingTrip && !demo && mobileActionsEnabled() && !!incomingTrip.decision_deadline_at && Date.parse(incomingTrip.decision_deadline_at)>clockNow ?
           <TouchableOpacity style={styles.incomingAccept} disabled={actionBusy} onPress={()=>{const id=incomingTrip.id;setIncomingTrip(null);setConfirmBookingId(id);setScreen('bookings')}}><Text style={styles.incomingAcceptText}>Accept trip</Text></TouchableOpacity> :
