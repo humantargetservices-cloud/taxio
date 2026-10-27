@@ -287,16 +287,17 @@ export default function App() {
       </>}
     </ScrollView>
     <Modal visible={!!incomingTrip} transparent animationType="slide" onRequestClose={()=>setIncomingTrip(null)}>
-      <View style={styles.modalBackdrop}><View style={styles.modalCard}>
-        <View style={styles.cardHeader}><Text style={styles.modalTitle}>Incoming trip</Text><TouchableOpacity onPress={()=>setIncomingTrip(null)}><Text style={styles.secondaryText}>Close ✕</Text></TouchableOpacity></View>
-        <Text style={styles.tripMeta}>{incomingTrip?.customer_name||'New passenger'} · {formatTripDate(incomingTrip?.ride_datetime)}</Text>
-        <View style={styles.card}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{incomingTrip?.pickup_address||''}</Text></View>
-        <View style={styles.card}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{incomingTrip?.dropoff_address||''}</Text></View>
-        <Text style={styles.note}>{incomingTrip?.decision_deadline_at && Date.parse(incomingTrip.decision_deadline_at)>clockNow ? `Offer expires in ${Math.ceil((Date.parse(incomingTrip.decision_deadline_at)-clockNow)/1000)} seconds`:'This booking has no active acceptance deadline. It may be historical or not yet activated.'}</Text>
+      <View style={styles.modalBackdrop}><View style={styles.incomingCard}>
+        <View style={styles.cardHeader}><Text style={styles.incomingEyebrow}>NEW TAXIO TRIP</Text><TouchableOpacity accessibilityLabel="Dismiss incoming offer" onPress={()=>setIncomingTrip(null)}><Text style={styles.incomingClose}>✕</Text></TouchableOpacity></View>
+        <Text style={styles.incomingRoute} numberOfLines={2}>{incomingTrip?.pickup_address||'Pickup'} → {incomingTrip?.dropoff_address||'Destination'}</Text>
+        {incomingTrip?.estimated_price_eur!=null?<Text style={styles.incomingPrice}>Trip price: €{Number(incomingTrip.estimated_price_eur).toFixed(2)}</Text>:<Text style={styles.incomingPriceMissing}>Price not available — review booking details</Text>}
+        <Text style={styles.incomingWhen}>When: {formatTripDate(incomingTrip?.ride_datetime || incomingTrip?.created_at)}</Text>
+        <View style={styles.incomingTrack}><View style={[styles.incomingProgress,{width:incomingTrip?.decision_deadline_at ? `${Math.max(0,Math.min(100,(Date.parse(incomingTrip.decision_deadline_at)-clockNow)/45000*100))}%`:'0%'}]}/></View>
+        <Text style={styles.incomingCountdown}>{incomingTrip?.decision_deadline_at && Date.parse(incomingTrip.decision_deadline_at)>clockNow ? `${Math.ceil((Date.parse(incomingTrip.decision_deadline_at)-clockNow)/1000)}s`:'Offer expired'}</Text>
         {incomingTrip && !demo && mobileActionsEnabled() && !!incomingTrip.decision_deadline_at && Date.parse(incomingTrip.decision_deadline_at)>clockNow ?
-          <TouchableOpacity style={styles.primary} onPress={()=>{setIncomingTrip(null);setConfirmBookingId(incomingTrip.id);setScreen('bookings')}}><Text style={styles.primaryText}>Review & accept</Text></TouchableOpacity> :
-          <TouchableOpacity style={styles.secondary} onPress={()=>{setIncomingTrip(null);setScreen('bookings')}}><Text style={styles.secondaryText}>View in My Bookings</Text></TouchableOpacity>}
-        <TouchableOpacity style={styles.secondary} onPress={()=>setIncomingTrip(null)}><Text style={styles.secondaryText}>Dismiss</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.incomingAccept} disabled={actionBusy} onPress={()=>{const id=incomingTrip.id;setIncomingTrip(null);setConfirmBookingId(id);setScreen('bookings')}}><Text style={styles.incomingAcceptText}>Accept trip</Text></TouchableOpacity> :
+          <><View style={[styles.incomingAccept,styles.incomingDisabled]}><Text style={styles.incomingAcceptText}>{incomingTrip?.decision_deadline_at&&Date.parse(incomingTrip.decision_deadline_at)>clockNow?'Accept trip · pilot disabled':'Offer unavailable'}</Text></View><Text style={styles.incomingInfo}>{mobileActionsEnabled()?'This offer cannot be accepted. Refresh for the latest status.':'Read-only pilot: live acceptance requires separately approved server integration.'}</Text></>}
+        <TouchableOpacity style={styles.incomingDetails} onPress={()=>{setIncomingTrip(null);setSelectedBookingId(incomingTrip?.id||null);setScreen('bookings')}}><Text style={styles.incomingDetailsText}>View booking details</Text></TouchableOpacity>
       </View></View>
     </Modal>
         <Modal visible={tripOpen} transparent animationType="slide" onRequestClose={()=>setTripOpen(false)}>
@@ -344,6 +345,22 @@ export default function App() {
 const styles = StyleSheet.create({
   // Driver-first dark palette inspired by the TAXIO web operator UI.
 
+  incomingCard:{backgroundColor:'#10192e',borderWidth:1,borderColor:'#73592d',borderRadius:23,padding:21,marginHorizontal:16,marginBottom:18,gap:13},
+  incomingEyebrow:{color:'#ffc642',fontSize:14,fontWeight:'900',letterSpacing:.6},
+  incomingClose:{color:'#e5e7eb',fontWeight:'800',fontSize:22},
+  incomingRoute:{color:'#f8fafc',fontSize:23,fontWeight:'900',lineHeight:30},
+  incomingPrice:{color:'#ffce55',fontSize:19,fontWeight:'900'},
+  incomingPriceMissing:{color:'#d1a84d',fontSize:14,fontWeight:'700'},
+  incomingWhen:{color:'#a8b7d0',fontSize:15},
+  incomingTrack:{height:11,borderRadius:20,backgroundColor:'#28364c',overflow:'hidden',marginTop:7},
+  incomingProgress:{height:11,borderRadius:20,backgroundColor:'#ffb900'},
+  incomingCountdown:{color:'#cbd5e1',textAlign:'center',fontWeight:'700',fontSize:15},
+  incomingAccept:{backgroundColor:'#ffb900',borderRadius:17,paddingVertical:19,alignItems:'center',justifyContent:'center',marginTop:4},
+  incomingAcceptText:{color:'#111827',fontWeight:'900',fontSize:19},
+  incomingDisabled:{opacity:.45},
+  incomingInfo:{color:'#94a3b8',fontSize:12,textAlign:'center'},
+  incomingDetails:{borderWidth:1,borderColor:'#50607a',borderRadius:15,paddingVertical:13,alignItems:'center'},
+  incomingDetailsText:{color:'#dbe4f3',fontWeight:'800'},
   fare:{fontSize:22,fontWeight:'900',color:'#ffcc4b'},pillOnWay:{color:'#65d8ff',backgroundColor:'#153b5d'},pillArrived:{color:'#d4b7ff',backgroundColor:'#42316b'},
   hero:{backgroundColor:'#111b32',padding:20,borderRadius:24,marginTop:4,gap:18},
   heroTop:{flexDirection:'row',gap:14,alignItems:'center'},
