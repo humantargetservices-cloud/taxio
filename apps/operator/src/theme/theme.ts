@@ -1,0 +1,16 @@
+export const theme = {
+  bg: '#070d1d',
+  card: '#121c32',
+  cardBorder: '#2b3851',
+  text: '#f8fafc',
+  muted: '#a5b5d0',
+  faint: '#64748b',
+  gold: '#f5c451',
+  goldText: '#111a30',
+  blue: '#087fca',
+  danger: '#f87171',
+  ok: '#86efac',
+  warn: '#fde68a',
+  input: '#ffffff',
+  inputText: '#111827',
+}
