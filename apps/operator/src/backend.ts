@@ -47,7 +47,7 @@ export async function readCompanyBookings(companyId: string) {
   ])
   if (active.error || newRequests.error || history.error)
     throw Error('Bookings unavailable or permission denied')
-  const byId=new Map<string,(typeof active.data)[number]>()
+  const byId=new Map<string,NonNullable<typeof active.data>[number]>()
   for(const row of [...(history.data||[]),...(newRequests.data||[]),...(active.data||[])]) byId.set(row.id,row)
   return Array.from(byId.values()).sort((a,b)=>
     Date.parse(b.created_at||'')-Date.parse(a.created_at||''))
