@@ -48,6 +48,8 @@ jobs:
             echo 'Disallowed secret or live-action flag found in client source'
             exit 1
           fi
+      - name: Check Expo package compatibility
+        run: npx expo install --check
       - name: Validate TypeScript
         env:
           EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
