@@ -8,6 +8,8 @@ on:
       - 'scripts/test_operator_accept_guard.mjs'
       - 'scripts/test_operator_notification_guard.mjs'
       - 'scripts/test_operator_booking_state.mjs'
+      - 'scripts/verify_operator_staging_env.mjs'
+      - 'scripts/verify_operator_apk.mjs'
       - '.github/workflows/operator-android-demo.yml'
   workflow_dispatch:
 
@@ -40,6 +42,12 @@ jobs:
             echo 'Live actions cannot be enabled in unverified pilot builds.'
             exit 1
           fi
+      - name: Require verified staging configuration
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.OPERATOR_STAGING_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.OPERATOR_STAGING_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_API_BASE_URL: ${{ secrets.OPERATOR_STAGING_API_BASE_URL }}
+        run: node ../../scripts/verify_operator_staging_env.mjs
       - name: Check server acceptance guard
         run: node --test ../../scripts/test_operator_accept_guard.mjs
       - name: Verify notification deduplication
@@ -58,22 +66,27 @@ jobs:
         run: npx expo install --check
       - name: Validate TypeScript
         env:
-          EXPO_PUBLIC_SUPABASE_URL: https://staging-not-configured.example
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: staging-publishable-key-not-set
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.OPERATOR_STAGING_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.OPERATOR_STAGING_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_API_BASE_URL: ${{ secrets.OPERATOR_STAGING_API_BASE_URL }}
         run: npx tsc --noEmit
       - name: Generate Android project
         env:
-          EXPO_PUBLIC_SUPABASE_URL: https://staging-not-configured.example
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: staging-publishable-key-not-set
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.OPERATOR_STAGING_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.OPERATOR_STAGING_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_API_BASE_URL: ${{ secrets.OPERATOR_STAGING_API_BASE_URL }}
         run: npx expo prebuild --platform android --no-install
       - name: Build standalone Android APK
         env:
-          EXPO_PUBLIC_SUPABASE_URL: https://staging-not-configured.example
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: staging-publishable-key-not-set
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.OPERATOR_STAGING_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.OPERATOR_STAGING_SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_API_BASE_URL: ${{ secrets.OPERATOR_STAGING_API_BASE_URL }}
         run: |
           chmod +x android/gradlew
           cd android
           ./gradlew assembleRelease --no-daemon
+      - name: Confirm APK uses staging and not production
+        run: node ../../scripts/verify_operator_apk.mjs android/app/build/outputs/apk/release/*.apk
       - name: Upload pilot APK
         uses: actions/upload-artifact@v4
         with:
