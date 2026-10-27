@@ -7,6 +7,7 @@ on:
       - 'api/rescue.js'
       - 'scripts/test_operator_accept_guard.mjs'
       - 'scripts/test_operator_notification_guard.mjs'
+      - 'scripts/test_operator_booking_state.mjs'
       - '.github/workflows/operator-android-demo.yml'
   workflow_dispatch:
 
@@ -28,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -43,6 +44,8 @@ jobs:
         run: node --test ../../scripts/test_operator_accept_guard.mjs
       - name: Verify notification deduplication
         run: node --test ../../scripts/test_operator_notification_guard.mjs
+      - name: Verify booking classification and production isolation
+        run: node --experimental-strip-types --test ../../scripts/test_operator_booking_state.mjs
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
       - name: Verify client-only release policy
@@ -55,18 +58,18 @@ jobs:
         run: npx expo install --check
       - name: Validate TypeScript
         env:
-          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
+          EXPO_PUBLIC_SUPABASE_URL: https://staging-not-configured.example
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: staging-publishable-key-not-set
         run: npx tsc --noEmit
       - name: Generate Android project
         env:
-          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
+          EXPO_PUBLIC_SUPABASE_URL: https://staging-not-configured.example
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: staging-publishable-key-not-set
         run: npx expo prebuild --platform android --no-install
       - name: Build standalone Android APK
         env:
-          EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
-          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
+          EXPO_PUBLIC_SUPABASE_URL: https://staging-not-configured.example
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: staging-publishable-key-not-set
         run: |
           chmod +x android/gradlew
           cd android

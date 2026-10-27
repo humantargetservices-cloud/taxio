@@ -1,13 +1,15 @@
 import 'react-native-url-polyfill/auto'
 import * as SecureStore from 'expo-secure-store'
 import { createClient, type Session } from '@supabase/supabase-js'
+import { isolatedValue } from './utils/environment'
 
-// No defaults: neither staging nor production is accessed unless explicitly configured.
+// No defaults. Production hosts are refused so a dev build cannot read taxio.be data.
 // EXPO_PUBLIC_ values are public and MUST NEVER contain service-role credentials.
-const url = process.env.EXPO_PUBLIC_SUPABASE_URL || ''
+const supabaseTarget = isolatedValue(process.env.EXPO_PUBLIC_SUPABASE_URL)
 const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || ''
-export const integrationConfigured = Boolean(url && key)
-export const operatorDb = integrationConfigured ? createClient(url, key, {
+export const productionTargetBlocked = supabaseTarget.blocked
+export const integrationConfigured = Boolean(supabaseTarget.value && key && !supabaseTarget.blocked)
+export const operatorDb = integrationConfigured ? createClient(supabaseTarget.value, key, {
   auth: { storage: { getItem: (k: string) => SecureStore.getItemAsync(k), setItem: (k: string,v: string) => SecureStore.setItemAsync(k,v), removeItem: (k: string) => SecureStore.deleteItemAsync(k) }, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
 }) : null
 
@@ -29,26 +31,47 @@ export async function resolveOperatorCompany(userId: string): Promise<OperatorCo
   if (!data || data.length !== 1) throw Error('Expected one approved company for this operator')
   return data[0] as OperatorCompany
 }
-export async function readCompanyBookings(companyId: string) {
+export type CompanyBooking = {
+  id: string
+  status: string
+  booking_reference?: string | null
+  pickup_address?: string | null
+  dropoff_address?: string | null
+  ride_datetime?: string | null
+  decision_deadline_at?: string | null
+  created_at?: string | null
+  customer_name?: string | null
+  completed_at?: string | null
+  driver_pickup_status?: string | null
+  completion_confirmation_status?: string | null
+  estimated_price_eur?: number | null
+  car_type?: string | null
+  service_type?: string | null
+  customer_phone?: string | null
+}
+export async function readCompanyBookings(companyId: string): Promise<CompanyBooking[]> {
   if (!operatorDb) throw Error('Integration is not configured')
-  const columns='id,booking_reference,pickup_address,dropoff_address,status,ride_datetime,decision_deadline_at,created_at,customer_name,completed_at,driver_pickup_status,estimated_price_eur,customer_phone'
+  const shared='id,booking_reference,pickup_address,dropoff_address,status,ride_datetime,decision_deadline_at,created_at,customer_name,completed_at,driver_pickup_status,completion_confirmation_status,estimated_price_eur,car_type,service_type'
+  const acceptedColumns=shared+',customer_phone'
   // Fetch accepted and new records independently: a busy company's history
   // must not push an active booking beyond a single global LIMIT 100.
+  // Passenger phone is loaded only for accepted trips.
   const [active, newRequests, history] = await Promise.all([
-    operatorDb.from('booking_requests').select(columns)
+    operatorDb.from('booking_requests').select(acceptedColumns)
       .eq('company_id',companyId).eq('status','accepted').is('completed_at',null)
       .order('created_at',{ascending:false}).limit(100),
-    operatorDb.from('booking_requests').select(columns)
+    operatorDb.from('booking_requests').select(shared)
       .eq('company_id',companyId).eq('status','new')
       .order('created_at',{ascending:false}).limit(100),
-    operatorDb.from('booking_requests').select(columns)
+    operatorDb.from('booking_requests').select(shared)
       .eq('company_id',companyId).neq('status','draft')
       .order('created_at',{ascending:false}).limit(50),
   ])
   if (active.error || newRequests.error || history.error)
     throw Error('Bookings unavailable or permission denied')
-  const byId=new Map<string,NonNullable<typeof active.data>[number]>()
-  for(const row of [...(history.data||[]),...(newRequests.data||[]),...(active.data||[])]) byId.set(row.id,row)
+  const rows = [...(history.data||[]),...(newRequests.data||[]),...(active.data||[])] as CompanyBooking[]
+  const byId=new Map<string,CompanyBooking>()
+  for(const row of rows) byId.set(row.id,row)
   return Array.from(byId.values()).sort((a,b)=>
     Date.parse(b.created_at||'')-Date.parse(a.created_at||''))
 }

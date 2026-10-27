@@ -1,4 +1,5 @@
 import { operatorDb } from './backend'
+import { apiBaseUrl, liveActionsEnabled } from './utils/environment'
 
 /** Never ship mobile service-role secrets. All trip decisions are authorized by TAXIO's server. */
 export type OperatorAction =
@@ -9,18 +10,18 @@ export type OperatorAction =
 
 export type OperatorActionResult = { ok: boolean; code?: string; error?: string }
 
-/** This remains off until the operator approves production integration and access tests pass. */
-const ACTIONS_ENABLED = process.env.EXPO_PUBLIC_ENABLE_LIVE_ACTIONS === 'true'
+/** Off unless an isolated staging API is configured and the explicit flag is set. Production hosts are refused. */
+const ACTIONS_ENABLED = liveActionsEnabled()
 
 export function mobileActionsEnabled(): boolean { return ACTIONS_ENABLED }
 
 export async function sendOperatorAction(
-  apiBaseUrl: string,
   companyId: string,
   payload: OperatorAction
 ): Promise<OperatorActionResult> {
-  if (!ACTIONS_ENABLED) return { ok: false, code: 'NOT_ENABLED', error: 'Live driver actions require explicit approval.' }
-  if (!operatorDb || !apiBaseUrl.startsWith('https://') || !companyId || payload.companyId !== companyId)
+  const base = apiBaseUrl()
+  if (!ACTIONS_ENABLED) return { ok: false, code: 'NOT_ENABLED', error: 'Live driver actions require an isolated staging API and explicit approval.' }
+  if (!operatorDb || !base.startsWith('https://') || !companyId || payload.companyId !== companyId)
     return { ok: false, code: 'INVALID_CONTEXT' }
   const { data, error: sessionErr } = await operatorDb.auth.getSession()
   if (sessionErr || !data.session?.access_token) return { ok: false, code: 'SESSION_EXPIRED' }
@@ -30,7 +31,7 @@ export async function sendOperatorAction(
     if (refreshed.error || !refreshed.data.session) return { ok: false, code: 'SESSION_EXPIRED' }
     session = refreshed.data.session
   }
-  const post = (token:string) => fetch(apiBaseUrl.replace(/\/$/, '') + '/api/rescue', {
+  const post = (token:string) => fetch(base + '/api/rescue', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
     body: JSON.stringify(payload),
