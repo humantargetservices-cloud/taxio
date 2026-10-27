@@ -36,8 +36,14 @@ for (let n = 0; n < count; n += 1) {
   cursor += 46 + nameLen + extraLen + commentLen
 }
 const haystack = Buffer.concat(chunks)
-const required = ['lyjicuuyrvblbsqlduqg.supabase.co', 'staging.taxio.be']
-const forbidden = ['gdiamipqrhxbmrcsnqdk', 'www.taxio.be', 'https://taxio.be', 'staging-not-configured.example']
+const required = ['lyjicuuyrvblbsqlduqg.supabase.co', 'https://staging.taxio.be']
+// Bare production hostnames are present in the client blocklist. A connection uses the URL.
+const forbidden = [
+  'https://gdiamipqrhxbmrcsnqdk.supabase.co',
+  'https://www.taxio.be',
+  'https://taxio.be',
+  'staging-not-configured.example',
+]
 const missing = required.filter((value) => !haystack.includes(Buffer.from(value)))
 const forbiddenPresent = forbidden.filter((value) => haystack.includes(Buffer.from(value)))
 console.log(JSON.stringify({ apkBytes: apk.length, entries: count, missing, forbiddenPresent }))
