@@ -11,6 +11,7 @@ type Options = {
   onBookings: (rows: SyncBooking[]) => void
   onRescue: (rows: RescueOffer[]) => void
   onIncoming: (booking: SyncBooking) => void
+  onAvailability?: (status: string) => void
   onError: (message: string) => void
 }
 
@@ -37,6 +38,8 @@ export function useOfferSync(options: Options) {
           seenOfferKeys.current = ids
           optionsRef.current.onBookings(rows)
           if (incoming) optionsRef.current.onIncoming(incoming)
+          const company = await operatorDb?.from('companies').select('availability_status').eq('id', optionsRef.current.companyId || '').maybeSingle()
+          if (company?.data?.availability_status) optionsRef.current.onAvailability?.(company.data.availability_status)
           try { optionsRef.current.onRescue(await readCompanyRescueOffers(optionsRef.current.companyId || '')) }
           catch { /* rescue permission may be unavailable */ }
         }

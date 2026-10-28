@@ -1,32 +1,36 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import * as Notifications from 'expo-notifications'
-import { Alert, Image, Linking, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native'
+import { Image, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import QRCode from 'react-native-qrcode-svg'
-import { type CompanyBooking, type RescueOffer } from '../backend'
+import { readCompanyBookings, readCompanyRescueOffers, setCompanyAvailability, type CompanyBooking, type RescueOffer } from '../backend'
+import { FullScreenRequest } from '../components/FullScreenRequest'
 import { IncomingOffer } from '../components/IncomingOffer'
 import { RouteDetails } from '../components/RouteDetails'
-import { StatusBadge } from '../components/StatusBadge'
+import { TripDetail } from '../components/TripDetail'
 import { TabBar, type DriverTab } from '../components/TabBar'
 import { useOfferSync } from '../hooks/useOfferSync'
-import { theme } from '../theme/theme'
-import { classifyBooking, isActionableOffer, isActionableRescue, secondsRemaining } from '../utils/bookingState'
-import { bookingHost } from '../utils/environment'
-import { navigationUrl } from '../utils/navigation'
 import { mobileActionsEnabled, sendOperatorAction } from '../operatorActions'
-import { setCompanyAvailability } from '../backend'
+import { theme } from '../theme/theme'
+import { isActionableOffer, isActionableRescue } from '../utils/bookingState'
+import { bookingHost } from '../utils/environment'
+import {
+  availabilityFromControls,
+  controlsFromAvailability,
+  currentTrip,
+  earningsBetween,
+  euro,
+  localDateKey,
+  localDayBounds,
+  nextScheduled,
+  pageOf,
+  scheduleLabel,
+  sortActiveTrips,
+  trailingWindow,
+  tripsOnLocalDate,
+  type ProgressAction,
+} from '../utils/driverDesk'
 
 export type DriverBooking = CompanyBooking
-
-function whenLabel(value?: string | null) {
-  if (!value) return 'Time not set'
-  return new Date(value).toLocaleString('en-BE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-}
-
-async function openNav(address: string, provider: 'waze' | 'google') {
-  const url = navigationUrl(address, provider)
-  if (!url) { Alert.alert('Navigation unavailable', 'This address is missing.'); return }
-  try { await Linking.openURL(url) } catch { Alert.alert('Unable to open navigation', 'Install Waze or Google Maps and try again.') }
-}
 
 export function Workspace({
   companyName,
@@ -38,6 +42,7 @@ export function Workspace({
   initialBookings,
   initialRescue,
   pushStatus,
+  onSignOut,
 }: {
   companyName: string
   logoUrl?: string | null
@@ -48,196 +53,297 @@ export function Workspace({
   initialBookings: DriverBooking[]
   initialRescue: RescueOffer[]
   pushStatus?: string
+  onSignOut: () => void
 }) {
   const [tab, setTab] = useState<DriverTab>('home')
   const [bookings, setBookings] = useState<DriverBooking[]>(initialBookings)
   const [rescueOffers, setRescueOffers] = useState<RescueOffer[]>(initialRescue)
   const [incoming, setIncoming] = useState<DriverBooking | null>(null)
+  const [incomingRescue, setIncomingRescue] = useState<RescueOffer | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
-  const [message, setMessage] = useState(demo ? 'Offline preview. The server is not connected.' : '')
   const [syncError, setSyncError] = useState('')
+  const [offerError, setOfferError] = useState('')
   const [busy, setBusy] = useState(false)
   const [availability, setAvailability] = useState(initialAvailability || 'available')
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyDate, setHistoryDate] = useState(localDateKey(Date.now()))
+  const bookingsRef = useRef(bookings)
+  const rescueRef = useRef(rescueOffers)
+  const seenRescue = useRef<Set<string> | null>(null)
+  bookingsRef.current = bookings
+  rescueRef.current = rescueOffers
+  const actions = mobileActionsEnabled() && !demo
 
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data || {}
       const kind = String(data.event_type || '')
-      setTab(kind.includes('rescue') ? 'rescue' : 'requests')
+      const bookingId = String(data.booking_id || '')
+      if (kind.includes('rescue')) {
+        const offer = rescueRef.current.find(item => isActionableRescue(item.status, item.expires_at, Date.now()))
+        if (offer) setIncomingRescue(offer)
+        return
+      }
+      const row = bookingsRef.current.find(item => item.id === bookingId)
+      if (row && isActionableOffer(row, Date.now())) setIncoming(row)
+      else if (bookingId) { setSelectedId(bookingId); setTab('trips') }
     })
     return () => sub.remove()
   }, [])
-  const actions = mobileActionsEnabled() && !demo
+
   React.useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
+
   useOfferSync({
     companyId,
     enabled: !demo,
     onBookings: setBookings,
     onRescue: setRescueOffers,
-    onIncoming: row => { setIncoming(row); setTab('requests') },
+    onIncoming: row => { setOfferError(''); setIncoming(row) },
+    onAvailability: setAvailability,
     onError: setSyncError,
   })
 
-  const actionable = bookings.filter(b => isActionableOffer(b, now))
-  const current = bookings.find(b => classifyBooking(b, now) === 'accepted')
-  const upcoming = bookings.filter(b => b.ride_datetime && Date.parse(b.ride_datetime) > now && !b.completed_at).sort((a, b) => Date.parse(a.ride_datetime || '') - Date.parse(b.ride_datetime || ''))[0]
-  const openRescue = rescueOffers.filter(o => isActionableRescue(o.status, o.expires_at, now))
-  const history = bookings.filter(b => !isActionableOffer(b, now) && classifyBooking(b, now) !== 'accepted')
+  useEffect(() => {
+    const ids = new Set(rescueOffers.filter(offer => isActionableRescue(offer.status, offer.expires_at, Date.now())).map(offer => offer.id + ':' + offer.expires_at))
+    if (seenRescue.current) {
+      const fresh = rescueOffers.find(offer => isActionableRescue(offer.status, offer.expires_at, Date.now()) && !seenRescue.current?.has(offer.id + ':' + offer.expires_at))
+      if (fresh) setIncomingRescue(fresh)
+    }
+    seenRescue.current = ids
+  }, [rescueOffers])
+
+  useEffect(() => {
+    if (incoming && !isActionableOffer(incoming, now)) { setIncoming(null); setOfferError('That request expired.') }
+  }, [incoming, now])
+
+  useEffect(() => {
+    if (incomingRescue && !isActionableRescue(incomingRescue.status, incomingRescue.expires_at, now)) setIncomingRescue(null)
+  }, [incomingRescue, now])
+
+  const actionable = bookings.filter(booking => isActionableOffer(booking, now))
+  const trips = sortActiveTrips(bookings, now)
+  const underway = currentTrip(bookings, now)
+  const scheduled = nextScheduled(bookings, now)
+  const openRescue = rescueOffers.filter(offer => isActionableRescue(offer.status, offer.expires_at, now))
+  const selected = bookings.find(booking => booking.id === selectedId) || null
+  const controls = controlsFromAvailability(availability)
   const host = bookingHost()
   const qr = slug && host && /^[a-z0-9-]+$/.test(slug) ? `https://${slug}.${host}` : null
+  const today = localDayBounds(now)
+  const dayEarnings = earningsBetween(bookings, today.start, today.end)
+  const week = trailingWindow(bookings, now, 7)
+  const month = trailingWindow(bookings, now, 30)
+  const dayTrips = tripsOnLocalDate(bookings, historyDate)
+  const historyPageRows = pageOf(dayTrips, historyPage)
+
+  async function refresh() {
+    const rows = await readCompanyBookings(companyId)
+    setBookings(rows)
+    try { setRescueOffers(await readCompanyRescueOffers(companyId)) } catch { /* rescue may be unavailable */ }
+  }
 
   async function acceptBooking(id: string) {
-    const target = bookings.find(b => b.id === id)
-    if (!target || !isActionableOffer(target, Date.now())) { setMessage('This offer is expired or no longer available.'); setIncoming(null); return }
-    if (demo) { setMessage('Preview only. TAXIO was not asked to accept this trip.'); setIncoming(null); return }
+    const target = bookings.find(booking => booking.id === id)
+    if (!target || !isActionableOffer(target, Date.now())) { setIncoming(null); setOfferError('That request expired.'); return }
+    if (demo) { setIncoming(null); setOfferError('Preview only. TAXIO was not asked to accept this trip.'); return }
     setBusy(true)
+    setOfferError('')
     try {
       const result = await sendOperatorAction(companyId, { action: 'accept_booking', companyId, bookingRequestId: id })
       if (!result.ok) throw Error(result.error || result.code || 'Booking no longer available')
-      setMessage('Accepted by the TAXIO server.')
-      setTab('trip')
       setIncoming(null)
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Unable to accept') }
-    finally { setBusy(false) }
-  }
-
-  async function declineBooking(id: string) {
-    const target = bookings.find(b => b.id === id)
-    if (!target || !isActionableOffer(target, Date.now())) { setMessage('This offer is no longer actionable.'); setIncoming(null); return }
-    if (demo) { setMessage('Preview only. TAXIO was not asked to decline this trip.'); setIncoming(null); return }
-    setBusy(true)
-    try {
-      const result = await sendOperatorAction(companyId, { action: 'decline', companyId, bookingRequestId: id })
-      if (!result.ok) throw Error(result.error || result.code || 'Unable to decline')
-      setMessage('Declined. Rescue follows the server rules.')
-      setIncoming(null)
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Unable to decline') }
-    finally { setBusy(false) }
+      setSelectedId(id)
+      setTab('trips')
+      await refresh()
+    } catch (error) {
+      setOfferError(error instanceof Error ? error.message : 'Unable to accept')
+    } finally { setBusy(false) }
   }
 
   async function acceptRescue(rescueRequestId: string) {
-    const offer = rescueOffers.find(o => o.rescue_request_id === rescueRequestId)
-    if (!offer || !isActionableRescue(offer.status, offer.expires_at, Date.now())) { setMessage('This rescue offer has expired.'); return }
-    if (demo) { setMessage('Preview only. Rescue was not sent to TAXIO.'); return }
+    const offer = rescueOffers.find(item => item.rescue_request_id === rescueRequestId)
+    if (!offer || !isActionableRescue(offer.status, offer.expires_at, Date.now())) { setIncomingRescue(null); setOfferError('That rescue offer expired.'); return }
+    if (demo) { setIncomingRescue(null); setOfferError('Preview only. Rescue was not sent to TAXIO.'); return }
     setBusy(true)
+    setOfferError('')
     try {
       const result = await sendOperatorAction(companyId, { action: 'accept', companyId, rescueRequestId })
       if (!result.ok) throw Error(result.error || result.code || 'Rescue no longer available')
-      setMessage('Rescue claimed. Passenger details stay locked until the server confirms the passenger.')
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Unable to claim rescue') }
-    finally { setBusy(false) }
+      setIncomingRescue(null)
+      setOfferError('Rescue claimed. Passenger details stay locked until the server confirms the passenger.')
+      await refresh()
+    } catch (error) {
+      setOfferError(error instanceof Error ? error.message : 'Unable to claim rescue')
+    } finally { setBusy(false) }
   }
 
-  async function progress(action: 'mark_on_way' | 'mark_arrived' | 'complete_trip') {
-    if (!current || demo) { setMessage(demo ? 'Preview only. Trip progress was not sent.' : 'No active trip.'); return }
+  async function progress(action: ProgressAction) {
+    if (!selected || demo) { setOfferError(demo ? 'Preview only. Trip progress was not sent.' : 'Select an accepted trip.'); return }
     setBusy(true)
+    setOfferError('')
     try {
-      const result = await sendOperatorAction(companyId, { action, companyId, bookingRequestId: current.id })
+      const result = await sendOperatorAction(companyId, { action, companyId, bookingRequestId: selected.id })
       if (!result.ok) throw Error(result.error || result.code || 'Unable to update the trip')
-      setMessage(action === 'complete_trip' ? 'Completion sent. It is finished only after the server confirms it.' : 'Progress sent to TAXIO.')
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Update failed') }
-    finally { setBusy(false) }
+      setOfferError(action === 'complete_trip' ? 'Completion sent. The trip is finished only after the server confirms it.' : 'Progress sent to TAXIO.')
+      await refresh()
+    } catch (error) {
+      setOfferError(error instanceof Error ? error.message : 'Update failed')
+    } finally { setBusy(false) }
   }
 
-  async function toggleAvailability() {
-    const next = availability === 'offline' ? 'available' : 'offline'
-    if (demo) { setMessage('Preview only. Availability was not changed.'); return }
+  async function persistAvailability(online: boolean, acceptNew: boolean) {
+    const next = availabilityFromControls(online, acceptNew)
+    if (demo) { setOfferError('Preview only. Availability was not changed.'); return }
     setBusy(true)
     try {
       await setCompanyAvailability(companyId, next)
       setAvailability(next)
-      setMessage(next === 'offline' ? 'Company is offline for new bookings.' : 'Company is available for new bookings.')
-    } catch (e) { setMessage(e instanceof Error ? e.message : 'Unable to update availability') }
-    finally { setBusy(false) }
+      setOfferError(next === 'available' ? 'Accepting new trips.' : next === 'busy' ? 'Online, not accepting new trips.' : 'Offline.')
+    } catch (error) {
+      setOfferError(error instanceof Error ? error.message : 'Unable to update availability')
+    } finally { setBusy(false) }
   }
+
+  function openTrip(id: string) {
+    setSelectedId(id)
+    setTab('trips')
+  }
+
+  const stateLabel = availability === 'offline' ? 'Offline' : availability === 'busy' ? 'Online · not accepting new trips' : 'Online · accepting trips'
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScrollView contentContainerStyle={{ padding: 18, gap: 14, paddingBottom: 28 }}>
-        <Text style={{ color: theme.gold, fontWeight: '900', letterSpacing: 1 }}>TAXIO</Text>
-        {logoUrl ? <Image source={{ uri: logoUrl }} accessibilityLabel="Company logo" style={{ width: 48, height: 48, borderRadius: 10 }} /> : null}
-        <Text style={{ color: theme.text, fontSize: 26, fontWeight: '900' }}>{companyName}</Text>
-        {demo ? <Text style={{ color: theme.warn }}>OFFLINE PREVIEW — NO LIVE BOOKINGS</Text> : <Text style={{ color: actions ? theme.ok : theme.warn }}>{actions ? 'Staging actions enabled' : 'Read only — staging actions are not enabled'}</Text>}
-        {syncError ? <Text style={{ color: theme.danger }}>{syncError}</Text> : <Text style={{ color: theme.faint }}>Connection follows the last server refresh.</Text>}
-        {message ? <Text style={{ color: theme.muted }}>{message}</Text> : null}
+        {demo ? <Text style={{ color: theme.warn }}>Offline preview. No live bookings.</Text> : null}
+        {syncError ? <Text style={{ color: theme.danger }}>{syncError}</Text> : null}
+        {offerError ? <Text style={{ color: theme.danger }}>{offerError}</Text> : null}
 
         {tab === 'home' ? (
-          <View style={{ gap: 12 }}>
-            <Text style={{ color: theme.text, fontSize: 18, fontWeight: '800' }}>{actionable[0] ? 'Incoming request' : current ? 'Trip in progress' : 'Waiting for requests'}</Text>
-            <Text style={{ color: availability === 'offline' ? theme.warn : theme.ok }}>{availability === 'offline' ? 'Offline' : availability === 'busy' ? 'Busy' : 'Online'}</Text>
-            <Text style={{ color: theme.muted }}>Requests {actionable.length} · Rescue {openRescue.length}</Text>
-            {current ? <RouteDetails pickup={current.pickup_address} dropoff={current.dropoff_address} /> : <Text style={{ color: theme.muted }}>No current trip.</Text>}
-            {upcoming ? <Text style={{ color: theme.muted }}>Next: {whenLabel(upcoming.ride_datetime)} · {upcoming.pickup_address}</Text> : null}
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Toggle availability" disabled={busy} onPress={toggleAvailability} style={btn}><Text style={btnText}>{availability === 'offline' ? 'Go online' : 'Go offline'}</Text></TouchableOpacity>
+          <View style={{ gap: 14 }}>
+            <Text style={{ color: theme.gold, fontWeight: '900', letterSpacing: 2, fontSize: 18 }}>TAXIO</Text>
+            {logoUrl ? <Image source={{ uri: logoUrl }} accessibilityLabel="Company logo" style={{ width: 52, height: 52, borderRadius: 12 }} /> : null}
+            <Text style={{ color: theme.text, fontSize: 28, fontWeight: '900' }}>{companyName}</Text>
+            <Text style={{ color: availability === 'available' ? theme.ok : theme.warn, fontSize: 18, fontWeight: '800' }}>{stateLabel}</Text>
+            <HomeCard title="Current trip" body={underway ? scheduleLabel(underway.ride_datetime, now) + ' · ' + (underway.pickup_address || '') : 'No trip underway'} onPress={() => underway && openTrip(underway.id)} />
+            <HomeCard title="Next scheduled pickup" body={scheduled ? scheduleLabel(scheduled.ride_datetime, now) + ' · ' + (scheduled.pickup_address || '') : 'No scheduled trip'} onPress={() => scheduled && openTrip(scheduled.id)} />
+            <HomeCard title="Pending requests" body={String(actionable.length)} onPress={() => actionable[0] && setIncoming(actionable[0])} />
+            <HomeCard title="Rescue" body={String(openRescue.length)} onPress={() => openRescue[0] && setIncomingRescue(openRescue[0])} />
+            <HomeCard title="Active trips" body={String(trips.length)} onPress={() => setTab('trips')} />
           </View>
         ) : null}
 
-        {tab === 'requests' ? (
+        {tab === 'trips' ? (
+          selected ? (
+            <TripDetail booking={selected} companyName={companyName} now={now} busy={busy} actionsEnabled={actions || demo} onBack={() => setSelectedId(null)} onProgress={progress} />
+          ) : (
+            <View style={{ gap: 12 }}>
+              <Text style={{ color: theme.text, fontSize: 24, fontWeight: '900' }}>Active trips</Text>
+              {trips.length === 0 ? <Text style={{ color: theme.muted }}>No accepted trips.</Text> : trips.map(booking => (
+                <TouchableOpacity key={booking.id} accessibilityRole="button" accessibilityLabel={'Open ' + (booking.booking_reference || 'trip')} onPress={() => setSelectedId(booking.id)} style={card}>
+                  <Text style={{ color: theme.gold, fontWeight: '800' }}>{scheduleLabel(booking.ride_datetime, now)}</Text>
+                  <Text style={{ color: theme.text, fontWeight: '800' }}>{booking.booking_reference || 'No reference'} · {booking.driver_pickup_status || 'Accepted'}</Text>
+                  <RouteDetails pickup={booking.pickup_address} dropoff={booking.dropoff_address} />
+                  <Text style={{ color: theme.muted }}>{booking.customer_name || 'Passenger name unavailable'}</Text>
+                  <Text style={{ color: theme.muted }}>{booking.estimated_price_eur == null ? 'Fare estimate unavailable' : 'Estimated ' + euro(Number(booking.estimated_price_eur))}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )
+        ) : null}
+
+        {tab === 'earnings' ? (
           <View style={{ gap: 12 }}>
-            {actionable.length === 0 ? <Text style={{ color: theme.muted }}>No actionable request. Expired and draft rows stay out of this list.</Text> : actionable.map(b => (
-              <TouchableOpacity key={b.id} accessibilityRole="button" onPress={() => setIncoming(b)} style={{ backgroundColor: theme.card, borderRadius: 16, padding: 16, gap: 8 }}>
-                <StatusBadge kind="actionable" />
-                <Text style={{ color: theme.muted }}>{b.booking_reference || 'No reference'}</Text>
-                <RouteDetails pickup={b.pickup_address} dropoff={b.dropoff_address} />
-                <Text style={{ color: theme.gold, fontWeight: '800' }}>{secondsRemaining(b.decision_deadline_at, now) ?? 0}s left</Text>
-              </TouchableOpacity>
-            ))}
+            <Text style={{ color: theme.text, fontSize: 24, fontWeight: '900' }}>Earnings</Text>
+            <Text style={{ color: theme.faint }}>Estimated booking value. TAXIO does not record money paid to the company.</Text>
+            <EarningsBlock label="Today" summary={dayEarnings} />
+            <EarningsBlock label="Last 7 days" summary={week.current} />
+            <EarningsBlock label="Previous 7 days" summary={week.previous} />
+            <EarningsBlock label="Last 30 days" summary={month.current} />
+            <EarningsBlock label="Previous 30 days" summary={month.previous} />
+            <Text style={{ color: theme.muted }}>Earnings per hour: unavailable. Working hours are not tracked, and trip duration is not used as a substitute.</Text>
           </View>
         ) : null}
 
-        {tab === 'trip' ? (
-          <View style={{ gap: 12 }}>
-            {!current ? <Text style={{ color: theme.muted }}>No accepted trip.</Text> : (
-              <>
-                <StatusBadge kind="accepted" />
-                <Text style={{ color: theme.muted }}>{current.booking_reference} · {current.driver_pickup_status || 'Accepted'}{current.completion_confirmation_status ? ' · ' + current.completion_confirmation_status : ''}</Text>
-                <RouteDetails pickup={current.pickup_address} dropoff={current.dropoff_address} />
-                <Text style={{ color: theme.text }}>{current.customer_name || 'Passenger name unavailable'}</Text>
-                {current.customer_phone ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Call passenger" onPress={() => Linking.openURL('tel:' + current.customer_phone)} style={btn}><Text style={btnText}>Call passenger</Text></TouchableOpacity> : <Text style={{ color: theme.faint }}>Passenger phone is hidden until the trip is accepted.</Text>}
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Navigate with Waze" onPress={() => openNav(String(current.driver_pickup_status === 'arrived' ? current.dropoff_address : current.pickup_address), 'waze')} style={btn}><Text style={btnText}>Navigate with Waze</Text></TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Navigate with Google Maps" onPress={() => openNav(String(current.driver_pickup_status === 'arrived' ? current.dropoff_address : current.pickup_address), 'google')} style={btn}><Text style={btnText}>Navigate with Google Maps</Text></TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => progress('mark_on_way')} style={btn}><Text style={btnText}>On the way</Text></TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => progress('mark_arrived')} style={btn}><Text style={btnText}>Arrived</Text></TouchableOpacity>
-                <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => progress('complete_trip')} style={btn}><Text style={btnText}>Complete trip</Text></TouchableOpacity>
-              </>
-            )}
-          </View>
-        ) : null}
-
-        {tab === 'rescue' ? (
-          <View style={{ gap: 12 }}>
-            {openRescue.length === 0 ? <Text style={{ color: theme.muted }}>No open rescue offer for this company.</Text> : openRescue.map(o => (
-              <View key={o.id} style={{ backgroundColor: theme.card, borderRadius: 16, padding: 16, gap: 8 }}>
-                <Text style={{ color: theme.gold, fontWeight: '800' }}>{secondsRemaining(o.expires_at, now) ?? 0}s</Text>
-                <RouteDetails pickup={o.rescue?.preview_pickup_label} dropoff={o.rescue?.preview_dropoff_label} />
-                <Text style={{ color: theme.faint }}>Passenger details stay on the server until you are the confirmed winner.</Text>
-                <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => acceptRescue(o.rescue_request_id)} style={btn}><Text style={btnText}>Accept rescue</Text></TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {tab === 'more' ? (
-          <View style={{ gap: 12 }}>
-            <Text style={{ color: theme.text, fontWeight: '800' }}>History</Text>
-            {history.length === 0 ? <Text style={{ color: theme.muted }}>No earlier trips in this view.</Text> : history.slice(0, 12).map(b => (
-              <View key={b.id} style={{ paddingVertical: 8 }}>
-                <StatusBadge kind={classifyBooking(b, now)} />
-                <Text style={{ color: theme.text }}>{b.pickup_address} → {b.dropoff_address}</Text>
-              </View>
-            ))}
+        {tab === 'account' ? (
+          <View style={{ gap: 14 }}>
+            <Text style={{ color: theme.text, fontSize: 24, fontWeight: '900' }}>Account</Text>
+            <Text style={{ color: theme.text, fontWeight: '800' }}>{companyName}</Text>
+            <Text style={{ color: theme.muted }}>{stateLabel}</Text>
+            <SwitchRow label="Online" value={controls.online} disabled={busy} onChange={value => persistAvailability(value, value ? true : false)} />
+            <SwitchRow label="Accept new requests" value={controls.acceptNew} disabled={busy || !controls.online} onChange={value => persistAvailability(true, value)} />
+            <Text style={{ color: theme.faint }}>Busy keeps the company online and the booking page shows busy. Staging refuses a new trip while busy or offline. Rescue offers still use the existing Rescue list.</Text>
+            <Text style={{ color: theme.text, fontWeight: '800' }}>Alerts</Text>
+            <Text style={{ color: theme.muted }}>{pushStatus || 'Alerts not registered'}</Text>
             <Text style={{ color: theme.text, fontWeight: '800' }}>Booking QR</Text>
             {qr ? <View style={{ backgroundColor: '#fff', padding: 16, borderRadius: 16, alignItems: 'center' }}><QRCode value={qr} size={160} /><Text style={{ color: '#111', marginTop: 8 }}>{qr}</Text></View> : <Text style={{ color: theme.muted }}>QR is shown only for an isolated staging company address.</Text>}
-            {qr ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share booking page" onPress={() => Share.share({ message: qr })} style={btn}><Text style={btnText}>Share booking page</Text></TouchableOpacity> : null}
-            <Text style={{ color: theme.faint }}>{pushStatus || 'Alerts not registered'}. A tap opens the matching request. Expired offers stay rejected by the server.</Text>
+            {qr ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share booking page" onPress={() => Share.share({ message: qr })} style={card}><Text style={{ color: theme.text, fontWeight: '800' }}>Share booking page</Text></TouchableOpacity> : null}
+            <Text style={{ color: theme.text, fontWeight: '800' }}>History</Text>
+            <TextInput accessibilityLabel="History date" value={historyDate} onChangeText={value => { setHistoryDate(value); setHistoryPage(1) }} placeholder="YYYY-MM-DD" placeholderTextColor="#94a3b8" style={{ backgroundColor: theme.input, color: theme.inputText, borderRadius: 12, padding: 12 }} />
+            <Text style={{ color: theme.muted }}>{dayTrips.length} trips on this date. Working and waiting time are not tracked.</Text>
+            {historyPageRows.rows.length === 0 ? <Text style={{ color: theme.muted }}>No trips for this date.</Text> : historyPageRows.rows.map(booking => (
+              <TouchableOpacity key={booking.id} accessibilityRole="button" onPress={() => openTrip(booking.id)} style={card}>
+                <Text style={{ color: theme.gold }}>{scheduleLabel(booking.ride_datetime, now)}</Text>
+                <Text style={{ color: theme.text }}>{booking.pickup_address} → {booking.dropoff_address}</Text>
+                <Text style={{ color: theme.muted }}>{booking.status}{booking.completed_at ? ' · completed' : ''} · {booking.estimated_price_eur == null ? 'Estimate unavailable' : 'Estimated ' + euro(Number(booking.estimated_price_eur))}</Text>
+              </TouchableOpacity>
+            ))}
+            {historyPageRows.hasMore ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Load more history" onPress={() => setHistoryPage(page => page + 1)} style={card}><Text style={{ color: theme.text, fontWeight: '800' }}>Load more</Text></TouchableOpacity> : null}
+            <Text style={{ color: theme.text, fontWeight: '800' }}>Performance</Text>
+            <Text style={{ color: theme.muted }}>7 days: {week.current.completedTrips} completed, estimated {euro(week.current.estimatedTotalEur)}. Previous 7 days: {week.previous.completedTrips} completed, estimated {euro(week.previous.estimatedTotalEur)}.</Text>
+            <Text style={{ color: theme.muted }}>30 days: {month.current.completedTrips} completed, estimated {euro(month.current.estimatedTotalEur)}. Previous 30 days: {month.previous.completedTrips} completed, estimated {euro(month.previous.estimatedTotalEur)}.</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sign out" onPress={onSignOut} style={card}><Text style={{ color: theme.danger, fontWeight: '800' }}>Sign out</Text></TouchableOpacity>
           </View>
         ) : null}
       </ScrollView>
-      <IncomingOffer offer={incoming} now={now} busy={busy} actionsEnabled={actions} demo={demo} onAccept={() => incoming && acceptBooking(incoming.id)} onDecline={() => incoming && declineBooking(incoming.id)} onClose={() => setIncoming(null)} />
-      <TabBar tab={tab} onChange={setTab} />
+      <IncomingOffer offer={incoming} now={now} busy={busy} actionsEnabled={actions} error={offerError} onAccept={() => incoming && acceptBooking(incoming.id)} />
+      <FullScreenRequest
+        visible={!!incomingRescue}
+        title="Rescue offer"
+        pickup={incomingRescue?.rescue?.preview_pickup_label}
+        dropoff={incomingRescue?.rescue?.preview_dropoff_label}
+        whenText={scheduleLabel(incomingRescue?.rescue?.preview_ride_datetime, now)}
+        fareText={incomingRescue?.rescue?.preview_estimated_price ? 'Estimated fare ' + incomingRescue.rescue.preview_estimated_price : 'Fare estimate unavailable'}
+        deadline={incomingRescue?.expires_at}
+        now={now}
+        busy={busy}
+        error={offerError}
+        acceptLabel="ACCEPT"
+        actionsEnabled={actions}
+        onAccept={() => incomingRescue && acceptRescue(incomingRescue.rescue_request_id)}
+      />
+      <TabBar tab={tab} onChange={next => { setTab(next); if (next !== 'trips') setSelectedId(null) }} />
     </View>
   )
 }
 
-const btn = { backgroundColor: theme.card, borderRadius: 12, padding: 16, alignItems: 'center' as const }
-const btnText = { color: theme.text, fontWeight: '800' as const }
+function HomeCard({ title, body, onPress }: { title: string; body: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={title} onPress={onPress} style={card}>
+      <Text style={{ color: theme.faint, fontWeight: '800' }}>{title}</Text>
+      <Text style={{ color: theme.text, fontSize: 18, fontWeight: '800' }}>{body}</Text>
+    </TouchableOpacity>
+  )
+}
+
+function EarningsBlock({ label, summary }: { label: string; summary: { completedTrips: number; estimatedTotalEur: number | null; averageEstimatedEur: number | null; paidToCompanyEur: null } }) {
+  return (
+    <View style={card}>
+      <Text style={{ color: theme.text, fontWeight: '800' }}>{label}</Text>
+      <Text style={{ color: theme.gold, fontSize: 20, fontWeight: '900' }}>{summary.completedTrips} completed · estimated {euro(summary.estimatedTotalEur)}</Text>
+      <Text style={{ color: theme.muted }}>Average estimated fare {euro(summary.averageEstimatedEur)}</Text>
+      <Text style={{ color: theme.faint }}>Paid to the company: not recorded</Text>
+    </View>
+  )
+}
+
+function SwitchRow({ label, value, disabled, onChange }: { label: string; value: boolean; disabled: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <TouchableOpacity accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: value, disabled }} disabled={disabled} onPress={() => onChange(!value)} style={card}>
+      <Text style={{ color: theme.text, fontWeight: '800' }}>{label}</Text>
+      <Text style={{ color: value ? theme.ok : theme.muted }}>{value ? 'On' : 'Off'}</Text>
+    </TouchableOpacity>
+  )
+}
+
+const card = { backgroundColor: theme.card, borderRadius: 16, padding: 16, gap: 6 }

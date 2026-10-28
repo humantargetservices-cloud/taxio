@@ -79,10 +79,7 @@ export default function App() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }}>
         <StatusBar barStyle="light-content" />
-        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} />
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sign out" onPress={signOut} style={{ position: 'absolute', top: 46, right: 16 }}>
-          <Text style={{ color: theme.faint, fontWeight: '700' }}>Sign out</Text>
-        </TouchableOpacity>
+        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} onSignOut={signOut} />
       </SafeAreaView>
     )
   }
