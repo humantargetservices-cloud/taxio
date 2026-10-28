@@ -36,17 +36,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Confirm live actions remain disabled
-        run: |
-          if [ "${EXPO_PUBLIC_ENABLE_LIVE_ACTIONS:-false}" = "true" ]; then
-            echo 'Live actions cannot be enabled in unverified pilot builds.'
-            exit 1
-          fi
       - name: Require verified staging configuration
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.OPERATOR_STAGING_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.OPERATOR_STAGING_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_API_BASE_URL: ${{ secrets.OPERATOR_STAGING_API_BASE_URL }}
+          EXPO_PUBLIC_ENABLE_LIVE_ACTIONS: 'true'
         run: node ../../scripts/verify_operator_staging_env.mjs
       - name: Check server acceptance guard
         run: node --test ../../scripts/test_operator_accept_guard.mjs
@@ -69,18 +64,21 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.OPERATOR_STAGING_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.OPERATOR_STAGING_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_API_BASE_URL: ${{ secrets.OPERATOR_STAGING_API_BASE_URL }}
+          EXPO_PUBLIC_ENABLE_LIVE_ACTIONS: 'true'
         run: npx tsc --noEmit
       - name: Generate Android project
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.OPERATOR_STAGING_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.OPERATOR_STAGING_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_API_BASE_URL: ${{ secrets.OPERATOR_STAGING_API_BASE_URL }}
+          EXPO_PUBLIC_ENABLE_LIVE_ACTIONS: 'true'
         run: npx expo prebuild --platform android --no-install
       - name: Build standalone Android APK
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.OPERATOR_STAGING_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.OPERATOR_STAGING_SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_API_BASE_URL: ${{ secrets.OPERATOR_STAGING_API_BASE_URL }}
+          EXPO_PUBLIC_ENABLE_LIVE_ACTIONS: 'true'
         run: |
           chmod +x android/gradlew
           cd android

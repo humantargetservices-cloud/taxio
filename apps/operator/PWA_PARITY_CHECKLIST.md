@@ -32,7 +32,7 @@ The web company dashboard remains authoritative for company profile, pricing, ve
 **Current state (27 October 2026, operator-mobile):**
 - Driver UI: Home, Requests, Trip, Rescue, More. Server deadline countdown. Demo mode is labeled and does not claim a server accept.
 - Booking classification: `new` is actionable only with a future `decision_deadline_at`. Rescue uses `OFFERED` (legacy `pending` still recognized).
-- Accept, decline, rescue claim and trip progress call `/api/rescue` only when `EXPO_PUBLIC_API_BASE_URL` is a non-production HTTPS host and `EXPO_PUBLIC_ENABLE_LIVE_ACTIONS=true`. This committed build leaves that flag unset.
+- Accept, decline, rescue claim and trip progress call `/api/rescue` only when `EXPO_PUBLIC_API_BASE_URL` is `https://staging.taxio.be` and `EXPO_PUBLIC_ENABLE_LIVE_ACTIONS=true`. The Android workflow sets that flag only after the staging server host was verified as `lyjicuuyrvblbsqlduqg`.
 - The operator-mobile copy of `api/rescue.js` rejects an expired booking accept. That guard is not on `main` and must not be deployed by merging this branch.
 - Development builds refuse `taxio.be` and the production Supabase host. The Android workflow no longer embeds them.
 - Closed-app push is not implemented. Device tokens are not uploaded.

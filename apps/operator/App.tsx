@@ -4,7 +4,7 @@ import { integrationConfigured, loginOperator, operatorDb, productionTargetBlock
 import { Workspace, type DriverBooking } from './src/screens/Workspace'
 import { theme } from './src/theme/theme'
 
-const DEMO_COMPANY = { id: 'demo', name: 'ABC Taxi', slug: null as string | null, logo_url: null as string | null }
+const DEMO_COMPANY = { id: 'demo', name: 'ABC Taxi', slug: null as string | null, logo_url: null as string | null, availability_status: 'available' }
 function demoBookings(now = Date.now()): DriverBooking[] {
   return [
     { id: 'demo-booking-1', booking_reference: 'TX-DEMO', pickup_address: 'Leuven Station', dropoff_address: 'Brussels Airport', status: 'new', decision_deadline_at: new Date(now + 25000).toISOString(), customer_name: 'Preview rider', estimated_price_eur: 42, ride_datetime: new Date(now + 3600000).toISOString() },
@@ -15,7 +15,7 @@ function demoBookings(now = Date.now()): DriverBooking[] {
 export default function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [company, setCompany] = useState<{ id: string; name: string; slug?: string | null; logo_url?: string | null } | null>(null)
+  const [company, setCompany] = useState<{ id: string; name: string; slug?: string | null; logo_url?: string | null; availability_status?: string | null } | null>(null)
   const [bookings, setBookings] = useState<DriverBooking[]>([])
   const [rescue, setRescue] = useState<RescueOffer[]>([])
   const [demo, setDemo] = useState(false)
@@ -70,7 +70,7 @@ export default function App() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }}>
         <StatusBar barStyle="light-content" />
-        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} demo={demo} companyId={company.id} initialBookings={bookings} initialRescue={rescue} />
+        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} />
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sign out" onPress={signOut} style={{ position: 'absolute', top: 46, right: 16 }}>
           <Text style={{ color: theme.faint, fontWeight: '700' }}>Sign out</Text>
         </TouchableOpacity>

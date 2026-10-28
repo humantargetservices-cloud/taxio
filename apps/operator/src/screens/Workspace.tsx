@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Alert, Image, Linking, ScrollView, Text, TouchableOpacity, View } from 'react-native'
+import { Alert, Image, Linking, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native'
 import QRCode from 'react-native-qrcode-svg'
 import { type CompanyBooking, type RescueOffer } from '../backend'
 import { IncomingOffer } from '../components/IncomingOffer'
@@ -12,6 +12,7 @@ import { classifyBooking, isActionableOffer, isActionableRescue, secondsRemainin
 import { bookingHost } from '../utils/environment'
 import { navigationUrl } from '../utils/navigation'
 import { mobileActionsEnabled, sendOperatorAction } from '../operatorActions'
+import { setCompanyAvailability } from '../backend'
 
 export type DriverBooking = CompanyBooking
 
@@ -32,6 +33,7 @@ export function Workspace({
   slug,
   demo,
   companyId,
+  initialAvailability,
   initialBookings,
   initialRescue,
 }: {
@@ -40,6 +42,7 @@ export function Workspace({
   slug?: string | null
   demo: boolean
   companyId: string
+  initialAvailability?: string | null
   initialBookings: DriverBooking[]
   initialRescue: RescueOffer[]
 }) {
@@ -51,6 +54,7 @@ export function Workspace({
   const [message, setMessage] = useState(demo ? 'Offline preview. The server is not connected.' : '')
   const [syncError, setSyncError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [availability, setAvailability] = useState(initialAvailability || 'available')
   const actions = mobileActionsEnabled() && !demo
   React.useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
   useOfferSync({
@@ -123,6 +127,18 @@ export function Workspace({
     finally { setBusy(false) }
   }
 
+  async function toggleAvailability() {
+    const next = availability === 'offline' ? 'available' : 'offline'
+    if (demo) { setMessage('Preview only. Availability was not changed.'); return }
+    setBusy(true)
+    try {
+      await setCompanyAvailability(companyId, next)
+      setAvailability(next)
+      setMessage(next === 'offline' ? 'Company is offline for new bookings.' : 'Company is available for new bookings.')
+    } catch (e) { setMessage(e instanceof Error ? e.message : 'Unable to update availability') }
+    finally { setBusy(false) }
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScrollView contentContainerStyle={{ padding: 18, gap: 14, paddingBottom: 28 }}>
@@ -136,10 +152,11 @@ export function Workspace({
         {tab === 'home' ? (
           <View style={{ gap: 12 }}>
             <Text style={{ color: theme.text, fontSize: 18, fontWeight: '800' }}>{actionable[0] ? 'Incoming request' : current ? 'Trip in progress' : 'Waiting for requests'}</Text>
+            <Text style={{ color: availability === 'offline' ? theme.warn : theme.ok }}>{availability === 'offline' ? 'Offline' : availability === 'busy' ? 'Busy' : 'Online'}</Text>
             <Text style={{ color: theme.muted }}>Requests {actionable.length} · Rescue {openRescue.length}</Text>
             {current ? <RouteDetails pickup={current.pickup_address} dropoff={current.dropoff_address} /> : <Text style={{ color: theme.muted }}>No current trip.</Text>}
             {upcoming ? <Text style={{ color: theme.muted }}>Next: {whenLabel(upcoming.ride_datetime)} · {upcoming.pickup_address}</Text> : null}
-            <Text style={{ color: theme.faint }}>Availability stays on the company website. This app does not pretend to go online.</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Toggle availability" disabled={busy} onPress={toggleAvailability} style={btn}><Text style={btnText}>{availability === 'offline' ? 'Go online' : 'Go offline'}</Text></TouchableOpacity>
           </View>
         ) : null}
 
@@ -164,7 +181,7 @@ export function Workspace({
                 <Text style={{ color: theme.muted }}>{current.booking_reference} · {current.driver_pickup_status || 'Accepted'}{current.completion_confirmation_status ? ' · ' + current.completion_confirmation_status : ''}</Text>
                 <RouteDetails pickup={current.pickup_address} dropoff={current.dropoff_address} />
                 <Text style={{ color: theme.text }}>{current.customer_name || 'Passenger name unavailable'}</Text>
-                {current.customer_phone ? <Text style={{ color: theme.muted }}>Phone available for this accepted trip.</Text> : <Text style={{ color: theme.faint }}>Passenger phone is hidden until the trip is accepted.</Text>}
+                {current.customer_phone ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Call passenger" onPress={() => Linking.openURL('tel:' + current.customer_phone)} style={btn}><Text style={btnText}>Call passenger</Text></TouchableOpacity> : <Text style={{ color: theme.faint }}>Passenger phone is hidden until the trip is accepted.</Text>}
                 <TouchableOpacity accessibilityRole="button" accessibilityLabel="Navigate with Waze" onPress={() => openNav(String(current.driver_pickup_status === 'arrived' ? current.dropoff_address : current.pickup_address), 'waze')} style={btn}><Text style={btnText}>Navigate with Waze</Text></TouchableOpacity>
                 <TouchableOpacity accessibilityRole="button" accessibilityLabel="Navigate with Google Maps" onPress={() => openNav(String(current.driver_pickup_status === 'arrived' ? current.dropoff_address : current.pickup_address), 'google')} style={btn}><Text style={btnText}>Navigate with Google Maps</Text></TouchableOpacity>
                 <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => progress('mark_on_way')} style={btn}><Text style={btnText}>On the way</Text></TouchableOpacity>
@@ -199,7 +216,8 @@ export function Workspace({
             ))}
             <Text style={{ color: theme.text, fontWeight: '800' }}>Booking QR</Text>
             {qr ? <View style={{ backgroundColor: '#fff', padding: 16, borderRadius: 16, alignItems: 'center' }}><QRCode value={qr} size={160} /><Text style={{ color: '#111', marginTop: 8 }}>{qr}</Text></View> : <Text style={{ color: theme.muted }}>QR is shown only for an isolated staging company address.</Text>}
-            <Text style={{ color: theme.faint }}>Closed-app alerts need a staging push sender. This build will not register a device token against production.</Text>
+            {qr ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share booking page" onPress={() => Share.share({ message: qr })} style={btn}><Text style={btnText}>Share booking page</Text></TouchableOpacity> : null}
+            <Text style={{ color: theme.faint }}>Closed-app alerts are not active until a device token is registered on a phone. This build does not send production notifications.</Text>
           </View>
         ) : null}
       </ScrollView>

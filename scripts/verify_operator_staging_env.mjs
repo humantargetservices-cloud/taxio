@@ -12,7 +12,7 @@ if (hostOf(supabaseUrl) !== 'lyjicuuyrvblbsqlduqg.supabase.co') failures.push('s
 if (apiBase !== 'https://staging.taxio.be') failures.push('api-base')
 if (!anonKey.startsWith('sb_publishable_') || anonKey.length < 40) failures.push('anon-key')
 if (/service_role|gdiamipqrhxbmrcsnqdk|www\.taxio\.be/.test(anonKey)) failures.push('anon-key-rejected')
-if (live === 'true') failures.push('live-actions')
+if (live !== 'true') failures.push('live-actions-off')
 
 console.log(JSON.stringify({
   supabaseHost: hostOf(supabaseUrl) || 'missing',

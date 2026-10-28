@@ -13,7 +13,7 @@ export const operatorDb = integrationConfigured ? createClient(supabaseTarget.va
   auth: { storage: { getItem: (k: string) => SecureStore.getItemAsync(k), setItem: (k: string,v: string) => SecureStore.setItemAsync(k,v), removeItem: (k: string) => SecureStore.deleteItemAsync(k) }, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
 }) : null
 
-export type OperatorCompany = { id: string; name: string; logo_url: string | null; status: string; slug?: string | null }
+export type OperatorCompany = { id: string; name: string; logo_url: string | null; status: string; slug?: string | null; availability_status?: string | null }
 export async function loginOperator(email: string, password: string): Promise<Session> {
   if (!operatorDb) throw Error('Integration is not configured')
   const { data, error } = await operatorDb.auth.signInWithPassword({ email: email.trim(), password })
@@ -25,11 +25,16 @@ export async function resolveOperatorCompany(userId: string): Promise<OperatorCo
   // Version 1: a single approved company operator/owner account per app session.
   // Future driver roles must be separately authorized by server-side policies.
   const {data,error} = await operatorDb.from('companies')
-    .select('id,name,logo_url,status,slug').eq('owner_user_id',userId)
+    .select('id,name,logo_url,status,slug,availability_status').eq('owner_user_id',userId)
     .eq('status','approved').limit(2)
   if(error) throw Error('Unable to verify your company')
   if (!data || data.length !== 1) throw Error('Expected one approved company for this operator')
   return data[0] as OperatorCompany
+}
+export async function setCompanyAvailability(companyId: string, status: 'available' | 'offline') {
+  if (!operatorDb) throw Error('Integration is not configured')
+  const { error } = await operatorDb.from('companies').update({ availability_status: status }).eq('id', companyId)
+  if (error) throw Error('Unable to update availability')
 }
 export type CompanyBooking = {
   id: string
