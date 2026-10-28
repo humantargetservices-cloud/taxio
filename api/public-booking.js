@@ -234,6 +234,22 @@ async function activateDraftBooking(req, res, body) {
     return json(res, 409, { error: 'Booking is no longer a draft.' })
   }
 
+  const { data: companyRow, error: companyErr } = await supabase
+    .from('companies')
+    .select('availability_status')
+    .eq('id', companyId)
+    .maybeSingle()
+  if (companyErr) {
+    console.error('[public-booking:availability]', companyErr)
+    return json(res, 500, { error: 'Could not activate booking.' })
+  }
+  if (String(companyRow?.availability_status || 'available') !== 'available') {
+    return json(res, 409, {
+      error: 'This company is not accepting new trips right now.',
+      code: 'COMPANY_NOT_ACCEPTING',
+    })
+  }
+
   let decisionSeconds = 25
   try {
     const { data: secs } = await supabase.rpc('taxio_rescue_decision_seconds')
