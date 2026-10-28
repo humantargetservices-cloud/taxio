@@ -28,6 +28,7 @@ import {
   sendOneSignalPushToCompany,
   validateOneSignalServerEnv,
 } from './_companyPush.js'
+import { sendOperatorExpoPush } from './_operatorPush.js'
 
 /** Reclaim a stuck PROCESSING row after this age (ms). */
 const STALE_PROCESSING_MS = 2 * 60 * 1000
@@ -230,6 +231,27 @@ export default async function handler(req, res) {
         })
         .eq('id', outbox.id)
 
+      let operator_push = { ok: false, code: 'SKIPPED', sent: 0 }
+      try {
+        operator_push = await sendOperatorExpoPush(admin, {
+          companyId,
+          eventType: outbox.event_type,
+          title: content.title,
+          body: content.body,
+          bookingId: content.data?.booking_id || outbox.booking_id || null,
+          rescueRequestId: content.data?.rescue_request_id || outbox.rescue_request_id || null,
+          data: {
+            event_type: outbox.event_type,
+            booking_id: content.data?.booking_id || outbox.booking_id || null,
+            rescue_request_id: content.data?.rescue_request_id || outbox.rescue_request_id || null,
+            rescue_opportunity_id: content.data?.rescue_opportunity_id || outbox.rescue_opportunity_id || null,
+          },
+        })
+      } catch (pushErr) {
+        console.error('[company-push-dispatch:expo]', pushErr?.message || pushErr)
+        operator_push = { ok: false, code: 'EXPO_ERROR', sent: 0 }
+      }
+
       return json(res, 200, {
         ok: true,
         code: 'SENT',
@@ -240,6 +262,11 @@ export default async function handler(req, res) {
         onesignal_notification_id: result.notificationId,
         recipients: result.recipients,
         provider: 'onesignal',
+        operator_push: {
+          ok: operator_push.ok === true,
+          code: operator_push.code || null,
+          sent: operator_push.sent || 0,
+        },
       })
     } catch (err) {
       const failMsg = safeLastError(err)
