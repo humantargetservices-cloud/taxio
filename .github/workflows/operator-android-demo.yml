@@ -8,6 +8,9 @@ on:
       - 'scripts/test_operator_accept_guard.mjs'
       - 'scripts/test_operator_notification_guard.mjs'
       - 'scripts/test_operator_booking_state.mjs'
+      - 'scripts/test_operator_push.mjs'
+      - 'api/_operatorPush.js'
+      - 'api/company-push-dispatch.js'
       - 'scripts/verify_operator_staging_env.mjs'
       - 'scripts/verify_operator_apk.mjs'
       - '.github/workflows/operator-android-demo.yml'
@@ -49,6 +52,8 @@ jobs:
         run: node --test ../../scripts/test_operator_notification_guard.mjs
       - name: Verify booking classification and production isolation
         run: node --experimental-strip-types --test ../../scripts/test_operator_booking_state.mjs
+      - name: Verify operator push routing
+        run: node --test ../../scripts/test_operator_push.mjs
       - name: Install JavaScript dependencies
         run: npm install --no-audit --no-fund
       - name: Verify client-only release policy

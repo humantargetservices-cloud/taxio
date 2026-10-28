@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { integrationConfigured, loginOperator, operatorDb, productionTargetBlocked, readCompanyBookings, readCompanyRescueOffers, resolveOperatorCompany, restoreOperatorCompany, type RescueOffer } from './src/backend'
+import { registerOperatorForPush, revokeOperatorPush } from './src/pushRegistration'
 import { Workspace, type DriverBooking } from './src/screens/Workspace'
 import { theme } from './src/theme/theme'
 
@@ -22,6 +23,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [restoring, setRestoring] = useState(integrationConfigured)
+  const [pushStatus, setPushStatus] = useState('Alerts not registered')
 
   useEffect(() => {
     let active = true
@@ -34,6 +36,8 @@ export default function App() {
             setCompany(existing)
             setBookings(rows)
             try { setRescue(await readCompanyRescueOffers(existing.id)) } catch { /* rescue may be unavailable */ }
+            const push = await registerOperatorForPush(existing.id)
+            if (active) setPushStatus(push.ok ? 'Alerts registered on this phone' : push.code)
           }
         }
       } catch { /* login stays visible */ }
@@ -53,6 +57,8 @@ export default function App() {
       setCompany(owner)
       setBookings(rows)
       try { setRescue(await readCompanyRescueOffers(owner.id)) } catch { /* rescue may be unavailable */ }
+      const push = await registerOperatorForPush(owner.id)
+      setPushStatus(push.ok ? 'Alerts registered on this phone' : push.code)
       setDemo(false)
       setPassword('')
     } catch (e) {
@@ -62,7 +68,10 @@ export default function App() {
   }
 
   async function signOut() {
-    if (!demo) await operatorDb?.auth.signOut()
+    if (!demo) {
+      await revokeOperatorPush()
+      await operatorDb?.auth.signOut()
+    }
     setCompany(null); setBookings([]); setRescue([]); setDemo(false)
   }
 
@@ -70,7 +79,7 @@ export default function App() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }}>
         <StatusBar barStyle="light-content" />
-        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} />
+        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} />
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sign out" onPress={signOut} style={{ position: 'absolute', top: 46, right: 16 }}>
           <Text style={{ color: theme.faint, fontWeight: '700' }}>Sign out</Text>
         </TouchableOpacity>

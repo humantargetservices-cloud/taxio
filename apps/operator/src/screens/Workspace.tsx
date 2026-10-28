@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import * as Notifications from 'expo-notifications'
 import { Alert, Image, Linking, ScrollView, Share, Text, TouchableOpacity, View } from 'react-native'
 import QRCode from 'react-native-qrcode-svg'
 import { type CompanyBooking, type RescueOffer } from '../backend'
@@ -36,6 +37,7 @@ export function Workspace({
   initialAvailability,
   initialBookings,
   initialRescue,
+  pushStatus,
 }: {
   companyName: string
   logoUrl?: string | null
@@ -45,6 +47,7 @@ export function Workspace({
   initialAvailability?: string | null
   initialBookings: DriverBooking[]
   initialRescue: RescueOffer[]
+  pushStatus?: string
 }) {
   const [tab, setTab] = useState<DriverTab>('home')
   const [bookings, setBookings] = useState<DriverBooking[]>(initialBookings)
@@ -55,6 +58,15 @@ export function Workspace({
   const [syncError, setSyncError] = useState('')
   const [busy, setBusy] = useState(false)
   const [availability, setAvailability] = useState(initialAvailability || 'available')
+
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data || {}
+      const kind = String(data.event_type || '')
+      setTab(kind.includes('rescue') ? 'rescue' : 'requests')
+    })
+    return () => sub.remove()
+  }, [])
   const actions = mobileActionsEnabled() && !demo
   React.useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
   useOfferSync({
@@ -217,7 +229,7 @@ export function Workspace({
             <Text style={{ color: theme.text, fontWeight: '800' }}>Booking QR</Text>
             {qr ? <View style={{ backgroundColor: '#fff', padding: 16, borderRadius: 16, alignItems: 'center' }}><QRCode value={qr} size={160} /><Text style={{ color: '#111', marginTop: 8 }}>{qr}</Text></View> : <Text style={{ color: theme.muted }}>QR is shown only for an isolated staging company address.</Text>}
             {qr ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share booking page" onPress={() => Share.share({ message: qr })} style={btn}><Text style={btnText}>Share booking page</Text></TouchableOpacity> : null}
-            <Text style={{ color: theme.faint }}>Closed-app alerts are not active until a device token is registered on a phone. This build does not send production notifications.</Text>
+            <Text style={{ color: theme.faint }}>{pushStatus || 'Alerts not registered'}. A tap opens the matching request. Expired offers stay rejected by the server.</Text>
           </View>
         ) : null}
       </ScrollView>
