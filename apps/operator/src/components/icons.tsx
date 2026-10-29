@@ -27,6 +27,9 @@ export function IconNavigate({ color = '#F4F7FB', size = 16 }: IconProps) {
 export function IconPhone({ color = '#F4F7FB', size = 16 }: IconProps) {
   return <Svg width={size} height={size} viewBox="0 0 24 24" fill="none"><Path d="M8 4h2.4l1 3.4-1.7 1a12 12 0 0 0 5 5l1-1.7L19.2 13V16a2 2 0 0 1-2.2 2A16 16 0 0 1 6 6.2 2 2 0 0 1 8 4Z" stroke={color} strokeWidth="1.8" strokeLinejoin="round" /></Svg>
 }
-export function IconClock({ color = '#1A1404', size = 16 }: IconProps) {
+export function IconSettings({ color = '#F3F5FA', size = 19 }: IconProps) {
+  return <Svg width={size} height={size} viewBox="0 0 24 24" fill="none"><Path d="M14 17H5M19 7H10" stroke={color} strokeWidth="1.8" strokeLinecap="round" /><Circle cx="17" cy="17" r="3" stroke={color} strokeWidth="1.8" /><Circle cx="7" cy="7" r="3" stroke={color} strokeWidth="1.8" /></Svg>
+}
+export function IconClock({ color = '#172030', size = 19 }: IconProps) {
   return <Svg width={size} height={size} viewBox="0 0 24 24" fill="none"><Circle cx="12" cy="12" r="7.5" stroke={color} strokeWidth="1.8" /><Path d="M12 8.5V12l2.5 1.6" stroke={color} strokeWidth="1.8" strokeLinecap="round" /></Svg>
 }

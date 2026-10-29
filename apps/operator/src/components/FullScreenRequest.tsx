@@ -60,8 +60,8 @@ export function FullScreenRequest({
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => {}}>
       <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: 18 }}>
-        <BrandBar onShare={() => {}} />
-        {companyName ? <CompanyCard name={companyName} slogan={slogan} vatNumber={vatNumber} phone={phone} availability={availability} onQr={() => {}} onShare={() => {}} /> : null}
+        <BrandBar hidden onSettings={() => {}} />
+        {companyName ? <CompanyCard name={companyName} slogan={slogan} vatNumber={vatNumber} phone={phone} statusText={availability === 'offline' ? '○ Offline' : '● Online'} hideActions onQr={() => {}} onShare={() => {}} /> : null}
         <View style={{ flex: 1, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 16, justifyContent: 'space-between' }}>
           <View style={{ gap: 10 }}>
             <Text style={{ color: theme.gold, fontWeight: '800', letterSpacing: 1.1, fontSize: 13 }}>{title}</Text>

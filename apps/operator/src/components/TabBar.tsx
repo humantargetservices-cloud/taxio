@@ -14,14 +14,14 @@ const ITEMS: { id: DriverTab; label: string; Icon: typeof IconHome }[] = [
 
 export function TabBar({ tab, onChange }: { tab: DriverTab; onChange: (tab: DriverTab) => void }) {
   return (
-    <View style={{ flexDirection: 'row', backgroundColor: theme.tab, borderTopWidth: 1, borderTopColor: '#1c2740', paddingBottom: 6, paddingTop: 6 }}>
+    <View style={{ flexDirection: 'row', backgroundColor: theme.tab, borderTopWidth: 1, borderTopColor: '#27374e', paddingHorizontal: 7, paddingVertical: 10 }}>
       {ITEMS.map(item => {
         const active = tab === item.id
         const color = active ? theme.gold : theme.faint
         return (
           <TouchableOpacity key={item.id} accessibilityRole="button" accessibilityLabel={item.label} onPress={() => onChange(item.id)} style={{ flex: 1, alignItems: 'center', minHeight: 52, justifyContent: 'center', gap: 4 }}>
-            <item.Icon color={color} />
-            <Text style={{ color, fontWeight: '700', fontSize: 12 }}>{item.label}</Text>
+            <item.Icon color={color} size={19} />
+            <Text style={{ color, fontWeight: '400', fontSize: 11 }}>{item.label}</Text>
           </TouchableOpacity>
         )
       })}

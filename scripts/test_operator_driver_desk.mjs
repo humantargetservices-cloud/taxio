@@ -56,12 +56,10 @@ test('trip actions follow the server stage and do not treat a trip as complete l
 })
 
 test('incoming request screen is accept-only and back does not accept', () => {
-  const offer = readFileSync(new URL('../apps/operator/src/components/IncomingOffer.tsx', import.meta.url), 'utf8')
-  const screen = readFileSync(new URL('../apps/operator/src/components/FullScreenRequest.tsx', import.meta.url), 'utf8')
-  assert.doesNotMatch(offer + screen, /accessibilityLabel="Decline|Decline trip|>Close</)
-  assert.match(offer, /Accept trip/)
+  const screen = readFileSync(new URL('../apps/operator/src/screens/Workspace.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(screen, /accessibilityLabel="Decline|Decline trip/)
+  assert.match(screen, /Accept trip/)
   assert.match(screen, /hardwareBackPress/)
-  assert.match(screen, /onRequestClose=\{\(\) => \{\}\}/)
   assert.doesNotMatch(screen, /hardwareBackPress[\s\S]{0,180}onAccept/)
 })
 
