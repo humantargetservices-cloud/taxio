@@ -70,6 +70,49 @@ function safeLastError(err) {
     .slice(0, 240)
 }
 
+function operatorPushBody(result) {
+  return {
+    ok: result?.ok === true,
+    code: result?.code || null,
+    sent: result?.sent || 0,
+    failed: result?.failed || 0,
+    revoked: result?.revoked || 0,
+    receipts: result?.receipts || 0,
+  }
+}
+
+/** Android delivery is independent of the web push result. */
+async function deliverOperatorAndroid(admin, outbox) {
+  try {
+    const safeCtx = await loadSafePushContext(admin, outbox)
+    const content = buildPushNotificationContent(outbox.event_type, safeCtx)
+    if (content.data) {
+      delete content.data.customer_phone
+      delete content.data.customer_name
+      delete content.data.passenger_phone
+      delete content.data.passenger_name
+    }
+    return await sendOperatorExpoPush(admin, {
+      companyId: outbox.company_id,
+      outboxId: outbox.id,
+      eventType: outbox.event_type,
+      title: content.title,
+      body: content.body,
+      bookingId: content.data?.booking_id || outbox.booking_id || null,
+      rescueRequestId: content.data?.rescue_request_id || outbox.rescue_request_id || null,
+      data: {
+        event_type: outbox.event_type,
+        booking_id: content.data?.booking_id || outbox.booking_id || null,
+        rescue_request_id: content.data?.rescue_request_id || outbox.rescue_request_id || null,
+        rescue_opportunity_id: content.data?.rescue_opportunity_id || outbox.rescue_opportunity_id || null,
+      },
+    })
+  } catch (pushErr) {
+    console.error('[company-push-dispatch:expo]', pushErr?.message || pushErr)
+    return { ok: false, code: 'EXPO_ERROR', sent: 0, failed: 0, revoked: 0, receipts: 0 }
+  }
+}
+
 export default async function handler(req, res) {
   cors(req, res)
   if (req.method === 'OPTIONS') {
@@ -102,9 +145,6 @@ export default async function handler(req, res) {
   const envErr = validateSupabaseServiceEnv()
   if (envErr) return json(res, 503, { error: envErr, code: 'ENV' })
   const onesignalErr = validateOneSignalServerEnv()
-  if (onesignalErr) {
-    return json(res, 503, { error: onesignalErr, code: 'ONESIGNAL_ENV' })
-  }
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {}
@@ -132,11 +172,13 @@ export default async function handler(req, res) {
     let outbox = loaded
 
     if (outbox.status === 'SENT') {
+      const operatorPush = await deliverOperatorAndroid(admin, outbox)
       return json(res, 200, {
         ok: true,
         code: 'ALREADY_SENT',
         outbox_id: outbox.id,
         sent: true,
+        operator_push: operatorPushBody(operatorPush),
       })
     }
 
@@ -187,11 +229,13 @@ export default async function handler(req, res) {
         .eq('id', outbox.id)
         .maybeSingle()
       if (again?.status === 'SENT') {
+        const operatorPush = await deliverOperatorAndroid(admin, again)
         return json(res, 200, {
           ok: true,
           code: 'ALREADY_SENT',
           outbox_id: outbox.id,
           sent: true,
+          operator_push: operatorPushBody(operatorPush),
         })
       }
       return json(res, 200, {
@@ -215,79 +259,59 @@ export default async function handler(req, res) {
       delete content.data.passenger_name
     }
 
-    try {
-      const result = await sendOneSignalPushToCompany({
-        companyId,
-        eventType: outbox.event_type,
-        content,
-      })
-
-      await admin
-        .from('company_push_outbox')
-        .update({
-          status: 'SENT',
-          sent_at: new Date().toISOString(),
-          last_error: null,
-        })
-        .eq('id', outbox.id)
-
-      let operator_push = { ok: false, code: 'SKIPPED', sent: 0 }
+    let web = { ok: false, code: 'FAILED', error: null, result: null }
+    if (onesignalErr) {
+      web = { ok: false, code: 'ONESIGNAL_ENV', error: onesignalErr, result: null }
+      await admin.from('company_push_outbox').update({ status: 'FAILED', last_error: safeLastError(onesignalErr) }).eq('id', outbox.id)
+    } else {
       try {
-        operator_push = await sendOperatorExpoPush(admin, {
+        const result = await sendOneSignalPushToCompany({
           companyId,
           eventType: outbox.event_type,
-          title: content.title,
-          body: content.body,
-          bookingId: content.data?.booking_id || outbox.booking_id || null,
-          rescueRequestId: content.data?.rescue_request_id || outbox.rescue_request_id || null,
-          data: {
-            event_type: outbox.event_type,
-            booking_id: content.data?.booking_id || outbox.booking_id || null,
-            rescue_request_id: content.data?.rescue_request_id || outbox.rescue_request_id || null,
-            rescue_opportunity_id: content.data?.rescue_opportunity_id || outbox.rescue_opportunity_id || null,
-          },
+          content,
         })
-      } catch (pushErr) {
-        console.error('[company-push-dispatch:expo]', pushErr?.message || pushErr)
-        operator_push = { ok: false, code: 'EXPO_ERROR', sent: 0 }
+        await admin
+          .from('company_push_outbox')
+          .update({
+            status: 'SENT',
+            sent_at: new Date().toISOString(),
+            last_error: null,
+          })
+          .eq('id', outbox.id)
+        web = { ok: true, code: 'SENT', error: null, result }
+      } catch (err) {
+        const failMsg = safeLastError(err)
+        console.error('[company-push-dispatch:onesignal]', failMsg)
+        await admin.from('company_push_outbox').update({ status: 'FAILED', last_error: failMsg }).eq('id', outbox.id)
+        web = { ok: false, code: err?.code || 'FAILED', error: failMsg, result: null }
       }
+    }
 
-      return json(res, 200, {
-        ok: true,
-        code: 'SENT',
-        outbox_id: outbox.id,
-        event_type: outbox.event_type,
-        company_id: companyId,
-        external_id: result.externalId,
-        onesignal_notification_id: result.notificationId,
-        recipients: result.recipients,
-        provider: 'onesignal',
-        operator_push: {
-          ok: operator_push.ok === true,
-          code: operator_push.code || null,
-          sent: operator_push.sent || 0,
-        },
-      })
-    } catch (err) {
-      const failMsg = safeLastError(err)
-      console.error('[company-push-dispatch:onesignal]', failMsg)
-      await admin
-        .from('company_push_outbox')
-        .update({
-          status: 'FAILED',
-          last_error: failMsg,
-        })
-        .eq('id', outbox.id)
-
+    const operatorPush = await deliverOperatorAndroid(admin, outbox)
+    if (!web.ok) {
       return json(res, 200, {
         ok: false,
-        code: err?.code || 'FAILED',
+        code: web.code,
         outbox_id: outbox.id,
         company_id: companyId,
         provider: 'onesignal',
-        error: failMsg,
+        error: web.error,
+        operator_push: operatorPushBody(operatorPush),
       })
     }
+
+    return json(res, 200, {
+      ok: true,
+      code: 'SENT',
+      outbox_id: outbox.id,
+      event_type: outbox.event_type,
+      company_id: companyId,
+      external_id: web.result.externalId,
+      onesignal_notification_id: web.result.notificationId,
+      recipients: web.result.recipients,
+      provider: 'onesignal',
+      operator_push: operatorPushBody(operatorPush),
+    })
   } catch (err) {
     console.error('[company-push-dispatch]', err?.message || err)
     return json(res, 500, {
