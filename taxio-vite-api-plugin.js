@@ -79,6 +79,7 @@ export function taxioApiPlugin() {
           '/api/rescue-whatsapp-tick': 'api/rescue-whatsapp-tick.js',
           '/api/company-push-subscribe': 'api/company-push-subscribe.js',
           '/api/company-push-dispatch': 'api/company-push-dispatch.js',
+          '/api/operator-push-test': 'api/operator-push-test.js',
           '/api/admin-approve-company': 'api/admin-approve-company.js',
           '/api/admin-delete-company': 'api/admin-delete-company.js',
           '/api/admin-dev-cleanup-test-companies': 'api/admin-dev-cleanup-test-companies.js',
@@ -94,6 +95,7 @@ export function taxioApiPlugin() {
         const isFindBooking = pathname === '/api/find-booking'
         const isCompanyPushSubscribe = pathname === '/api/company-push-subscribe'
         const isCompanyPushDispatch = pathname === '/api/company-push-dispatch'
+        const isOperatorPushTest = pathname === '/api/operator-push-test'
         const isRescueWhatsappTick = pathname === '/api/rescue-whatsapp-tick'
         const methodOk =
           req.method === 'POST' ||
@@ -104,6 +106,7 @@ export function taxioApiPlugin() {
           (isCompanyPushSubscribe &&
             (req.method === 'GET' || req.method === 'POST' || req.method === 'DELETE')) ||
           (isCompanyPushDispatch && req.method === 'POST') ||
+          (isOperatorPushTest && (req.method === 'POST' || req.method === 'OPTIONS')) ||
           (isRescueWhatsappTick && (req.method === 'POST' || req.method === 'GET'))
         if (!file || !methodOk) {
           return next()

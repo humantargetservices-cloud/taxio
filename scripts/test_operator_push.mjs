@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildOperatorPushMessages, assertStagingPushTarget } from '../api/_operatorPush.js'
+import { readFileSync } from 'node:fs'
+import { buildOperatorPushMessages, assertStagingPushTarget, interpretExpoPushTicket, interpretExpoReceipt, shouldSendAndroidPush, OPERATOR_CHANNEL_ID, OPERATOR_SOUND } from '../api/_operatorPush.js'
 
 test('push messages keep routing ids and drop passenger contact fields', () => {
   const messages = buildOperatorPushMessages(
@@ -24,7 +25,8 @@ test('push messages keep routing ids and drop passenger contact fields', () => {
   )
   assert.equal(messages.length, 1)
   assert.equal(messages[0].to, 'ExponentPushToken[abc]')
-  assert.equal(messages[0].channelId, 'taxio-offers')
+  assert.equal(messages[0].channelId, OPERATOR_CHANNEL_ID)
+  assert.equal(messages[0].sound, OPERATOR_SOUND)
   assert.equal(messages[0].priority, 'high')
   assert.equal(messages[0].data.booking_id, 'booking-1')
   assert.equal(messages[0].data.customer_phone, undefined)
@@ -40,6 +42,31 @@ test('sender refuses a production Supabase host', () => {
     if (previous == null) delete process.env.SUPABASE_URL
     else process.env.SUPABASE_URL = previous
   }
+})
+
+test('expo tickets revoke a dead device and retry only a rate limit', () => {
+  assert.equal(interpretExpoPushTicket({ status: 'ok', id: 'ticket-1' }).outcome, 'accepted')
+  assert.equal(interpretExpoPushTicket({ status: 'error', details: { error: 'DeviceNotRegistered' } }).revoke, true)
+  assert.equal(interpretExpoPushTicket({ status: 'error', details: { error: 'MessageRateExceeded' } }).retry, true)
+  assert.equal(interpretExpoReceipt({ status: 'ok' }).outcome, 'delivered')
+  assert.equal(interpretExpoReceipt(null).outcome, 'pending')
+})
+
+test('a recorded android alert is not sent again while its receipt is still open', () => {
+  const now = Date.parse('2026-10-29T12:00:00Z')
+  assert.equal(shouldSendAndroidPush(null, now), true)
+  assert.equal(shouldSendAndroidPush({ status: 'RECEIPT_OK', attempt_count: 1 }, now), false)
+  assert.equal(shouldSendAndroidPush({ status: 'REVOKED', attempt_count: 1 }, now), false)
+  assert.equal(shouldSendAndroidPush({ status: 'SENT', expo_ticket_id: 't', attempt_count: 1, updated_at: '2026-10-29T11:50:00Z' }, now), false)
+  assert.equal(shouldSendAndroidPush({ status: 'FAILED', attempt_count: 1, updated_at: '2026-10-29T11:00:00Z' }, now), true)
+  assert.equal(shouldSendAndroidPush({ status: 'FAILED', attempt_count: 3, updated_at: '2026-10-29T11:00:00Z' }, now), false)
+})
+
+test('android delivery still runs when web push already finished or failed', () => {
+  const src = readFileSync(new URL('../api/company-push-dispatch.js', import.meta.url), 'utf8')
+  assert.match(src, /if \(outbox\.status === 'SENT'\) \{[\s\S]{0,240}deliverOperatorAndroid/)
+  assert.match(src, /const operatorPush = await deliverOperatorAndroid\(admin, outbox\)/)
+  assert.equal((src.match(/deliverOperatorAndroid\(/g) || []).length >= 3, true)
 })
 
 test('sender stays closed unless the staging project is configured', () => {

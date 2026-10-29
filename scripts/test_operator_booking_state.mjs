@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyBooking, isActionableRescue, secondsRemaining } from '../apps/operator/src/utils/bookingState.ts'
+import { classifyBooking, isActionableRescue, routeOpenedAlert, secondsRemaining } from '../apps/operator/src/utils/bookingState.ts'
 import { isProductionTarget, liveActionsEnabled } from '../apps/operator/src/utils/environment.ts'
 
 const now = Date.parse('2026-10-27T12:00:00Z')
@@ -31,4 +31,19 @@ test('production hosts are refused', () => {
   assert.equal(isProductionTarget('https://amigo.taxio.be'), true)
   assert.equal(isProductionTarget('https://staging.taxio.be'), false)
   assert.equal(liveActionsEnabled(), false)
+})
+
+test('an opened alert refetches into the current offer and never accepts an expired one', () => {
+  const future = { id: 'b1', status: 'new', decision_deadline_at: '2026-10-27T12:00:30Z' }
+  const expired = { id: 'b1', status: 'new', decision_deadline_at: '2026-10-27T11:00:00Z' }
+  const accepted = { id: 'b1', status: 'accepted', decision_deadline_at: '2026-10-27T11:00:00Z' }
+  assert.equal(routeOpenedAlert({ eventType: 'company_booking_new', booking: future, nowMs: now }), 'open-booking')
+  assert.equal(routeOpenedAlert({ eventType: 'company_booking_new', booking: expired, nowMs: now }), 'expired')
+  assert.equal(routeOpenedAlert({ eventType: 'company_booking_new', booking: accepted, nowMs: now }), 'open-trip')
+  assert.equal(routeOpenedAlert({ eventType: 'company_booking_new', booking: { id: 'b1', status: 'cancelled' }, nowMs: now }), 'unavailable')
+  assert.equal(routeOpenedAlert({ eventType: 'company_booking_new', booking: null, nowMs: now }), 'unavailable')
+  assert.equal(routeOpenedAlert({ eventType: 'rescue_opportunity_new', rescue: { status: 'OFFERED', expires_at: '2026-10-27T12:00:30Z' }, nowMs: now }), 'open-rescue')
+  assert.equal(routeOpenedAlert({ eventType: 'rescue_opportunity_new', rescue: { status: 'ACCEPTED', expires_at: '2026-10-27T12:00:30Z' }, nowMs: now }), 'unavailable')
+  assert.equal(routeOpenedAlert({ eventType: 'rescue_opportunity_new', rescue: null, nowMs: now }), 'unavailable')
+  assert.equal(routeOpenedAlert({ eventType: 'operator_test', booking: null, nowMs: now }), 'test')
 })
