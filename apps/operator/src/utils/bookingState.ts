@@ -251,6 +251,28 @@ export function pageOf<T>(rows: T[], page: number, size = 20): { rows: T[]; hasM
 }
 
 export function euro(amount: number | null): string {
-  if (amount == null) return 'Unavailable'
+  if (amount == null || Number.isNaN(amount)) return 'Unavailable'
   return '€' + amount.toFixed(2)
+}
+
+export function shortPlace(address?: string | null): string {
+  if (!address) return 'Address missing'
+  const parts = address.split(',').map(part => part.trim()).filter(Boolean)
+  const last = parts[parts.length - 1] || address
+  return last.replace(/^\d{4}\s*/, '') || last
+}
+
+export function pickupWhen(rideDatetime: string | null | undefined, nowMs: number): string {
+  if (!rideDatetime) return 'Ride now'
+  const ride = new Date(rideDatetime)
+  if (Number.isNaN(ride.getTime())) return 'Ride now'
+  const time = ride.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  const start = new Date(nowMs)
+  start.setHours(0, 0, 0, 0)
+  const rideDay = new Date(ride)
+  rideDay.setHours(0, 0, 0, 0)
+  const diff = Math.round((rideDay.getTime() - start.getTime()) / 86400000)
+  if (diff === 0) return 'Today · ' + time
+  if (diff === 1) return 'Tomorrow · ' + time
+  return ride.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/,/g, '') + ' · ' + time
 }

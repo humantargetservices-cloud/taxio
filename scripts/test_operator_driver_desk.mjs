@@ -59,7 +59,7 @@ test('incoming request screen is accept-only and back does not accept', () => {
   const offer = readFileSync(new URL('../apps/operator/src/components/IncomingOffer.tsx', import.meta.url), 'utf8')
   const screen = readFileSync(new URL('../apps/operator/src/components/FullScreenRequest.tsx', import.meta.url), 'utf8')
   assert.doesNotMatch(offer + screen, /accessibilityLabel="Decline|Decline trip|>Close</)
-  assert.match(offer, /ACCEPT/)
+  assert.match(offer, /Accept trip/)
   assert.match(screen, /hardwareBackPress/)
   assert.match(screen, /onRequestClose=\{\(\) => \{\}\}/)
   assert.doesNotMatch(screen, /hardwareBackPress[\s\S]{0,180}onAccept/)

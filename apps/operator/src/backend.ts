@@ -13,7 +13,7 @@ export const operatorDb = integrationConfigured ? createClient(supabaseTarget.va
   auth: { storage: { getItem: (k: string) => SecureStore.getItemAsync(k), setItem: (k: string,v: string) => SecureStore.setItemAsync(k,v), removeItem: (k: string) => SecureStore.deleteItemAsync(k) }, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
 }) : null
 
-export type OperatorCompany = { id: string; name: string; logo_url: string | null; status: string; slug?: string | null; availability_status?: string | null }
+export type OperatorCompany = { id: string; name: string; logo_url: string | null; status: string; slug?: string | null; availability_status?: string | null; slogan?: string | null; vat_number?: string | null; phone?: string | null }
 export async function loginOperator(email: string, password: string): Promise<Session> {
   if (!operatorDb) throw Error('Integration is not configured')
   const { data, error } = await operatorDb.auth.signInWithPassword({ email: email.trim(), password })
@@ -25,7 +25,7 @@ export async function resolveOperatorCompany(userId: string): Promise<OperatorCo
   // Version 1: a single approved company operator/owner account per app session.
   // Future driver roles must be separately authorized by server-side policies.
   const {data,error} = await operatorDb.from('companies')
-    .select('id,name,logo_url,status,slug,availability_status').eq('owner_user_id',userId)
+    .select('id,name,logo_url,status,slug,availability_status,slogan,vat_number,phone').eq('owner_user_id',userId)
     .eq('status','approved').limit(2)
   if(error) throw Error('Unable to verify your company')
   if (!data || data.length !== 1) throw Error('Expected one approved company for this operator')
@@ -88,6 +88,13 @@ export async function restoreOperatorCompany(): Promise<OperatorCompany | null> 
   const {data,error} = await operatorDb.auth.getUser()
   if(error || !data.user) return null
   return resolveOperatorCompany(data.user.id)
+}
+
+export async function readWonRescueBookingIds(companyId: string): Promise<string[] | null> {
+  if (!operatorDb) return null
+  const { data, error } = await operatorDb.from('rescue_requests').select('booking_request_id').eq('accepted_by_company_id', companyId).limit(200)
+  if (error) return null
+  return (data || []).map(row => String((row as { booking_request_id?: string }).booking_request_id || '')).filter(Boolean)
 }
 
 export type RescueOffer = { id:string; rescue_request_id:string; expires_at:string|null; status:string; rescue?: {id:string;status:string;preview_pickup_label:string|null;preview_dropoff_label:string|null;preview_ride_datetime:string|null;preview_estimated_price?:string|null} | null }

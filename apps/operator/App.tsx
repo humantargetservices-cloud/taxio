@@ -5,18 +5,22 @@ import { registerOperatorForPush, revokeOperatorPush } from './src/pushRegistrat
 import { Workspace, type DriverBooking } from './src/screens/Workspace'
 import { theme } from './src/theme/theme'
 
-const DEMO_COMPANY = { id: 'demo', name: 'ABC Taxi', slug: null as string | null, logo_url: null as string | null, availability_status: 'available' }
+const DEMO_COMPANY = { id: 'demo', name: 'Preview Taxi', slug: 'preview-taxi', logo_url: null as string | null, availability_status: 'available', slogan: 'Preview slogan', vat_number: 'Preview VAT', phone: '+32 000 00 00' }
 function demoBookings(now = Date.now()): DriverBooking[] {
+  const hour = 3600000
   return [
-    { id: 'demo-booking-1', booking_reference: 'TX-DEMO', pickup_address: 'Leuven Station', dropoff_address: 'Brussels Airport', status: 'new', decision_deadline_at: new Date(now + 25000).toISOString(), customer_name: 'Preview rider', estimated_price_eur: 42, ride_datetime: new Date(now + 3600000).toISOString() },
-    { id: 'demo-trip-1', booking_reference: 'TX-TRIP', pickup_address: 'Aarschot', dropoff_address: 'Leuven', status: 'accepted', customer_name: 'Preview passenger', driver_pickup_status: 'accepted' },
+    { id: 'demo-booking-1', booking_reference: 'TX-DEMO', pickup_address: 'Preview street 1, 3000 Preview City', dropoff_address: 'Preview station, 3001 Other City', status: 'new', decision_deadline_at: new Date(now + 30000).toISOString(), customer_name: 'Preview rider', estimated_price_eur: 23.09, ride_datetime: new Date(now + hour).toISOString() },
+    { id: 'demo-trip-1', booking_reference: 'TX-TRIP', pickup_address: 'Preview lane 12, 3200 First Town', dropoff_address: 'Preview square, 3000 Second Town', status: 'accepted', customer_name: 'Preview passenger', customer_phone: '+32000000000', driver_pickup_status: 'accepted', estimated_price_eur: 23.09, ride_datetime: new Date(now + hour).toISOString() },
+    { id: 'demo-trip-2', booking_reference: 'TX-LATER', pickup_address: 'North road, 2800 Third Town', dropoff_address: 'South road, 1000 Fourth Town', status: 'accepted', customer_name: 'Preview passenger', driver_pickup_status: 'accepted', estimated_price_eur: 58, ride_datetime: new Date(now + 20 * hour).toISOString() },
+    { id: 'demo-done-1', booking_reference: 'TX-DONE', pickup_address: 'Done street, 3000 Preview City', dropoff_address: 'Done station, 3001 Other City', status: 'completed', completed_at: new Date(now - hour).toISOString(), estimated_price_eur: 40, customer_name: 'Preview passenger' },
+    { id: 'demo-done-2', booking_reference: 'TX-DONE-2', pickup_address: 'Second street, 3000 Preview City', dropoff_address: 'Second station, 3001 Other City', status: 'completed', completed_at: new Date(now - 2 * hour).toISOString(), estimated_price_eur: 35, customer_name: 'Preview passenger' },
   ]
 }
 
 export default function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [company, setCompany] = useState<{ id: string; name: string; slug?: string | null; logo_url?: string | null; availability_status?: string | null } | null>(null)
+  const [company, setCompany] = useState<{ id: string; name: string; slug?: string | null; logo_url?: string | null; availability_status?: string | null; slogan?: string | null; vat_number?: string | null; phone?: string | null } | null>(null)
   const [bookings, setBookings] = useState<DriverBooking[]>([])
   const [rescue, setRescue] = useState<RescueOffer[]>([])
   const [demo, setDemo] = useState(false)
@@ -77,15 +81,18 @@ export default function App() {
 
   if (company) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }}>
-        <StatusBar barStyle="light-content" />
-        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} onSignOut={signOut} />
-      </SafeAreaView>
+      <View style={frame}>
+        <SafeAreaView style={phone}>
+          <StatusBar barStyle="light-content" />
+          <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} slogan={company.slogan} vatNumber={company.vat_number} phone={company.phone} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} onSignOut={signOut} />
+        </SafeAreaView>
+      </View>
     )
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }}>
+    <View style={frame}>
+    <SafeAreaView style={phone}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={{ padding: 22, gap: 12 }}>
         <Text style={{ color: theme.gold, fontWeight: '900', marginTop: 24 }}>TAXIO OPERATOR</Text>
@@ -106,7 +113,10 @@ export default function App() {
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
+    </View>
   )
 }
 
+const frame = { flex: 1, backgroundColor: '#000', alignItems: 'center' as const }
+const phone = { flex: 1, width: '100%' as const, maxWidth: 430, backgroundColor: theme.bg }
 const input = { backgroundColor: theme.input, color: theme.inputText, borderRadius: 12, padding: 14, fontSize: 16 }
