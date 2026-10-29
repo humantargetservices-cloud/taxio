@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Text, TextInput, TouchableOpacity } from 'react-native'
 import { integrationConfigured, loginOperator, operatorDb, productionTargetBlocked, readCompanyBookings, readCompanyRescueOffers, resolveOperatorCompany, restoreOperatorCompany, type RescueOffer } from './src/backend'
-import { registerOperatorForPush, revokeOperatorPush } from './src/pushRegistration'
+import { registerOperatorForPush, revokeOperatorPush, sendStagingTestPush } from './src/pushRegistration'
 import { Workspace, type DriverBooking } from './src/screens/Workspace'
 import { theme } from './src/theme/theme'
 
@@ -28,6 +28,9 @@ export default function App() {
   const [message, setMessage] = useState('')
   const [restoring, setRestoring] = useState(integrationConfigured)
   const [pushStatus, setPushStatus] = useState('Alerts not registered')
+  const [pushPermission, setPushPermission] = useState('unknown')
+  const [lastAlertTest, setLastAlertTest] = useState('No test sent from this phone')
+  const [testAlertBusy, setTestAlertBusy] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -41,7 +44,7 @@ export default function App() {
             setBookings(rows)
             try { setRescue(await readCompanyRescueOffers(existing.id)) } catch { /* rescue may be unavailable */ }
             const push = await registerOperatorForPush(existing.id)
-            if (active) setPushStatus(push.ok ? 'Alerts registered on this phone' : push.code)
+            if (active) { setPushStatus(push.ok ? 'Alerts registered on this phone' : push.code); setPushPermission(push.permission) }
           }
         }
       } catch { /* login stays visible */ }
@@ -63,12 +66,21 @@ export default function App() {
       try { setRescue(await readCompanyRescueOffers(owner.id)) } catch { /* rescue may be unavailable */ }
       const push = await registerOperatorForPush(owner.id)
       setPushStatus(push.ok ? 'Alerts registered on this phone' : push.code)
+      setPushPermission(push.permission)
       setDemo(false)
       setPassword('')
     } catch (e) {
       setMessage(e instanceof Error ? e.message : 'Unable to sign in')
       await operatorDb?.auth.signOut()
     } finally { setBusy(false) }
+  }
+
+  async function testAlert() {
+    if (demo || testAlertBusy) return
+    setTestAlertBusy(true)
+    const result = await sendStagingTestPush()
+    setLastAlertTest(result.ok ? 'Test accepted by staging. Confirm it appears on this phone.' : result.code)
+    setTestAlertBusy(false)
   }
 
   async function signOut() {
@@ -83,7 +95,7 @@ export default function App() {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }}>
         <StatusBar barStyle="light-content" />
-        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} slogan={company.slogan} vatNumber={company.vat_number} phone={company.phone} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} onSignOut={signOut} />
+        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} slogan={company.slogan} vatNumber={company.vat_number} phone={company.phone} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} pushPermission={pushPermission} lastAlertTest={lastAlertTest} onTestAlert={testAlert} testAlertBusy={testAlertBusy} onSignOut={signOut} />
       </SafeAreaView>
     )
   }

@@ -3,7 +3,7 @@
     "name": "TAXIO Operator",
     "slug": "taxio-operator",
     "scheme": "taxiooperator",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "android": {
@@ -16,7 +16,12 @@
       "bundleIdentifier": "be.taxio.operator"
     },
     "plugins": [
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "sounds": ["./assets/taxio_offer.wav"]
+        }
+      ]
     ]
   }
 }

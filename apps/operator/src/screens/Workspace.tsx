@@ -10,7 +10,7 @@ import { navigationUrl } from '../utils/navigation'
 import { useOfferSync } from '../hooks/useOfferSync'
 import { mobileActionsEnabled, sendOperatorAction } from '../operatorActions'
 import { theme } from '../theme/theme'
-import { isActionableOffer, isActionableRescue, pickupProgress, secondsRemaining } from '../utils/bookingState'
+import { isActionableOffer, isActionableRescue, pickupProgress, routeOpenedAlert, secondsRemaining } from '../utils/bookingState'
 import { bookingHost } from '../utils/environment'
 import {
   availabilityFromControls,
@@ -42,6 +42,10 @@ export function Workspace({
   initialBookings,
   initialRescue,
   pushStatus,
+  pushPermission,
+  lastAlertTest,
+  onTestAlert,
+  testAlertBusy,
   onSignOut,
 }: {
   companyName: string
@@ -56,6 +60,10 @@ export function Workspace({
   initialBookings: DriverBooking[]
   initialRescue: RescueOffer[]
   pushStatus?: string
+  pushPermission?: string
+  lastAlertTest?: string
+  onTestAlert?: () => void
+  testAlertBusy?: boolean
   onSignOut: () => void
 }) {
   const [tab, setTab] = useState<DriverTab>('home')
@@ -105,22 +113,59 @@ export function Workspace({
     void readWonRescueBookingIds(companyId).then(setRescuedIds)
   }, [companyId, demo, bookings])
 
+  const openAlertRef = useRef<(data: Record<string, unknown>) => void>(() => {})
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data || {}
-      const kind = String(data.event_type || '')
-      const bookingId = String(data.booking_id || '')
-      if (kind.includes('rescue')) {
-        const offer = rescueRef.current.find(item => isActionableRescue(item.status, item.expires_at, Date.now()))
-        if (offer) setIncomingRescue(offer)
-        return
-      }
-      const row = bookingsRef.current.find(item => item.id === bookingId)
-      if (row && isActionableOffer(row, Date.now())) setIncoming(row)
-      else if (bookingId) { setSelectedId(bookingId); setTab('trips') }
+      void openAlertRef.current(data)
     })
     return () => sub.remove()
   }, [])
+
+  async function openAlert(data: Record<string, unknown>) {
+    const kind = String(data.event_type || '')
+    const bookingId = String(data.booking_id || '')
+    const rescueId = String(data.rescue_request_id || data.rescue_opportunity_id || '')
+    let rows = bookingsRef.current
+    let rescueRows = rescueRef.current
+    if (!demo) {
+      try {
+        rows = await readCompanyBookings(companyId)
+        setBookings(rows)
+        try {
+          rescueRows = await readCompanyRescueOffers(companyId)
+          setRescueOffers(rescueRows)
+        } catch { /* rescue may be unavailable */ }
+      } catch {
+        setNotice('Could not refresh this alert. Check the connection before acting on it.')
+        return
+      }
+    }
+    const booking = rows.find(row => row.id === bookingId) || null
+    const rescueOffer = rescueRows.find(row => row.rescue_request_id === rescueId || row.id === rescueId) || null
+    const action = routeOpenedAlert({ eventType: kind, booking, rescue: rescueOffer, nowMs: Date.now() })
+    setIncoming(null)
+    setIncomingRescue(null)
+    if (action === 'test') { setNotice('Test alert opened. No trip was created.'); return }
+    if (action === 'open-booking' && booking) { setOfferError(''); setIncoming(booking); setNotice(''); return }
+    if (action === 'open-rescue' && rescueOffer) { setIncomingRescue(rescueOffer); setNotice(''); return }
+    if (action === 'open-trip' && booking) { setSelectedId(booking.id); setTab('trips'); setNotice(''); return }
+    if (action === 'expired') { setNotice('Request expired · no trip accepted'); return }
+    setNotice('This offer is no longer available.')
+  }
+  openAlertRef.current = openAlert
+
+  useEffect(() => {
+    if (demo) return
+    const actionable = new Set(bookings.filter(row => isActionableOffer(row, Date.now())).map(row => row.id))
+    void Notifications.getPresentedNotificationsAsync().then(items => {
+      for (const item of items) {
+        const bookingId = String(item.request.content.data?.booking_id || '')
+        if (!bookingId || actionable.has(bookingId)) continue
+        void Notifications.dismissNotificationAsync(item.request.identifier)
+      }
+    }).catch(() => {})
+  }, [bookings, demo])
 
   React.useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
 
@@ -364,7 +409,14 @@ export function Workspace({
       <Text style={{ color: theme.text }}>Language</Text>
       <Text style={small}>English · Nederlands · Français. The app stays in its current language.</Text>
       <Text style={{ color: theme.text, marginVertical: 7 }}>Appearance · Dark</Text>
-      <Text style={small}>{pushStatus || 'Alerts not registered'}</Text>
+      <Text style={h3}>Alert status</Text>
+      <Text style={small}>Permission · {pushPermission || 'unknown'}</Text>
+      <Text style={small}>Registration · {pushStatus || 'Alerts not registered'}</Text>
+      <Text style={small}>Channel · Trip offers, high importance, TAXIO sound</Text>
+      <Text style={small}>Connection · {syncError ? 'Not connected. ' + syncError : 'Connected to TAXIO'}</Text>
+      <Text style={small}>Last test · {lastAlertTest || 'No test sent from this phone'}</Text>
+      <Text style={small}>A test confirms the staging sender. It does not prove an alert will sound when Android has stopped the app.</Text>
+      {demo ? null : <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send test alert" disabled={testAlertBusy} onPress={onTestAlert} style={quietBtn}><Text style={btnText}>{testAlertBusy ? 'Sending test…' : 'Send test alert'}</Text></TouchableOpacity>}
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sign out" onPress={onSignOut} style={quietBtn}><Text style={btnText}>Sign out</Text></TouchableOpacity>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close preferences" onPress={() => setPanel('')} style={quietBtn}><Text style={btnText}>Close</Text></TouchableOpacity>
     </View>

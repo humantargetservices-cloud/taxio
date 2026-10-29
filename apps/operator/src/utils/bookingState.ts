@@ -58,6 +58,29 @@ export function isActionableRescue(status: string, expiresAt: string | null | un
   return ms != null && ms > nowMs
 }
 
+export type OpenedAlertAction = 'test' | 'open-booking' | 'open-rescue' | 'open-trip' | 'expired' | 'unavailable'
+
+/** Decide what a tapped alert may open. It never accepts a trip. */
+export function routeOpenedAlert(input: {
+  eventType?: string | null
+  booking?: BookingLike | null
+  rescue?: { status?: string | null; expires_at?: string | null } | null
+  nowMs: number
+}): OpenedAlertAction {
+  const kind = String(input.eventType || '').toLowerCase()
+  if (kind === 'operator_test') return 'test'
+  if (kind.includes('rescue')) {
+    if (input.rescue && isActionableRescue(String(input.rescue.status || ''), input.rescue.expires_at, input.nowMs)) return 'open-rescue'
+    return 'unavailable'
+  }
+  if (!input.booking) return 'unavailable'
+  const state = classifyBooking(input.booking, input.nowMs)
+  if (state === 'actionable') return 'open-booking'
+  if (state === 'accepted' || state === 'completed') return 'open-trip'
+  if (state === 'expired') return 'expired'
+  return 'unavailable'
+}
+
 export type DeskBooking = BookingLike & {
   pickup_address?: string | null
   dropoff_address?: string | null
