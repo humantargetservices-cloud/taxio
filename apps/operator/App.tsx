@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { SafeAreaView, ScrollView, StatusBar, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { SafeAreaView, ScrollView, StatusBar, Text, TextInput, TouchableOpacity } from 'react-native'
 import { integrationConfigured, loginOperator, operatorDb, productionTargetBlocked, readCompanyBookings, readCompanyRescueOffers, resolveOperatorCompany, restoreOperatorCompany, type RescueOffer } from './src/backend'
 import { registerOperatorForPush, revokeOperatorPush } from './src/pushRegistration'
 import { Workspace, type DriverBooking } from './src/screens/Workspace'
@@ -81,18 +81,15 @@ export default function App() {
 
   if (company) {
     return (
-      <View style={frame}>
-        <SafeAreaView style={phone}>
-          <StatusBar barStyle="light-content" />
-          <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} slogan={company.slogan} vatNumber={company.vat_number} phone={company.phone} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} onSignOut={signOut} />
-        </SafeAreaView>
-      </View>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }}>
+        <StatusBar barStyle="light-content" />
+        <Workspace companyName={company.name} logoUrl={company.logo_url} slug={company.slug} slogan={company.slogan} vatNumber={company.vat_number} phone={company.phone} demo={demo} companyId={company.id} initialAvailability={company.availability_status} initialBookings={bookings} initialRescue={rescue} pushStatus={pushStatus} onSignOut={signOut} />
+      </SafeAreaView>
     )
   }
 
   return (
-    <View style={frame}>
-    <SafeAreaView style={phone}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={{ padding: 22, gap: 12 }}>
         <Text style={{ color: theme.gold, fontWeight: '900', marginTop: 24 }}>TAXIO OPERATOR</Text>
@@ -113,10 +110,7 @@ export default function App() {
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
-    </View>
   )
 }
 
-const frame = { flex: 1, backgroundColor: '#000', alignItems: 'center' as const }
-const phone = { flex: 1, width: '100%' as const, maxWidth: 430, backgroundColor: theme.bg }
 const input = { backgroundColor: theme.input, color: theme.inputText, borderRadius: 12, padding: 14, fontSize: 16 }

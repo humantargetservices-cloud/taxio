@@ -255,9 +255,8 @@ export function Workspace({
     <>
       <BrandBar onShare={() => setQrOpen(true)} />
       <CompanyCard name={companyName} slogan={slogan} vatNumber={vatNumber} phone={phone} availability={availability} onQr={() => setQrOpen(true)} onShare={() => setQrOpen(true)} />
-      {demo ? <Text style={{ color: theme.warn, paddingHorizontal: 18, marginTop: 8 }}>Offline preview. No live bookings.</Text> : null}
-      {syncError ? <Text style={{ color: theme.danger, paddingHorizontal: 18, marginTop: 8 }}>{syncError}</Text> : null}
-      {offerError ? <Text style={{ color: theme.danger, paddingHorizontal: 18, marginTop: 8 }}>{offerError}</Text> : null}
+      {syncError ? <Text style={{ color: theme.danger, paddingHorizontal: 16, marginTop: 8 }}>{syncError}</Text> : null}
+      {offerError ? <Text style={{ color: theme.danger, paddingHorizontal: 16, marginTop: 8 }}>{offerError}</Text> : null}
       {body}
     </>
   )
@@ -266,9 +265,9 @@ export function Workspace({
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         {tab === 'home' ? shell(
-          <View style={{ padding: 16, gap: 14 }}>
-            <Text style={{ color: theme.faint, fontWeight: '800', letterSpacing: 0.8, fontSize: 12 }}>{dateLabel}</Text>
-            <Text style={{ color: theme.text, fontSize: 32, fontWeight: '900', marginTop: -8 }}>Your driving day</Text>
+          <View style={{ paddingHorizontal: 14, paddingTop: 14, gap: 10 }}>
+            <Text style={{ color: theme.faint, fontWeight: '700', letterSpacing: 0.8, fontSize: 11 }}>{dateLabel}</Text>
+            <Text style={{ color: theme.text, fontSize: 26, fontWeight: '800', marginTop: -4 }}>Your driving day</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <Stat value={String(trips.length)} label={'Active\nBookings & updates'} emphasized onPress={() => setTab('trips')} />
               <Stat value={String(completedToday.length)} label={'Completed\nRescued & direct'} />
@@ -292,7 +291,7 @@ export function Workspace({
             {offer ? (
               <View style={card}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ color: theme.text, fontSize: 18, fontWeight: '800' }}>Incoming booking</Text>
+                  <Text style={{ color: theme.text, fontSize: 16, fontWeight: '800' }}>Incoming booking</Text>
                   <Text style={{ color: theme.goldText, backgroundColor: theme.gold, borderRadius: 8, overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 3, fontWeight: '900', fontSize: 12 }}>NEW</Text>
                 </View>
                 <Text style={{ color: theme.text, fontWeight: '700' }}>{shortPlace(offer.pickup_address)} → {shortPlace(offer.dropoff_address)}</Text>
@@ -304,8 +303,9 @@ export function Workspace({
             ) : null}
             {openRescue[0] ? (
               <View style={card}>
-                <Text style={{ color: theme.text, fontSize: 18, fontWeight: '800' }}>Rescue offer</Text>
-                <Text style={{ color: theme.muted }}>Passenger details stay hidden until you are the confirmed winner.</Text>
+                <Text style={{ color: theme.text, fontSize: 16, fontWeight: '800' }}>Rescue offer</Text>
+                <Text style={{ color: theme.text, fontWeight: '700' }}>{openRescue[0].rescue?.preview_pickup_label || 'Pickup hidden'} → {openRescue[0].rescue?.preview_dropoff_label || 'Destination hidden'}</Text>
+                <Text style={{ color: theme.gold, fontWeight: '800' }}>{pickupWhen(openRescue[0].rescue?.preview_ride_datetime, now)}</Text>
                 <TouchableOpacity accessibilityRole="button" accessibilityLabel="View rescue offer" onPress={() => setIncomingRescue(openRescue[0])} style={goldBtn}>
                   <Text style={goldText}>View rescue offer</Text>
                 </TouchableOpacity>
@@ -332,7 +332,7 @@ export function Workspace({
         {tab === 'earnings' ? shell(
           <View style={{ padding: 16, gap: 14 }}>
             <Text style={{ color: theme.faint, fontWeight: '800', letterSpacing: 0.8, fontSize: 12 }}>{dateLabel}</Text>
-            <Text style={{ color: theme.text, fontSize: 32, fontWeight: '900', marginTop: -8 }}>Your earnings</Text>
+            <Text style={{ color: theme.text, fontSize: 26, fontWeight: '800', marginTop: -4 }}>Your earnings</Text>
             <View style={card}>
               <Text style={{ color: theme.faint, fontWeight: '800', letterSpacing: 0.6, fontSize: 12 }}>COMPLETED TRIP FARES · TODAY</Text>
               <Text style={{ color: theme.text, fontSize: 40, fontWeight: '900' }}>{euro(dayEarnings.estimatedTotalEur)}</Text>
@@ -380,7 +380,7 @@ export function Workspace({
               </View>
             ) : (
               <View style={{ gap: 14 }}>
-                <Text style={{ color: theme.text, fontSize: 32, fontWeight: '900' }}>Driver account</Text>
+                <Text style={{ color: theme.text, fontSize: 26, fontWeight: '800' }}>Driver account</Text>
                 <View style={card}>
                   <Text style={{ color: theme.text, fontSize: 18, fontWeight: '800' }}>{driverName || 'Driver'}</Text>
                   <Text style={{ color: theme.muted }}>{companyName} · driver</Text>
@@ -446,13 +446,13 @@ export function Workspace({
 
 function Stat({ value, label, emphasized, onPress }: { value: string; label: string; emphasized?: boolean; onPress?: () => void }) {
   return (
-    <TouchableOpacity accessibilityRole="button" disabled={!onPress} onPress={onPress} style={{ flex: 1, backgroundColor: theme.card, borderRadius: 16, padding: 12, minHeight: 108, borderWidth: emphasized ? 1 : 0, borderColor: theme.gold }}>
-      <Text style={{ color: theme.text, fontSize: 28, fontWeight: '900' }}>{value}</Text>
-      <Text style={{ color: theme.muted, marginTop: 6 }}>{label}</Text>
+    <TouchableOpacity accessibilityRole="button" disabled={!onPress} onPress={onPress} style={{ flex: 1, backgroundColor: theme.card, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 12, minHeight: 92, borderWidth: emphasized ? 1 : 0, borderColor: theme.gold }}>
+      <Text style={{ color: theme.text, fontSize: 22, fontWeight: '800' }}>{value}</Text>
+      <Text style={{ color: theme.muted, marginTop: 4, fontSize: 12, lineHeight: 15 }}>{label}</Text>
     </TouchableOpacity>
   )
 }
 
-const card = { backgroundColor: theme.card, borderRadius: 18, padding: 16, gap: 8 }
-const goldBtn = { backgroundColor: theme.gold, borderRadius: 14, minHeight: 52, alignItems: 'center' as const, justifyContent: 'center' as const }
-const goldText = { color: theme.goldText, fontWeight: '900' as const, fontSize: 16 }
+const card = { backgroundColor: theme.card, borderRadius: 16, padding: 14, gap: 6 }
+const goldBtn = { backgroundColor: theme.gold, borderRadius: 12, minHeight: 48, alignItems: 'center' as const, justifyContent: 'center' as const, marginTop: 4 }
+const goldText = { color: theme.goldText, fontWeight: '800' as const, fontSize: 16 }

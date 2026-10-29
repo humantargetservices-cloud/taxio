@@ -14,7 +14,7 @@ const ITEMS: { id: DriverTab; label: string; Icon: typeof IconHome }[] = [
 
 export function TabBar({ tab, onChange }: { tab: DriverTab; onChange: (tab: DriverTab) => void }) {
   return (
-    <View style={{ flexDirection: 'row', backgroundColor: '#0c1322', borderTopWidth: 1, borderTopColor: '#1c2740', paddingBottom: 8, paddingTop: 8 }}>
+    <View style={{ flexDirection: 'row', backgroundColor: theme.tab, borderTopWidth: 1, borderTopColor: '#1c2740', paddingBottom: 6, paddingTop: 6 }}>
       {ITEMS.map(item => {
         const active = tab === item.id
         const color = active ? theme.gold : theme.faint
