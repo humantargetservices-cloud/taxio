@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "TAXIO Operator",
-    "slug": "taxio-operator",
+    "slug": "taxio-platform",
     "scheme": "taxiooperator",
     "version": "0.5.1",
     "orientation": "portrait",
@@ -19,9 +19,17 @@
       [
         "expo-notifications",
         {
-          "sounds": ["./assets/taxio_offer.wav"]
+          "sounds": [
+            "./assets/taxio_offer.wav"
+          ]
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "bda84336-17c9-470c-831f-6680a2be36cf"
+      }
+    },
+    "owner": "taxio-platform"
   }
 }
