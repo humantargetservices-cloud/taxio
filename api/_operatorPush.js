@@ -10,7 +10,7 @@ const PRODUCTION_HOST = 'gdiamipqrhxbmrcsnqdk.supabase.co'
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send'
 const EXPO_RECEIPT_URL = 'https://exp.host/--/api/v2/push/getReceipts'
 
-export const OPERATOR_CHANNEL_ID = 'taxio-offers-v2'
+export const OPERATOR_CHANNEL_ID = 'taxio-offers-v3'
 export const OPERATOR_SOUND = 'taxio_offer.wav'
 const RECEIPT_WAIT_MS = 15 * 60 * 1000
 const MAX_ATTEMPTS = 3
