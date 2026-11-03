@@ -1,16 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react'
 import * as Notifications from 'expo-notifications'
-import { Alert, BackHandler, Linking, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from 'react-native'
+import { Alert, AppState, BackHandler, Linking, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { operatorDb, readCompanyBookings, readCompanyRescueOffers, readWonRescueBookingIds, setCompanyAvailability, type CompanyBooking, type RescueOffer } from '../backend'
 import QRCode from 'react-native-qrcode-svg'
 import { BrandBar, CompanyCard } from '../components/CompanyCard'
+import { IncomingOffer } from '../components/IncomingOffer'
+import { OfferSound } from '../components/OfferSound'
 import { TabBar, type DriverTab } from '../components/TabBar'
 import { IconClock, IconNavigate, IconPhone } from '../components/icons'
 import { navigationUrl } from '../utils/navigation'
 import { useOfferSync } from '../hooks/useOfferSync'
+import { dismissOfferNotifications } from '../pushRegistration'
 import { mobileActionsEnabled, sendOperatorAction } from '../operatorActions'
 import { theme } from '../theme/theme'
-import { isActionableOffer, isActionableRescue, pickupProgress, routeOpenedAlert, secondsRemaining } from '../utils/bookingState'
+import { isActionableOffer, isActionableRescue, classifyBooking, pickupProgress, routeOpenedAlert, secondsRemaining, alertPresentation } from '../utils/bookingState'
 import { bookingHost } from '../utils/environment'
 import {
   availabilityFromControls,
@@ -91,6 +94,7 @@ export function Workspace({
   const [averageWindow, setAverageWindow] = useState<7 | 30>(7)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [openHistory, setOpenHistory] = useState<Record<string, boolean>>({})
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active')
   const bookingsRef = useRef(bookings)
   const rescueRef = useRef(rescueOffers)
   const seenRescue = useRef<Set<string> | null>(null)
@@ -115,11 +119,23 @@ export function Workspace({
 
   const openAlertRef = useRef<(data: Record<string, unknown>) => void>(() => {})
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data || {}
+    const received = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data || {}
+      if (alertPresentation(String(data.event_type || '')) === 'test') {
+        setNotice('Test alert. No trip was created.')
+        return
+      }
       void openAlertRef.current(data)
     })
-    return () => sub.remove()
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data || {}
+      if (alertPresentation(String(data.event_type || '')) === 'test') {
+        setNotice('Test alert. No trip was created.')
+        return
+      }
+      void openAlertRef.current(data)
+    })
+    return () => { received.remove(); sub.remove() }
   }, [])
 
   async function openAlert(data: Record<string, unknown>) {
@@ -167,6 +183,11 @@ export function Workspace({
     }).catch(() => {})
   }, [bookings, demo])
 
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => setAppActive(state === 'active'))
+    return () => sub.remove()
+  }, [])
+
   React.useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
 
   useEffect(() => {
@@ -195,12 +216,34 @@ export function Workspace({
   }, [rescueOffers])
 
   useEffect(() => {
-    if (incoming && !isActionableOffer(incoming, now)) { setIncoming(null); setNotice('Request expired · no trip accepted') }
-  }, [incoming, now])
+    if (!incoming) return
+    const fresh = bookings.find(row => row.id === incoming.id) || incoming
+    if (!isActionableOffer(fresh, now)) {
+      const id = incoming.id
+      const state = classifyBooking(fresh, now)
+      setIncoming(null)
+      setNotice(state === 'expired' ? 'Request expired · no trip accepted' : 'This offer is no longer available.')
+      void dismissOfferNotifications({ bookingId: id })
+      return
+    }
+    if (fresh !== incoming && (fresh.status !== incoming.status || fresh.decision_deadline_at !== incoming.decision_deadline_at)) {
+      setIncoming(fresh)
+    }
+  }, [bookings, incoming, now])
 
   useEffect(() => {
-    if (incomingRescue && !isActionableRescue(incomingRescue.status, incomingRescue.expires_at, now)) setIncomingRescue(null)
-  }, [incomingRescue, now])
+    if (!incomingRescue) return
+    const fresh = rescueOffers.find(offer => offer.rescue_request_id === incomingRescue.rescue_request_id) || incomingRescue
+    if (!isActionableRescue(fresh.status, fresh.expires_at, now)) {
+      const id = incomingRescue.rescue_request_id
+      setIncomingRescue(null)
+      void dismissOfferNotifications({ rescueId: id })
+      return
+    }
+    if (fresh !== incomingRescue && (fresh.status !== incomingRescue.status || fresh.expires_at !== incomingRescue.expires_at)) {
+      setIncomingRescue(fresh)
+    }
+  }, [incomingRescue, now, rescueOffers])
 
   const actionable = bookings.filter(booking => isActionableOffer(booking, now))
   const trips = sortActiveTrips(bookings, now)
@@ -239,8 +282,15 @@ export function Workspace({
     setOfferError('')
     try {
       const result = await sendOperatorAction(companyId, { action: 'accept_booking', companyId, bookingRequestId: id })
-      if (!result.ok) throw Error(result.error || result.code || 'Booking no longer available')
+      if (!result.ok) {
+        if (result.code === 'NO_LONGER_AVAILABLE') {
+          setIncoming(null)
+          void dismissOfferNotifications({ bookingId: id })
+        }
+        throw Error(result.error || result.code || 'Booking no longer available')
+      }
       setIncoming(null)
+      void dismissOfferNotifications({ bookingId: id })
       setSelectedId(id)
       setTab('trips')
       await refresh()
@@ -257,8 +307,13 @@ export function Workspace({
     setOfferError('')
     try {
       const result = await sendOperatorAction(companyId, { action: 'accept', companyId, rescueRequestId })
-      if (!result.ok) throw Error(result.error || result.code || 'Rescue no longer available')
+      if (!result.ok) {
+        setIncomingRescue(null)
+        void dismissOfferNotifications({ rescueId: rescueRequestId })
+        throw Error(result.error || result.code || 'Rescue no longer available')
+      }
       setIncomingRescue(null)
+      void dismissOfferNotifications({ rescueId: rescueRequestId })
       setOfferError('Rescue claimed. Passenger details stay locked until the server confirms the passenger.')
       await refresh()
     } catch (error) {
@@ -412,10 +467,10 @@ export function Workspace({
       <Text style={h3}>Alert status</Text>
       <Text style={small}>Permission · {pushPermission || 'unknown'}</Text>
       <Text style={small}>Registration · {pushStatus || 'Alerts not registered'}</Text>
-      <Text style={small}>Channel · Trip offers, high importance, TAXIO sound</Text>
+      <Text style={small}>Channel · Trip offers, high importance, TAXIO signature</Text>
       <Text style={small}>Connection · {syncError ? 'Not connected. ' + syncError : 'Connected to TAXIO'}</Text>
       <Text style={small}>Last test · {lastAlertTest || 'No test sent from this phone'}</Text>
-      <Text style={small}>A test confirms the staging sender. It does not prove an alert will sound when Android has stopped the app.</Text>
+      <Text style={small}>A test alert does not open a booking. While TAXIO is open, a real offer repeats the signature until the server deadline. On the lock screen the signature plays once; tap it to refresh and open the offer. Android does not open the offer by itself while the app is minimized.</Text>
       {demo ? null : <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send test alert" disabled={testAlertBusy} onPress={onTestAlert} style={quietBtn}><Text style={btnText}>{testAlertBusy ? 'Sending test…' : 'Send test alert'}</Text></TouchableOpacity>}
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sign out" onPress={onSignOut} style={quietBtn}><Text style={btnText}>Sign out</Text></TouchableOpacity>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close preferences" onPress={() => setPanel('')} style={quietBtn}><Text style={btnText}>Close</Text></TouchableOpacity>
@@ -423,7 +478,7 @@ export function Workspace({
   ) : null
 
   let body: React.ReactNode = null
-  if (requestBooking || rescueRow) {
+  if ((demo && requestBooking) || (rescueRow && !requestBooking)) {
     const seconds = secondsRemaining(requestBooking ? requestBooking.decision_deadline_at : rescueRow?.expires_at, now)
     const expired = seconds == null || seconds <= 0
     const width = seconds == null ? 0 : Math.max(0, Math.min(100, (seconds / 45) * 100))
@@ -671,6 +726,25 @@ export function Workspace({
         {notice ? <Text style={{ color: theme.warn, fontSize: 12, marginTop: 10 }}>{notice}</Text> : null}
       </ScrollView>
       {requestOpen ? null : <TabBar tab={navTab} onChange={next => { setTab(next); setPanel(''); setHistoryOpen(false); if (next !== 'trips') setSelectedId(null) }} />}
+      {!demo && requestBooking ? (
+        <IncomingOffer
+          offer={requestBooking}
+          now={now}
+          busy={busy}
+          actionsEnabled={actions}
+          error={offerError}
+          onAccept={() => { void acceptBooking(requestBooking.id) }}
+          companyName={companyName}
+          slogan={slogan}
+          vatNumber={vatNumber}
+          phone={phone}
+          availability={availability}
+        />
+      ) : null}
+      <OfferSound
+        active={appActive && !demo && ((!!requestBooking && (secondsRemaining(requestBooking.decision_deadline_at, now) ?? 0) > 0) || (!requestBooking && !!rescueRow && (secondsRemaining(rescueRow.expires_at, now) ?? 0) > 0))}
+        offerId={requestBooking ? requestBooking.id : rescueRow ? rescueRow.rescue_request_id : null}
+      />
     </View>
   )
 }

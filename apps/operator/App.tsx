@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { SafeAreaView, ScrollView, StatusBar, Text, TextInput, TouchableOpacity } from 'react-native'
 import { integrationConfigured, loginOperator, operatorDb, productionTargetBlocked, readCompanyBookings, readCompanyRescueOffers, resolveOperatorCompany, restoreOperatorCompany, type RescueOffer } from './src/backend'
-import { registerOperatorForPush, revokeOperatorPush, sendStagingTestPush } from './src/pushRegistration'
+import { ensureOfferChannel, registerOperatorForPush, revokeOperatorPush, sendStagingTestPush } from './src/pushRegistration'
 import { Workspace, type DriverBooking } from './src/screens/Workspace'
 import { theme } from './src/theme/theme'
 
@@ -31,6 +31,8 @@ export default function App() {
   const [pushPermission, setPushPermission] = useState('unknown')
   const [lastAlertTest, setLastAlertTest] = useState('No test sent from this phone')
   const [testAlertBusy, setTestAlertBusy] = useState(false)
+
+  useEffect(() => { void ensureOfferChannel() }, [])
 
   useEffect(() => {
     let active = true

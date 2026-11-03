@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "219838419760",
+    "project_id": "taxio-operator",
+    "storage_bucket": "taxio-operator.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:219838419760:android:4bd344568c90b091f5aef5",
+        "android_client_info": {
+          "package_name": "be.taxio.operator"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBbENjors8dDtRuN4Q74twj2yTMYCbDASQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

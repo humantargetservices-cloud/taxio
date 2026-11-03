@@ -14,13 +14,40 @@ Notifications.setNotificationHandler({
   }),
 })
 
+const OFFER_CHANNEL = 'taxio-offers-v3'
+const OFFER_VIBRATION = [0, 500, 200, 500, 200, 500, 300, 700]
+
+/** New channel id. Android keeps the sound of an existing channel, so v2 cannot be edited in place. */
+export async function ensureOfferChannel() {
+  await Notifications.setNotificationChannelAsync(OFFER_CHANNEL, {
+    name: 'Trip offers',
+    importance: Notifications.AndroidImportance.MAX,
+    sound: 'taxio_offer.wav',
+    vibrationPattern: OFFER_VIBRATION,
+    enableVibrate: true,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    bypassDnd: false,
+  })
+}
+
+export async function dismissOfferNotifications(ids: { bookingId?: string; rescueId?: string }) {
+  const items = await Notifications.getPresentedNotificationsAsync().catch(() => [])
+  for (const item of items) {
+    const data = item.request.content.data || {}
+    if (String(data.event_type || '') === 'operator_test') continue
+    const bookingId = String(data.booking_id || '')
+    const rescueId = String(data.rescue_request_id || data.rescue_opportunity_id || '')
+    const match = (ids.bookingId && bookingId === ids.bookingId) || (ids.rescueId && rescueId === ids.rescueId)
+    if (!match) continue
+    await Notifications.dismissNotificationAsync(item.request.identifier).catch(() => {})
+  }
+}
+
 export type PushRegistrationResult = {
   ok: boolean
   code: 'REGISTERED' | 'NOT_DEVICE' | 'PERMISSION_DENIED' | 'NO_PROJECT_ID' | 'NOT_CONFIGURED' | 'REGISTRATION_FAILED'
   permission: 'granted' | 'denied' | 'undetermined' | 'unknown'
 }
-
-const OFFER_CHANNEL = 'taxio-offers-v2'
 
 function projectId() {
   return Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId || ''
@@ -32,14 +59,7 @@ export async function registerOperatorForPush(companyId: string): Promise<PushRe
   const existing = await Notifications.getPermissionsAsync()
   const permission = existing.status === 'granted' ? existing : await Notifications.requestPermissionsAsync()
   const permissionState = permission.status === 'granted' || permission.status === 'denied' ? permission.status : 'undetermined'
-  await Notifications.setNotificationChannelAsync(OFFER_CHANNEL, {
-    name: 'Trip offers',
-    importance: Notifications.AndroidImportance.MAX,
-    sound: 'taxio_offer.wav',
-    vibrationPattern: [0, 400, 200, 400],
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    bypassDnd: false,
-  })
+  await ensureOfferChannel()
   if (permissionState !== 'granted') return { ok: false, code: 'PERMISSION_DENIED', permission: permissionState }
   const id = projectId()
   if (!id) return { ok: false, code: 'NO_PROJECT_ID', permission: permissionState }

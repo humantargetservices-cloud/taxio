@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyBooking, isActionableRescue, routeOpenedAlert, secondsRemaining } from '../apps/operator/src/utils/bookingState.ts'
+import { readFileSync } from 'node:fs'
+import { alertPresentation, classifyBooking, isActionableRescue, routeOpenedAlert, secondsRemaining } from '../apps/operator/src/utils/bookingState.ts'
 import { isProductionTarget, liveActionsEnabled } from '../apps/operator/src/utils/environment.ts'
 
 const now = Date.parse('2026-10-27T12:00:00Z')
@@ -46,4 +47,18 @@ test('an opened alert refetches into the current offer and never accepts an expi
   assert.equal(routeOpenedAlert({ eventType: 'rescue_opportunity_new', rescue: { status: 'ACCEPTED', expires_at: '2026-10-27T12:00:30Z' }, nowMs: now }), 'unavailable')
   assert.equal(routeOpenedAlert({ eventType: 'rescue_opportunity_new', rescue: null, nowMs: now }), 'unavailable')
   assert.equal(routeOpenedAlert({ eventType: 'operator_test', booking: null, nowMs: now }), 'test')
+  assert.equal(routeOpenedAlert({ eventType: 'operator_test', booking: future, nowMs: now }), 'test')
+  assert.equal(alertPresentation('operator_test'), 'test')
+  assert.equal(alertPresentation('company_booking_new'), 'offer')
+  assert.equal(alertPresentation('rescue_opportunity_new'), 'offer')
+  assert.equal(alertPresentation('passenger_cancelled'), 'other')
+  assert.equal(alertPresentation('something_else'), 'other')
+})
+
+test('the signature alert is one original 5 to 6 second cue', () => {
+  const wav = readFileSync(new URL('../apps/operator/assets/taxio_offer.wav', import.meta.url))
+  const rate = wav.readUInt32LE(24)
+  const dataBytes = wav.readUInt32LE(40)
+  const seconds = dataBytes / (rate * 2)
+  assert.ok(seconds >= 5 && seconds <= 6, 'expected a 5–6 second signature, got ' + seconds)
 })

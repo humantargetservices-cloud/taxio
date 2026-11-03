@@ -58,6 +58,16 @@ export function isActionableRescue(status: string, expiresAt: string | null | un
   return ms != null && ms > nowMs
 }
 
+export type AlertPresentation = 'test' | 'offer' | 'other'
+
+/** A test alert never opens the acceptance screen, even if a booking id is attached. */
+export function alertPresentation(eventType?: string | null): AlertPresentation {
+  const kind = String(eventType || '').toLowerCase()
+  if (kind === 'operator_test') return 'test'
+  if (kind === 'company_booking_new' || kind.includes('rescue')) return 'offer'
+  return 'other'
+}
+
 export type OpenedAlertAction = 'test' | 'open-booking' | 'open-rescue' | 'open-trip' | 'expired' | 'unavailable'
 
 /** Decide what a tapped alert may open. It never accepts a trip. */
