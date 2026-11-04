@@ -251,7 +251,14 @@ export function Workspace({
   const actionable = bookings.filter(booking => isActionableOffer(booking, now))
   const trips = sortActiveTrips(bookings, now)
   const openRescue = rescueOffers.filter(offer => isActionableRescue(offer.status, offer.expires_at, now))
-  const claimedPending = claimedRescues.filter(rescue => !rescue.booking_request_id || !bookings.some(b => b.id === rescue.booking_request_id && b.status === 'accepted' && !b.completed_at))
+  const claimedPending = claimedRescues.filter(rescue => {
+    if (rescue.status !== 'ACCEPTED' || ['CANCELLED_BY_PASSENGER', 'EXPIRED'].includes(rescue.passenger_confirm_status || '')) return false
+    // A finished booking is history, not the driver's next action.
+    if (bookings.some(b => b.id === rescue.booking_request_id && !!b.completed_at)) return false
+    // Keep old accepted rescues out of the action area when the trip is not visible.
+    if (rescue.created_at && Date.parse(rescue.created_at) < now - 7 * 24 * 3600 * 1000) return false
+    return !rescue.booking_request_id || !bookings.some(b => b.id === rescue.booking_request_id && b.status === 'accepted')
+  })
   const selected = bookings.find(booking => booking.id === selectedId) || null
   const controls = controlsFromAvailability(availability)
   const host = bookingHost()
@@ -547,13 +554,13 @@ export function Workspace({
             {claimedPending.map(claim => (
               <View key={claim.id} style={tripRowStyle}>
                 <View style={row}>
-                  <Text style={{ color: theme.text, fontWeight: '800', flex: 1 }}>Rescue · {claim.status}</Text>
+                  <Text style={{ color: theme.text, fontWeight: '800', flex: 1 }}>Rescue · {claim.passenger_confirm_status === 'CONFIRMED' ? 'Passenger confirmed' : 'Claimed'}</Text>
                   <Text style={blueBadge}>CLAIMED</Text>
                 </View>
                 <Text style={{ color: theme.text, marginTop: 5 }}>{shortPlace(claim.preview_pickup_label)} → {shortPlace(claim.preview_dropoff_label)}</Text>
                 <Text style={small}>{pickupWhen(claim.preview_ride_datetime, now)} · Passenger details remain protected until confirmation.</Text>
                 {claim.booking_request_id && bookings.some(b => b.id === claim.booking_request_id && b.status === 'accepted' && !b.completed_at) ? null : (
-                  <Text style={small}>Waiting for the server to make the trip available. Pulling fresh status automatically.</Text>
+                  <Text style={small}>{claim.passenger_confirm_status === 'CONFIRMED' ? 'Passenger confirmed. Trip details are not yet authorized in this view; check the PWA if needed.' : 'Waiting for passenger confirmation. Trip details become available only when authorized.'}</Text>
                 )}
               </View>
             ))}
