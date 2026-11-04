@@ -636,7 +636,7 @@ export function Workspace({
           <Text style={small}>DESTINATION</Text>
           <Text style={{ color: theme.text }}>{selected.dropoff_address || 'Destination not set'}</Text>
         </View>
-        <Text style={[small, { marginTop: 8 }]}>NEXT ACTION</Text>
+        {stage < 5 ? <Text style={[small, { marginTop: 8 }]}>NEXT ACTION</Text> : null}
         {stage < 5 ? (
           <TouchableOpacity accessibilityRole="button" accessibilityLabel={stageAction[stage]} disabled={busy || (!actions && !demo)} onPress={() => { void advance() }} style={[primaryBtn, { opacity: busy ? 0.55 : 1 }]}>
             <Text style={primaryText}>{busy ? 'Sending…' : stageAction[stage]}</Text>
