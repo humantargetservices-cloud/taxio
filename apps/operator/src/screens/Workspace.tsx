@@ -636,6 +636,20 @@ export function Workspace({
           <Text style={small}>DESTINATION</Text>
           <Text style={{ color: theme.text }}>{selected.dropoff_address || 'Destination not set'}</Text>
         </View>
+        <Text style={[small, { marginTop: 8 }]}>NEXT ACTION</Text>
+        {stage < 5 ? (
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={stageAction[stage]} disabled={busy || (!actions && !demo)} onPress={() => { void advance() }} style={[primaryBtn, { opacity: busy ? 0.55 : 1 }]}>
+            <Text style={primaryText}>{busy ? 'Sending…' : stageAction[stage]}</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={panelBox}><Text style={greenBadge}>COMPLETED</Text><Text style={{ color: theme.text, marginVertical: 7 }}>Trip added to earnings.</Text></View>
+        )}
+        {stage < 5 ? (
+          <View style={twoCol}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Navigate" onPress={() => { void openNav(String(address || '')) }} style={halfBtn}><View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}><IconNavigate size={19} /><Text style={btnText}>Navigate</Text></View></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Contact" onPress={() => setPanel('contact')} style={halfBtn}><View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}><IconPhone size={19} /><Text style={btnText}>Contact</Text></View></TouchableOpacity>
+          </View>
+        ) : null}
         <View style={row}>
           <View><Text style={small}>PASSENGER</Text><Text style={{ color: theme.text }}>{selected.customer_name || 'Passenger'}</Text></View>
           <View><Text style={small}>PICKUP TIME</Text><Text style={pickup}>{pickupWhen(selected.ride_datetime, now)}</Text></View>
@@ -651,19 +665,6 @@ export function Workspace({
         {stage === 2 ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Update ETA" onPress={() => { setEtaDraft('8'); setPanel('eta') }} style={quietBtn}><Text style={btnText}>Update ETA</Text></TouchableOpacity> : null}
         {stage === 3 ? <Text style={{ color: theme.text, marginVertical: 7 }}>Waiting at pickup · passenger not yet onboard</Text> : null}
         {stage === 4 ? <Text style={{ color: theme.text, marginVertical: 7 }}>Passenger onboard · heading to destination</Text> : null}
-        {stage < 5 ? (
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={stageAction[stage]} disabled={busy || (!actions && !demo)} onPress={() => { void advance() }} style={[primaryBtn, { opacity: busy ? 0.55 : 1 }]}>
-            <Text style={primaryText}>{busy ? 'Sending…' : stageAction[stage]}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={panelBox}><Text style={greenBadge}>COMPLETED</Text><Text style={{ color: theme.text, marginVertical: 7 }}>Trip added to earnings.</Text></View>
-        )}
-        {stage < 5 ? (
-          <View style={twoCol}>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Navigate" onPress={() => { void openNav(String(address || '')) }} style={halfBtn}><View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}><IconNavigate size={19} /><Text style={btnText}>Navigate</Text></View></TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Contact" onPress={() => setPanel('contact')} style={halfBtn}><View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}><IconPhone size={19} /><Text style={btnText}>Contact</Text></View></TouchableOpacity>
-          </View>
-        ) : null}
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Home" onPress={() => { setSelectedId(null); setTab('home'); setPanel('') }} style={quietBtn}><Text style={btnText}>← Home</Text></TouchableOpacity>
         {confirming ? (
           <View style={sheet}>
