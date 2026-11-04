@@ -538,6 +538,16 @@ export function Workspace({
       <View>
         <Text style={small}>{dateLabel}</Text>
         <Text style={h2}>{tab === 'home' ? 'Your driving day' : 'Your trips'}</Text>
+        {trips[0] ? (
+          <View style={panelBox}>
+            <Text style={greenBadge}>NEXT ACTION · ACTIVE TRIP</Text>
+            <Text style={{ color: theme.text, fontSize: 19, fontWeight: '800', marginTop: 12 }}>{shortPlace(trips[0].pickup_address)} → {shortPlace(trips[0].dropoff_address)}</Text>
+            <Text style={pickup}>{pickupWhen(trips[0].ride_datetime, now)}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Open active trip" onPress={() => { setSelectedId(trips[0].id); setTab('trips'); setPanel('') }} style={primaryBtn}>
+              <Text style={primaryText}>Open active trip</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 18, marginBottom: 12 }}>
           {cards.map(item => (
             <TouchableOpacity key={item[0]} accessibilityRole="button" accessibilityState={{ expanded: expanded === item[0] }} onPress={() => setExpanded(current => current === item[0] ? null : item[0])} style={[statBtn, expanded === item[0] ? statOn : null]}>
