@@ -101,6 +101,8 @@ export type ClaimedRescue = {
   id: string
   booking_request_id: string | null
   status: string
+  passenger_confirm_status: string | null
+  created_at: string | null
   preview_pickup_label: string | null
   preview_dropoff_label: string | null
   preview_ride_datetime: string | null
@@ -113,7 +115,7 @@ export type ClaimedRescue = {
 export async function readClaimedRescues(companyId: string): Promise<ClaimedRescue[]> {
   if (!operatorDb) throw Error('Integration is not configured')
   const { data, error } = await operatorDb.from('rescue_requests')
-    .select('id,booking_request_id,status,preview_pickup_label,preview_dropoff_label,preview_ride_datetime,preview_estimated_price')
+    .select('id,booking_request_id,status,passenger_confirm_status,created_at,preview_pickup_label,preview_dropoff_label,preview_ride_datetime,preview_estimated_price')
     .eq('accepted_by_company_id', companyId).limit(30)
   if (error) throw Error('Claimed Rescue status unavailable')
   return (data || []) as ClaimedRescue[]
