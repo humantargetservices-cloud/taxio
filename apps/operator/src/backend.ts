@@ -97,6 +97,28 @@ export async function readWonRescueBookingIds(companyId: string): Promise<string
   return (data || []).map(row => String((row as { booking_request_id?: string }).booking_request_id || '')).filter(Boolean)
 }
 
+export type ClaimedRescue = {
+  id: string
+  booking_request_id: string | null
+  status: string
+  preview_pickup_label: string | null
+  preview_dropoff_label: string | null
+  preview_ride_datetime: string | null
+  preview_estimated_price: string | null
+}
+
+/** Server-confirmed claims only. Preview fields are safe before passenger confirmation.
+ * Never derive passenger contact details from rescue preview data.
+ */
+export async function readClaimedRescues(companyId: string): Promise<ClaimedRescue[]> {
+  if (!operatorDb) throw Error('Integration is not configured')
+  const { data, error } = await operatorDb.from('rescue_requests')
+    .select('id,booking_request_id,status,preview_pickup_label,preview_dropoff_label,preview_ride_datetime,preview_estimated_price')
+    .eq('accepted_by_company_id', companyId).limit(30)
+  if (error) throw Error('Claimed Rescue status unavailable')
+  return (data || []) as ClaimedRescue[]
+}
+
 export type RescueOffer = { id:string; rescue_request_id:string; expires_at:string|null; status:string; rescue?: {id:string;status:string;preview_pickup_label:string|null;preview_dropoff_label:string|null;preview_ride_datetime:string|null;preview_estimated_price?:string|null} | null }
 export async function readCompanyRescueOffers(companyId:string):Promise<RescueOffer[]> {
   if(!operatorDb) throw Error('Integration not configured')
