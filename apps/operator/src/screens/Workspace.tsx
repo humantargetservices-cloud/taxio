@@ -537,26 +537,17 @@ export function Workspace({
     body = (
       <View>
         <Text style={small}>{dateLabel}</Text>
-        <Text style={h2}>{tab === 'home' ? 'Your driving day' : 'Your trips'}</Text>
+        <Text style={h2}>{tab === 'home' ? 'Next action' : 'Your trips'}</Text>
         {trips[0] ? (
           <View style={panelBox}>
             <Text style={greenBadge}>NEXT ACTION · ACTIVE TRIP</Text>
             <Text style={{ color: theme.text, fontSize: 19, fontWeight: '800', marginTop: 12 }}>{shortPlace(trips[0].pickup_address)} → {shortPlace(trips[0].dropoff_address)}</Text>
             <Text style={pickup}>{pickupWhen(trips[0].ride_datetime, now)}</Text>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Open active trip" onPress={() => { setSelectedId(trips[0].id); setTab('trips'); setPanel('') }} style={primaryBtn}>
-              <Text style={primaryText}>Open active trip</Text>
+              <Text style={primaryText}>{'Continue trip · ' + stageAction[stageOf(trips[0])]}</Text>
             </TouchableOpacity>
           </View>
         ) : null}
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 18, marginBottom: 12 }}>
-          {cards.map(item => (
-            <TouchableOpacity key={item[0]} accessibilityRole="button" accessibilityState={{ expanded: expanded === item[0] }} onPress={() => setExpanded(current => current === item[0] ? null : item[0])} style={[statBtn, expanded === item[0] ? statOn : null]}>
-              <Text style={num}>{item[1]}</Text>
-              <Text style={{ fontSize: 12, color: theme.text }}>{item[2]}</Text>
-              <Text style={small}>{item[3]} ⌄</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
         {claimedPending.length ? (
           <View style={panelBox}>
             <Text style={h3}>Rescue claims · {claimedPending.length}</Text>
@@ -577,7 +568,23 @@ export function Workspace({
           </View>
         ) : null}
         {claimedRescueError ? <Text style={{ color: theme.warn }}>{claimedRescueError}</Text> : null}
-        {expanded ? (
+        {tab === 'home' ? (
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="View all trips and history" onPress={() => { setTab('trips'); setSelectedId(null); setExpanded('active') }} style={[quietBtn, { marginTop: 10 }]}>
+            <Text style={btnText}>View all trips · {trips.length} active</Text>
+          </TouchableOpacity>
+        ) : null}
+        {tab === 'trips' ? (
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 18, marginBottom: 12 }}>
+          {cards.map(item => (
+            <TouchableOpacity key={item[0]} accessibilityRole="button" accessibilityState={{ expanded: expanded === item[0] }} onPress={() => setExpanded(current => current === item[0] ? null : item[0])} style={[statBtn, expanded === item[0] ? statOn : null]}>
+              <Text style={num}>{item[1]}</Text>
+              <Text style={{ fontSize: 12, color: theme.text }}>{item[2]}</Text>
+              <Text style={small}>{item[3]} ⌄</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        ) : null}
+        {tab === 'trips' && expanded ? (
           <View style={panelBox}>
             <Text style={h3}>{expanded === 'active' ? 'Trips needing attention' : expanded === 'completed' ? 'Completed trips' : 'All trips'}</Text>
             {activeRows.map(tripRow)}
@@ -591,9 +598,9 @@ export function Workspace({
             <Text style={pickup}>{pickupWhen(offer.ride_datetime, now)}</Text>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="View incoming request" onPress={() => { setNotice(''); setIncoming(offer) }} style={primaryBtn}><Text style={primaryText}>View incoming request</Text></TouchableOpacity>
           </View>
-        ) : tab === 'home' ? (
+        ) : tab === 'home' && !trips.length && !claimedPending.length ? (
           <View style={panelBox}>
-            <Text style={h3}>Booking availability</Text>
+            <Text style={h3}>Ready for requests</Text>
             <Text style={{ color: theme.text, marginVertical: 7 }}>{controls.online && controls.acceptNew ? 'You can receive new requests.' : 'You are not receiving new requests.'}</Text>
             <Text style={small}>Manage availability in Account.</Text>
           </View>
