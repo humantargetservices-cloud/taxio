@@ -266,39 +266,56 @@ export default function App() {
         <TouchableOpacity style={styles.secondary} onPress={()=>setIncomingTrip(null)}><Text style={styles.secondaryText}>Dismiss</Text></TouchableOpacity>
       </View></View>
     </Modal>
-        <Modal visible={tripOpen} transparent animationType="slide" onRequestClose={()=>setTripOpen(false)}>
-      <View style={styles.modalBackdrop}><ScrollView contentContainerStyle={styles.modalCard}>
-        <View style={styles.cardHeader}><Text style={styles.modalTitle}>Active trip</Text><TouchableOpacity onPress={()=>setTripOpen(false)}><Text style={styles.secondaryText}>Close ✕</Text></TouchableOpacity></View>
+    <Modal visible={tripOpen} transparent animationType="slide" onRequestClose={()=>{setTripOpen(false);setTripConfirm(null)}}>
+      <View style={styles.tripBackdrop}><ScrollView style={styles.tripSheet} contentContainerStyle={styles.tripSheetInner}>
+        <View style={styles.tripHandle}/>
+        <View style={styles.tripHead}><Text style={styles.tripTitle}>Current trip</Text><TouchableOpacity accessibilityLabel="Close trip" onPress={()=>{setTripOpen(false);setTripConfirm(null)}} style={styles.tripClose}><Text style={styles.tripWhite}>✕</Text></TouchableOpacity></View>
         {currentTrip ? <>
-          <Text style={styles.status}>ACCEPTED · {currentTrip.booking_reference||'BOOKING'}</Text>
-          <Text style={styles.tripMeta}>{formatTripDate(currentTrip.ride_datetime || currentTrip.created_at)}</Text>
-          {currentTrip.customer_name?<Text style={styles.route}>{currentTrip.customer_name}</Text>:null}
-          <View style={styles.card}><Text style={styles.routeSmall}>PICKUP</Text><Text style={styles.route}>{currentTrip.pickup_address}</Text></View>
-          <View style={styles.card}><Text style={styles.routeSmall}>DESTINATION</Text><Text style={styles.route}>{currentTrip.dropoff_address}</Text></View>
-          <Text style={styles.overviewTitle}>Navigation to pickup</Text>
-          <View style={styles.navigationRow}>
-            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.pickup_address,'waze')}><Text style={styles.navigationText}>↗ Waze</Text></TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.pickup_address,'google')}><Text style={styles.navigationText}>↗ Google Maps</Text></TouchableOpacity>
+          <View style={styles.tripHead}><Text style={styles.tripBadge}>ACCEPTED</Text><Text style={styles.tripRef}>{currentTrip.booking_reference || 'BOOKING'}</Text></View>
+          <Text style={styles.tripLabel}>PICKUP</Text><Text style={styles.tripValue}>{currentTrip.pickup_address}</Text>
+          <Text style={styles.tripLabel}>DESTINATION</Text><Text style={styles.tripValue}>{currentTrip.dropoff_address}</Text>
+          <Text style={styles.tripLabel}>TIME</Text><Text style={styles.tripValue}>{formatTripDate(currentTrip.ride_datetime || currentTrip.created_at)}</Text>
+          {currentTrip.customer_name ? <><Text style={styles.tripLabel}>PASSENGER</Text><Text style={styles.tripValue}>{currentTrip.customer_name}</Text></> : null}
+          <Text style={styles.tripSection}>Navigate to pickup</Text>
+          <View style={styles.tripHead}>
+            <TouchableOpacity style={styles.tripSecondary} onPress={()=>navigateTo(currentTrip.pickup_address,'google')}><Text style={styles.tripWhite}>Google Maps</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.tripSecondary} onPress={()=>navigateTo(currentTrip.pickup_address,'waze')}><Text style={styles.tripWhite}>Waze</Text></TouchableOpacity>
           </View>
-          <Text style={styles.overviewTitle}>Navigation to destination</Text>
-          <View style={styles.navigationRow}>
-            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.dropoff_address,'waze')}><Text style={styles.navigationText}>↗ Waze</Text></TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" style={styles.navigationButton} onPress={()=>navigateTo(currentTrip.dropoff_address,'google')}><Text style={styles.navigationText}>↗ Google Maps</Text></TouchableOpacity>
-          </View>
-          <Text style={styles.note}>{demo?'Preview mode':mobileActionsEnabled()?'Updates are sent to the TAXIO server; passenger status changes follow existing server behavior.':'Passenger updates are disabled until live pilot verification.'}</Text>
-          {(['mark_on_way','mark_arrived','complete_trip'] as const).map(action =>
-            <TouchableOpacity key={action} disabled={demo||!mobileActionsEnabled()||actionBusy} style={[styles.primary,(demo||!mobileActionsEnabled())&&styles.inactive]} onPress={()=>setTripConfirm(action)}>
-              <Text style={styles.primaryText}>{action==='mark_on_way'?'On the way':action==='mark_arrived'?'I have arrived':'Complete trip'}</Text>
+          <Text style={styles.tripSection}>Trip actions</Text>
+          <Text style={styles.tripHint}>Choose the correct step. TAXIO must confirm every update.</Text>
+          {(['mark_on_way','mark_arrived','complete_trip'] as const).map(action=>
+            <TouchableOpacity key={action} disabled={demo||!mobileActionsEnabled()||actionBusy} style={[styles.tripAction,action==='complete_trip'&&styles.tripComplete,(demo||!mobileActionsEnabled())&&styles.inactive]} onPress={()=>setTripConfirm(action)}>
+              <Text style={styles.tripWhite}>{action==='mark_on_way'?'On the way':action==='mark_arrived'?"I've arrived":'Complete trip'}</Text>
             </TouchableOpacity>)}
-          {tripConfirm?<View style={styles.card}><Text style={styles.route}>Confirm status update?</Text><Text style={styles.note}>This will update the live trip status on TAXIO.</Text><TouchableOpacity style={styles.primary} disabled={actionBusy} onPress={()=>updateTrip(tripConfirm)}><Text style={styles.primaryText}>{actionBusy?'Updating…':'Confirm update'}</Text></TouchableOpacity><TouchableOpacity style={styles.secondary} onPress={()=>setTripConfirm(null)}><Text style={styles.secondaryText}>Cancel</Text></TouchableOpacity></View>:null}
-          {actionMessage?<Text style={styles.note}>{actionMessage}</Text>:null}
-        </>:<Text style={styles.note}>No active trip found.</Text>}
+          {tripConfirm ? <View style={styles.tripConfirm}><Text style={styles.tripValue}>Confirm status update?</Text><Text style={styles.tripHint}>This will update the live trip on TAXIO.</Text><TouchableOpacity style={styles.tripComplete} disabled={actionBusy} onPress={()=>updateTrip(tripConfirm)}><Text style={styles.tripWhite}>{actionBusy?'Updating…':'Confirm update'}</Text></TouchableOpacity><TouchableOpacity style={styles.tripSecondary} onPress={()=>setTripConfirm(null)}><Text style={styles.tripWhite}>Go back</Text></TouchableOpacity></View> : null}
+          <Text style={styles.tripHint}>{demo?'Preview mode':mobileActionsEnabled()?'Updates are sent to the TAXIO server.':'Passenger updates disabled pending verification.'}</Text>
+          {actionMessage ? <Text style={styles.tripHint}>{actionMessage}</Text>:null}
+        </> : <Text style={styles.tripHint}>No active trip found.</Text>}
       </ScrollView></View>
     </Modal>
     <Modal visible={qrOpen} transparent animationType="slide" onRequestClose={()=>setQrOpen(false)}><View style={styles.modalBackdrop}><View style={styles.modalCard}><Text style={styles.modalTitle}>Share your booking page</Text><Text style={styles.subtitle}>Passengers scan and book your taxi directly.</Text>{bookingUrl ? <><View style={styles.qrPanel}><QRCode value={bookingUrl} size={216} backgroundColor="#ffffff" color="#111a30" /></View><Text selectable style={styles.qrUrl}>{bookingUrl}</Text><TouchableOpacity style={styles.primary} onPress={()=>Share.share({message:`Book a taxi with ${company?.name}: ${bookingUrl}`,url:bookingUrl})}><Text style={styles.primaryText}>Share booking link</Text></TouchableOpacity></> : <Text style={styles.notice}>This company has no verified booking subdomain yet. Open the web dashboard to check its booking link.</Text>}<TouchableOpacity style={styles.secondary} onPress={()=>setQrOpen(false)}><Text style={styles.secondaryText}>Close</Text></TouchableOpacity></View></View></Modal>
   </SafeAreaView>
 }
 const styles = StyleSheet.create({
+  tripBackdrop:{flex:1,backgroundColor:'rgba(3,8,24,.78)',justifyContent:'flex-end'},
+  tripSheet:{maxHeight:'90%',backgroundColor:'#0f172a',borderTopLeftRadius:26,borderTopRightRadius:26},
+  tripSheetInner:{padding:25,paddingBottom:38,gap:11},
+  tripHandle:{width:48,height:5,backgroundColor:'#394b65',borderRadius:5,alignSelf:'center',marginBottom:9},
+  tripHead:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:12},
+  tripTitle:{fontSize:23,fontWeight:'900',color:'#f8fafc'},
+  tripClose:{height:43,width:43,backgroundColor:'#202b41',borderRadius:14,alignItems:'center',justifyContent:'center'},
+  tripWhite:{fontSize:15,fontWeight:'800',color:'#f8fafc'},
+  tripBadge:{fontSize:12,color:'#a5b4fc',backgroundColor:'#302454',paddingHorizontal:11,paddingVertical:7,borderRadius:8,overflow:'hidden',fontWeight:'800'},
+  tripRef:{color:'#facc15',fontSize:14,fontWeight:'800'},
+  tripLabel:{fontSize:12,color:'#788aa6',fontWeight:'800',marginTop:5},
+  tripValue:{fontSize:18,lineHeight:25,color:'#f8fafc',fontWeight:'700'},
+  tripSection:{fontSize:16,fontWeight:'800',color:'#d8d1ed',marginTop:14},
+  tripHint:{fontSize:13,color:'#a6b6cd',lineHeight:19},
+  tripSecondary:{flex:1,minHeight:52,padding:13,backgroundColor:'#202e44',borderColor:'#43536a',borderWidth:1,borderRadius:14,alignItems:'center',justifyContent:'center'},
+  tripAction:{backgroundColor:'#233249',padding:17,borderRadius:14,alignItems:'center',marginTop:2},
+  tripComplete:{backgroundColor:'#009d75',padding:17,borderRadius:14,alignItems:'center',marginTop:2},
+  tripConfirm:{backgroundColor:'#1d2940',borderRadius:18,padding:16,gap:12},
+
   hero:{backgroundColor:'#121b32',padding:20,borderRadius:24,marginTop:4,gap:18},
   heroTop:{flexDirection:'row',gap:14,alignItems:'center'},
   heroLogo:{width:58,height:58,borderRadius:15,backgroundColor:'#fff'},
