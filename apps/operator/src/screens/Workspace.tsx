@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import * as Notifications from 'expo-notifications'
 import { Alert, AppState, BackHandler, Linking, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from 'react-native'
-import { operatorDb, readCompanyBookings, readCompanyRescueOffers, readWonRescueBookingIds, setCompanyAvailability, type CompanyBooking, type RescueOffer } from '../backend'
+import { operatorDb, readCompanyBookings, readCompanyRescueOffers, readWonRescueBookingIds, readClaimedRescues, setCompanyAvailability, type ClaimedRescue, type CompanyBooking, type RescueOffer } from '../backend'
 import QRCode from 'react-native-qrcode-svg'
 import { BrandBar, CompanyCard } from '../components/CompanyCard'
 import { IncomingOffer } from '../components/IncomingOffer'
@@ -84,6 +84,8 @@ export function Workspace({
   const [historyDate, setHistoryDate] = useState(localDateKey(Date.now()))
   const [driverName, setDriverName] = useState('')
   const [rescuedIds, setRescuedIds] = useState<string[] | null>(null)
+  const [claimedRescues, setClaimedRescues] = useState<ClaimedRescue[]>([])
+  const [claimedRescueError, setClaimedRescueError] = useState('')
   const [expanded, setExpanded] = useState<'active' | 'completed' | 'total' | null>('active')
   const [panel, setPanel] = useState<'' | 'qr' | 'share' | 'contact' | 'eta' | 'prefs'>('')
   const [notice, setNotice] = useState('')
@@ -113,8 +115,9 @@ export function Workspace({
   }, [demo])
 
   useEffect(() => {
-    if (demo) { setRescuedIds([]); return }
-    void readWonRescueBookingIds(companyId).then(setRescuedIds)
+    if (demo) { setRescuedIds([]); setClaimedRescues([]); return }
+    void readWonRescueBookingIds(companyId).then(setRescuedIds).catch(() => setRescuedIds(null))
+    void readClaimedRescues(companyId).then(rows => { setClaimedRescues(rows); setClaimedRescueError('') }).catch(() => setClaimedRescueError('Claimed Rescue status could not be refreshed.'))
   }, [companyId, demo, bookings])
 
   const openAlertRef = useRef<(data: Record<string, unknown>) => void>(() => {})
@@ -248,6 +251,7 @@ export function Workspace({
   const actionable = bookings.filter(booking => isActionableOffer(booking, now))
   const trips = sortActiveTrips(bookings, now)
   const openRescue = rescueOffers.filter(offer => isActionableRescue(offer.status, offer.expires_at, now))
+  const claimedPending = claimedRescues.filter(rescue => !rescue.booking_request_id || !bookings.some(b => b.id === rescue.booking_request_id && b.status === 'accepted' && !b.completed_at))
   const selected = bookings.find(booking => booking.id === selectedId) || null
   const controls = controlsFromAvailability(availability)
   const host = bookingHost()
@@ -272,6 +276,8 @@ export function Workspace({
     const rows = await readCompanyBookings(companyId)
     setBookings(rows)
     try { setRescueOffers(await readCompanyRescueOffers(companyId)) } catch { /* rescue may be unavailable */ }
+    try { setClaimedRescues(await readClaimedRescues(companyId)); setClaimedRescueError('') }
+    catch { setClaimedRescueError('Claimed Rescue status could not be refreshed.') }
   }
 
   async function acceptBooking(id: string) {
@@ -314,7 +320,9 @@ export function Workspace({
       }
       setIncomingRescue(null)
       void dismissOfferNotifications({ rescueId: rescueRequestId })
-      setOfferError('Rescue claimed. Passenger details stay locked until the server confirms the passenger.')
+      setOfferError('Rescue claimed. Passenger details remain locked until confirmation.')
+      setSelectedId(null)
+      setTab('trips')
       await refresh()
     } catch (error) {
       setOfferError(error instanceof Error ? error.message : 'Unable to claim rescue')
@@ -532,6 +540,26 @@ export function Workspace({
             </TouchableOpacity>
           ))}
         </View>
+        {claimedPending.length ? (
+          <View style={panelBox}>
+            <Text style={h3}>Rescue claims · {claimedPending.length}</Text>
+            <Text style={small}>Claimed Rescue requests stay visible here until an authorized active trip is available.</Text>
+            {claimedPending.map(claim => (
+              <View key={claim.id} style={tripRowStyle}>
+                <View style={row}>
+                  <Text style={{ color: theme.text, fontWeight: '800', flex: 1 }}>Rescue · {claim.status}</Text>
+                  <Text style={blueBadge}>CLAIMED</Text>
+                </View>
+                <Text style={{ color: theme.text, marginTop: 5 }}>{shortPlace(claim.preview_pickup_label)} → {shortPlace(claim.preview_dropoff_label)}</Text>
+                <Text style={small}>{pickupWhen(claim.preview_ride_datetime, now)} · Passenger details remain protected until confirmation.</Text>
+                {claim.booking_request_id && bookings.some(b => b.id === claim.booking_request_id && b.status === 'accepted' && !b.completed_at) ? null : (
+                  <Text style={small}>Waiting for the server to make the trip available. Pulling fresh status automatically.</Text>
+                )}
+              </View>
+            ))}
+          </View>
+        ) : null}
+        {claimedRescueError ? <Text style={{ color: theme.warn }}>{claimedRescueError}</Text> : null}
         {expanded ? (
           <View style={panelBox}>
             <Text style={h3}>{expanded === 'active' ? 'Trips needing attention' : expanded === 'completed' ? 'Completed trips' : 'All trips'}</Text>
