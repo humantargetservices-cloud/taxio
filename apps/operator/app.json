@@ -1,13 +1,14 @@
 {
   "expo": {
     "name": "TAXIO Operator",
-    "slug": "taxio-operator",
+    "slug": "taxio-platform",
     "scheme": "taxiooperator",
-    "version": "0.1.0",
+    "version": "0.5.1",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "be.taxio.operator",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "POST_NOTIFICATIONS"
       ]
@@ -16,7 +17,27 @@
       "bundleIdentifier": "be.taxio.operator"
     },
     "plugins": [
-      "expo-notifications"
-    ]
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/taxio_offer.wav"
+          ]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "bda84336-17c9-470c-831f-6680a2be36cf"
+      }
+    },
+    "owner": "taxio-platform"
   }
 }

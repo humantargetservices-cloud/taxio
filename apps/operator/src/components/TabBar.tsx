@@ -1,0 +1,30 @@
+import React from 'react'
+import { Text, TouchableOpacity, View } from 'react-native'
+import { theme } from '../theme/theme'
+import { IconAccount, IconEuro, IconHome, IconTrips } from './icons'
+
+export type DriverTab = 'home' | 'trips' | 'earnings' | 'account'
+
+const ITEMS: { id: DriverTab; label: string; Icon: typeof IconHome }[] = [
+  { id: 'home', label: 'Home', Icon: IconHome },
+  { id: 'trips', label: 'Trips', Icon: IconTrips },
+  { id: 'earnings', label: 'Earnings', Icon: IconEuro },
+  { id: 'account', label: 'Account', Icon: IconAccount },
+]
+
+export function TabBar({ tab, onChange }: { tab: DriverTab; onChange: (tab: DriverTab) => void }) {
+  return (
+    <View style={{ flexDirection: 'row', backgroundColor: theme.tab, borderTopWidth: 1, borderTopColor: '#27374e', paddingHorizontal: 7, paddingVertical: 10 }}>
+      {ITEMS.map(item => {
+        const active = tab === item.id
+        const color = active ? theme.gold : theme.faint
+        return (
+          <TouchableOpacity key={item.id} accessibilityRole="button" accessibilityLabel={item.label} onPress={() => onChange(item.id)} style={{ flex: 1, alignItems: 'center', minHeight: 52, justifyContent: 'center', gap: 4 }}>
+            <item.Icon color={color} size={19} />
+            <Text style={{ color, fontWeight: '400', fontSize: 11 }}>{item.label}</Text>
+          </TouchableOpacity>
+        )
+      })}
+    </View>
+  )
+}
