@@ -19,6 +19,7 @@ import {
   PRODUCTION_PUSH_ORIGIN,
   companyOneSignalExternalId,
   externalIdAssociationOk,
+  hasActiveBrowserPushSubscription,
   isCompetingRootOneSignalWorker,
   isIosDevice,
   isPushEnrollmentComplete,
@@ -114,6 +115,41 @@ describe('planPushEnable', () => {
     const result = plan({ ios: false, supported: true, permission: 'default', installedPwa: false })
     assert.equal(result.ok, null)
     assert.equal(result.code, 'REQUEST_PERMISSION')
+  })
+})
+
+describe('browser push transport subscription', () => {
+  it('recognizes a valid browser subscription before company identity is checked', () => {
+    assert.equal(
+      hasActiveBrowserPushSubscription({
+        permission: 'granted',
+        optedIn: true,
+        subscriptionIdPresent: true,
+        tokenPresent: true,
+      }),
+      true
+    )
+  })
+
+  it('requires permission, opt-in and an id/token', () => {
+    assert.equal(
+      hasActiveBrowserPushSubscription({
+        permission: 'granted',
+        optedIn: false,
+        subscriptionIdPresent: true,
+        tokenPresent: true,
+      }),
+      false
+    )
+    assert.equal(
+      hasActiveBrowserPushSubscription({
+        permission: 'granted',
+        optedIn: true,
+        subscriptionIdPresent: false,
+        tokenPresent: false,
+      }),
+      false
+    )
   })
 })
 
@@ -366,11 +402,14 @@ describe('production push origin and new-trip payload', () => {
       rescueRequestId: 'r1',
       urlQuery: 'rescue=r1',
     })
-    assert.equal(booking.title, 'New trip request')
-    assert.equal(booking.body, 'New trip request — respond within 30 seconds.')
+    assert.equal(booking.title, '🚕 NEW TAXIO TRIP')
+    assert.equal(booking.body, 'Action required — 49 seconds to respond. Tap now.')
     assert.equal(booking.data.url, '/dashboard/company?booking=b1')
-    assert.equal(rescue.title, 'New trip request')
-    assert.equal(rescue.body, booking.body)
+    assert.equal(rescue.title, '🚨 TAXIO RESCUE REQUEST')
+    assert.equal(
+      rescue.body,
+      'Another company needs coverage — 49 seconds to respond. Tap now.'
+    )
     assert.equal(rescue.data.url, '/dashboard/company?rescue=r1')
   })
 })
