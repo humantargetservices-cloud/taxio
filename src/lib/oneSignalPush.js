@@ -12,6 +12,7 @@ import {
   ONESIGNAL_SW_SCOPE,
   companyOneSignalExternalId,
   externalIdAssociationOk,
+  hasActiveBrowserPushSubscription,
   isCompetingRootOneSignalWorker,
   isInstalledPwa,
   isIosDevice,
@@ -283,7 +284,7 @@ export function readOneSignalPushSnapshot(OneSignal) {
 }
 
 function isActivelySubscribed(snap) {
-  return isPushEnrollmentComplete({
+  return hasActiveBrowserPushSubscription({
     permission: snap?.browserPermission,
     optedIn: snap?.optedIn,
     subscriptionIdPresent: snap?.subscriptionIdPresent,
