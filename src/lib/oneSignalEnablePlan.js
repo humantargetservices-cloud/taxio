@@ -41,6 +41,23 @@ export function externalIdAssociationOk(seenId, expectedExternalId) {
   return String(seenId || '') === expected
 }
 
+/**
+ * Browser push transport is active when permission is granted and OneSignal has
+ * an opted-in subscription id/token. Company identity is checked separately.
+ */
+export function hasActiveBrowserPushSubscription({
+  permission,
+  optedIn,
+  subscriptionIdPresent,
+  tokenPresent,
+} = {}) {
+  return (
+    permission === 'granted' &&
+    !!optedIn &&
+    !!(subscriptionIdPresent || tokenPresent)
+  )
+}
+
 /** Enabled only when permission, a real subscription, and the company external id all match. */
 export function isPushEnrollmentComplete({
   permission,
