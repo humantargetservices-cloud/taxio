@@ -43,7 +43,11 @@ function nowMs() {
 
 function readOwner() {
   if (typeof localStorage === 'undefined') return null
-  return safeParse(localStorage.getItem(ALERT_OWNER_KEY))
+  try {
+    return safeParse(localStorage.getItem(ALERT_OWNER_KEY))
+  } catch {
+    return null
+  }
 }
 
 function writeOwner(requestKey) {
@@ -59,9 +63,14 @@ function writeOwner(requestKey) {
     return false
   }
   const mine = { tabId, requestKey, expiresAt: now + OWNER_LEASE_MS }
-  localStorage.setItem(ALERT_OWNER_KEY, JSON.stringify(mine))
-  const verify = readOwner()
-  return verify?.tabId === tabId && verify?.requestKey === requestKey
+  try {
+    localStorage.setItem(ALERT_OWNER_KEY, JSON.stringify(mine))
+    const verify = readOwner()
+    return verify?.tabId === tabId && verify?.requestKey === requestKey
+  } catch {
+    // Storage can be restricted in privacy modes. Single-tab ringing is still safer than silence.
+    return true
+  }
 }
 
 function renewOwner() {
@@ -71,21 +80,29 @@ function renewOwner() {
     stopLocalAlert({ releaseOwner: false })
     return
   }
-  localStorage.setItem(
-    ALERT_OWNER_KEY,
-    JSON.stringify({
-      tabId,
-      requestKey: currentKey,
-      expiresAt: nowMs() + OWNER_LEASE_MS,
-    })
-  )
+  try {
+    localStorage.setItem(
+      ALERT_OWNER_KEY,
+      JSON.stringify({
+        tabId,
+        requestKey: currentKey,
+        expiresAt: nowMs() + OWNER_LEASE_MS,
+      })
+    )
+  } catch {
+    /* storage unavailable; keep local alert alive */
+  }
 }
 
 function releaseOwner(requestKey = currentKey) {
   if (!requestKey || typeof localStorage === 'undefined') return
   const owner = readOwner()
   if (owner?.tabId === tabId && owner?.requestKey === requestKey) {
-    localStorage.removeItem(ALERT_OWNER_KEY)
+    try {
+      localStorage.removeItem(ALERT_OWNER_KEY)
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -207,7 +224,7 @@ function stopSoundAndVibration() {
   vibrationInterval = null
   setHornLevel(false)
   try {
-    navigator?.vibrate?.(0)
+    globalThis.navigator?.vibrate?.(0)
   } catch {
     /* ignore */
   }
