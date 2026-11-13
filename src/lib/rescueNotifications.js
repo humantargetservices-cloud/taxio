@@ -29,6 +29,11 @@ import {
   renderNewTripDecisionOverlay,
   renderRescueOpportunityOverlay,
 } from './rescueMvpUi.js'
+import {
+  installForegroundTripAlertLifecycle,
+  stopForegroundTripAlert,
+  syncForegroundTripAlert,
+} from './tripAlertAudio.js'
 
 /** @type {string[]} */
 let dismissedIds = []
@@ -229,6 +234,7 @@ function bindHandlers(ctx) {
           }
           return
         }
+        stopForegroundTripAlert({ broadcast: true })
         if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
         // Open Current Trip sheet once after Company A accept
         try {
@@ -275,6 +281,7 @@ function bindHandlers(ctx) {
                 }
                 return
               }
+              stopForegroundTripAlert({ broadcast: true })
               if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
               void refreshNotifications()
               return
@@ -288,6 +295,7 @@ function bindHandlers(ctx) {
             }
             return
           }
+          stopForegroundTripAlert({ broadcast: true })
           if (!dismissedIds.includes(bookingId)) dismissedIds = [...dismissedIds, bookingId]
           showFlash(copy.rescueActiveLooking || copy.rescueActivateSuccess)
           void refreshNotifications()
@@ -348,6 +356,7 @@ function bindHandlers(ctx) {
           }
           return
         }
+        stopForegroundTripAlert({ broadcast: true })
         const acceptedId = String(
           result.body?.rescue_request_id || rescueId || ''
         ).trim()
@@ -451,6 +460,12 @@ async function refreshNotifications() {
 
     const pendingDecision = pickPendingDecisionBooking(bookings, dismissedIds)
     const openOpp = pickOpenOpportunity(opportunities)
+    const foregroundAlertKey = openOpp?.id
+      ? `rescue:${openOpp.id}`
+      : pendingDecision?.id
+        ? `booking:${pendingDecision.id}`
+        : ''
+    syncForegroundTripAlert(foregroundAlertKey)
 
     // Active alert: WAITING only. Never auto-pick historical CONFIRMED/CANCELLED on reopen.
     let won = pickWonRescue(opportunities, companyId, { actionableOnly: true })
@@ -581,6 +596,7 @@ async function refreshNotifications() {
     if (openOpp) {
       startCountdown(openOpp.expires_at, flags.opportunitySeconds || RESCUE_OPPORTUNITY_SECONDS, () => {
         // Display-only expiry — close quietly; server cron owns opportunity withdraw
+        stopForegroundTripAlert({ broadcast: true })
         lastSig = ''
         queueRefresh()
       })
@@ -589,6 +605,7 @@ async function refreshNotifications() {
         pendingDecision.decision_deadline_at,
         flags.decisionSeconds || ORIGINAL_COMPANY_DECISION_SECONDS,
         () => {
+          stopForegroundTripAlert({ broadcast: true })
           const bookingId = pendingDecision.id
           if (bookingId && !dismissedIds.includes(bookingId)) {
             dismissedIds = [...dismissedIds, bookingId]
@@ -627,6 +644,7 @@ export function startRescueNotifications({ companyId, accessToken, companyName }
   stopRescueNotifications()
   const portal = ensurePortal()
   session = { companyId, accessToken, companyName: companyName || '', portal }
+  installForegroundTripAlertLifecycle(() => queueRefresh())
   dismissedIds = []
   dismissedWinnerIds = loadDismissedWinnerIds(companyId)
   liveWinnerRescueId = ''
@@ -646,6 +664,7 @@ export function startRescueNotifications({ companyId, accessToken, companyName }
 
 export function stopRescueNotifications() {
   const previousCompanyId = session?.companyId || ''
+  stopForegroundTripAlert({ broadcast: true })
   stopRescueLiveUpdates()
   stopCountdown()
   if (flashTimer) {

@@ -160,7 +160,7 @@ export function pushTtlSecondsForEvent(eventType) {
     eventType === PUSH_EVENT_TYPES.COMPANY_BOOKING_NEW ||
     eventType === PUSH_EVENT_TYPES.RESCUE_OPPORTUNITY_NEW
   ) {
-    return 30
+    return 49
   }
   return 60
 }
@@ -540,8 +540,8 @@ export function buildPushNotificationContent(eventType, ctx = {}) {
   switch (eventType) {
     case PUSH_EVENT_TYPES.COMPANY_BOOKING_NEW:
       return {
-        title: 'New trip request',
-        body: 'New trip request — respond within 30 seconds.',
+        title: '🚕 NEW TAXIO TRIP',
+        body: 'Action required — 49 seconds to respond. Tap now.',
         tag: `booking-${ctx.bookingId || 'new'}`,
         data: {
           url,
@@ -551,8 +551,8 @@ export function buildPushNotificationContent(eventType, ctx = {}) {
       }
     case PUSH_EVENT_TYPES.RESCUE_OPPORTUNITY_NEW:
       return {
-        title: 'New trip request',
-        body: 'New trip request — respond within 30 seconds.',
+        title: '🚨 TAXIO RESCUE REQUEST',
+        body: 'Another company needs coverage — 49 seconds to respond. Tap now.',
         tag: `rescue-opp-${ctx.opportunityId || ctx.rescueRequestId || 'new'}`,
         data: {
           url,
@@ -677,12 +677,12 @@ export async function sendWebPushToSubscription(webpushApi, subscriptionRow, pay
   }
   const body = JSON.stringify(payloadObj)
   const eventType = String(opts.eventType || payloadObj?.event_type || '')
-  // Opportunity windows are 25s/30s — do not keep stale trip alerts useful after expiry.
+  // Timed trip opportunities are currently 49s in production — keep stale alerts short-lived.
   const isTimedOpportunity =
     eventType === PUSH_EVENT_TYPES.COMPANY_BOOKING_NEW ||
     eventType === PUSH_EVENT_TYPES.RESCUE_OPPORTUNITY_NEW
   await webpushApi.sendNotification(pushSubscription, body, {
-    TTL: isTimedOpportunity ? 30 : 60,
+    TTL: isTimedOpportunity ? 49 : 60,
     urgency: 'high',
   })
 }
