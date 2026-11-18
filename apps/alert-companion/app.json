@@ -13,7 +13,8 @@
         "VIBRATE",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_SPECIAL_USE"
-      ]
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "ios": {
       "bundleIdentifier": "be.taxio.alert",
@@ -38,7 +39,10 @@
       "./plugins/withTaxioForegroundService"
     ],
     "extra": {
-      "taxioApiOrigin": "https://www.taxio.be"
+      "taxioApiOrigin": "https://www.taxio.be",
+      "eas": {
+        "projectId": "bda84336-17c9-470c-831f-6680a2be36cf"
+      }
     },
     "owner": "taxio-platform"
   }

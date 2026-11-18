@@ -1,7 +1,35 @@
-const { withAndroidManifest } = require('expo/config-plugins')
+const fs = require('fs')
+const path = require('path')
+const { withAndroidManifest, withDangerousMod } = require('expo/config-plugins')
+
+const WORKMANAGER_R8_RULES = `
+# Expo SDK 58 / AGP 9: WorkManager + Room instantiate these reflectively.
+# Keep their no-arg constructors in minified release builds.
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class * extends androidx.work.InputMerger { <init>(); }
+`.trim()
+
+function withTaxioWorkManagerR8Fix(config) {
+  return withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const file = path.join(
+        config.modRequest.platformProjectRoot,
+        'app',
+        'proguard-rules.pro'
+      )
+      let existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''
+      if (!existing.includes('-keep class * extends androidx.room.RoomDatabase { <init>(); }')) {
+        existing = `${existing.trimEnd()}\n\n${WORKMANAGER_R8_RULES}\n`
+        fs.writeFileSync(file, existing, 'utf8')
+      }
+      return config
+    },
+  ])
+}
 
 module.exports = function withTaxioForegroundService(config) {
-  return withAndroidManifest(config, (config) => {
+  config = withAndroidManifest(config, (config) => {
     const manifest = config.modResults.manifest
     const permissions = manifest['uses-permission'] || (manifest['uses-permission'] = [])
     const permissionName = 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE'
@@ -46,4 +74,6 @@ module.exports = function withTaxioForegroundService(config) {
 
     return config
   })
+
+  return withTaxioWorkManagerR8Fix(config)
 }
