@@ -24,7 +24,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/taxio-apk
-          gh run download 44302292384 -n taxio-alert-companion-pilot-apk -D /tmp/taxio-apk
+          gh run download 44344641476 -n taxio-alert-companion-pilot-apk -D /tmp/taxio-apk
           find /tmp/taxio-apk -type f -maxdepth 2 -ls
           APK=$(find /tmp/taxio-apk -name '*.apk' -type f | head -n 1)
           test -n "$APK"
@@ -48,17 +48,14 @@ jobs:
             adb install -r /tmp/taxio-alert.apk
             echo 'Third-party packages after install:'
             adb shell pm list packages -3
-            adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER be.taxio.operator
+            adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER be.taxio.alert
             adb logcat -c
-            adb shell am force-stop be.taxio.operator || true
-            adb shell monkey -p be.taxio.operator -c android.intent.category.LAUNCHER 1
+            adb shell am force-stop be.taxio.alert || true
+            adb shell monkey -p be.taxio.alert -c android.intent.category.LAUNCHER 1
             sleep 8
-            adb shell pidof be.taxio.operator || true
+            adb shell pidof be.taxio.alert || true
             adb logcat -d > /tmp/taxio-logcat.txt
             echo '--- fatal/crash lines ---'
-            grep -iE 'FATAL EXCEPTION|AndroidRuntime|Process: be.taxio.operator|ReactNativeJS|UnsatisfiedLinkError|ClassNotFoundException|IllegalStateException|NoSuchMethodError|SecurityException' /tmp/taxio-logcat.txt | tail -n 300 || true
-            if ! adb shell pidof be.taxio.operator >/dev/null 2>&1; then
-              echo 'TAXIO_ALERT_APP_CRASHED'
-              exit 1
-            fi
+            grep -iE 'FATAL EXCEPTION|AndroidRuntime|Process: be.taxio.alert|ReactNativeJS|UnsatisfiedLinkError|ClassNotFoundException|IllegalStateException|NoSuchMethodError|SecurityException' /tmp/taxio-logcat.txt | tail -n 300 || true
+            adb shell pidof be.taxio.alert
 
