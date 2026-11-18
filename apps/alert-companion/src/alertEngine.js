@@ -7,7 +7,7 @@ import notifee, {
 import * as Notifications from 'expo-notifications'
 
 export const ALERT_NOTIFICATION_ID = 'taxio-active-trip-alert'
-export const ALERT_CHANNEL_ID = 'taxio-trip-alert-v1'
+export const ALERT_CHANNEL_ID = 'taxio-trip-alert-v2'
 
 export function extractTaxioAlertData(input) {
   const candidates = [
@@ -35,7 +35,7 @@ export async function ensureAlertChannel() {
     visibility: AndroidVisibility.PUBLIC,
     vibration: true,
     vibrationPattern: [700, 200, 700, 200, 1000],
-    sound: 'default',
+    sound: 'taxio_offer',
   })
 }
 
@@ -70,7 +70,7 @@ export async function startAndroidAlert(input) {
       ongoing: true,
       autoCancel: false,
       loopSound: true,
-      sound: 'default',
+      sound: 'taxio_offer',
       vibrationPattern: [700, 200, 700, 200, 1000],
       lightUpScreen: true,
       pressAction: {
@@ -155,7 +155,7 @@ export async function showLocalTestAlert() {
     content: {
       title: '🚕 TAXIO TEST ALERT',
       body: 'Native iPhone notification test.',
-      sound: 'default',
+      sound: 'taxio_offer.wav',
       interruptionLevel: 'timeSensitive',
       data: {
         taxio_native_alert: '1',

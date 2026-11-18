@@ -120,7 +120,7 @@ export async function sendNativeAlertToCompanyBestEffort({ admin, outbox, conten
   }
   const messages=targetDevices.map(device=>{
     const common={to:device.expo_push_token,priority:'high',ttl,data}
-    if(device.platform==='ios') return {...common,title:data.title,body:data.body,sound:'default',interruptionLevel:'time-sensitive'}
+    if(device.platform==='ios') return {...common,title:data.title,body:data.body,sound:'taxio_offer.wav',interruptionLevel:'time-sensitive'}
     return common
   })
   const {tickets}=await postExpo(messages)
