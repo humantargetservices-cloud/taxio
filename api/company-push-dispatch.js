@@ -28,6 +28,7 @@ import {
   sendOneSignalPushToCompany,
   validateOneSignalServerEnv,
 } from './_companyPush.js'
+import { sendNativeAlertToCompanyBestEffort } from './_nativeAlert.js'
 
 /** Reclaim a stuck PROCESSING row after this age (ms). */
 const STALE_PROCESSING_MS = 2 * 60 * 1000
@@ -214,6 +215,18 @@ export default async function handler(req, res) {
       delete content.data.passenger_name
     }
 
+    // Start the isolated native companion send in parallel. It is best-effort:
+    // it must never change the existing OneSignal/Web Push outcome.
+    const nativeAlertPromise = sendNativeAlertToCompanyBestEffort({
+      admin,
+      outbox,
+      content,
+      safeCtx,
+    }).catch((nativeErr) => {
+      console.error('[company-push-dispatch:native]', safeLastError(nativeErr))
+      return { ok: false, code: 'NATIVE_ALERT_FAILED', sent: 0 }
+    })
+
     try {
       const result = await sendOneSignalPushToCompany({
         companyId,
@@ -230,6 +243,8 @@ export default async function handler(req, res) {
         })
         .eq('id', outbox.id)
 
+      const nativeAlert = await nativeAlertPromise
+
       return json(res, 200, {
         ok: true,
         code: 'SENT',
@@ -240,6 +255,7 @@ export default async function handler(req, res) {
         onesignal_notification_id: result.notificationId,
         recipients: result.recipients,
         provider: 'onesignal',
+        native_alert: nativeAlert,
       })
     } catch (err) {
       const failMsg = safeLastError(err)
@@ -252,6 +268,8 @@ export default async function handler(req, res) {
         })
         .eq('id', outbox.id)
 
+      const nativeAlert = await nativeAlertPromise
+
       return json(res, 200, {
         ok: false,
         code: err?.code || 'FAILED',
@@ -259,6 +277,7 @@ export default async function handler(req, res) {
         company_id: companyId,
         provider: 'onesignal',
         error: failMsg,
+        native_alert: nativeAlert,
       })
     }
   } catch (err) {

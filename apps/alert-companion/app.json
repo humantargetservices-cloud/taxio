@@ -1,0 +1,34 @@
+{
+  "expo":{
+    "name":"TAXIO Alert",
+    "slug":"taxio-alert-companion",
+    "version":"0.1.0",
+    "orientation":"portrait",
+    "scheme":"taxio-alert",
+    "userInterfaceStyle":"automatic",
+    "android":{
+      "package":"be.taxio.alert",
+      "permissions":[
+        "POST_NOTIFICATIONS",
+        "VIBRATE",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_SPECIAL_USE"
+      ]
+    },
+    "ios":{
+      "bundleIdentifier":"be.taxio.alert",
+      "supportsTablet":false,
+      "infoPlist":{"UIBackgroundModes":["remote-notification"]}
+    },
+    "plugins":[
+      ["expo-notifications",{"enableBackgroundRemoteNotifications":true}],
+      "expo-secure-store",
+      "@notifee/react-native",
+      "./plugins/withTaxioForegroundService"
+    ],
+    "extra":{
+      "taxioApiOrigin":"https://www.taxio.be",
+      "eas":{"projectId":"SET_WITH_EAS_INIT"}
+    }
+  }
+}
