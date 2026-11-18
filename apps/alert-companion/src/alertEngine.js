@@ -52,7 +52,7 @@ export async function ensureAlertChannel() {
     importance: AndroidImportance.HIGH,
     visibility: AndroidVisibility.PUBLIC,
     vibration: true,
-    vibrationPattern: [700, 200, 700, 200, 1000],
+    vibrationPattern: [700, 200, 700, 200, 1000, 200],
     sound: 'taxio_offer',
   })
 }
@@ -89,7 +89,7 @@ export async function startAndroidAlert(input) {
       autoCancel: false,
       loopSound: true,
       sound: 'taxio_offer',
-      vibrationPattern: [700, 200, 700, 200, 1000],
+      vibrationPattern: [700, 200, 700, 200, 1000, 200],
       lightUpScreen: true,
       pressAction: {
         id: 'open-taxio',
