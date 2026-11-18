@@ -272,7 +272,24 @@ export async function sendOneSignalPushToCompany({ companyId, eventType, content
   delete data.customer_name
   delete data.passenger_phone
   delete data.passenger_name
-  if (Object.keys(data).length) payload.data = data
+
+  // Marker consumed by /sw.js before OneSignal's click handler so Android can
+  // route the in-scope URL into the installed TAXIO PWA/WebAPK.
+  data.taxio_open_pwa = '1'
+  if (typeof data.url === 'string' && data.url.startsWith('/')) {
+    data.taxio_path = data.url
+  } else {
+    try {
+      const parsed = new URL(url)
+      data.taxio_path =
+        parsed.origin === publicAppOrigin()
+          ? `${parsed.pathname}${parsed.search}${parsed.hash}`
+          : '/dashboard/company'
+    } catch {
+      data.taxio_path = '/dashboard/company'
+    }
+  }
+  payload.data = data
 
   const res = await fetch('https://api.onesignal.com/notifications', {
     method: 'POST',

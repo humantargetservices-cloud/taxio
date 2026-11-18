@@ -7,6 +7,51 @@
  * SPA HTML rewrite and cannot create a push subscription.
  * Purges older taxio-shell-v1/v2 and taxio-assets-v1/v2 on activate.
  */
+/**
+ * TAXIO push click interception must register before the OneSignal worker.
+ * For TAXIO trip notifications we open an in-scope URL through Clients.openWindow().
+ * Chrome/Android may route that URL into the installed standalone PWA/WebAPK.
+ * Non-TAXIO notifications fall through to OneSignal unchanged.
+ */
+function taxioNotificationData(notification) {
+  const root = notification?.data && typeof notification.data === 'object' ? notification.data : {}
+  const candidates = [
+    root,
+    root.additionalData,
+    root.data,
+    root.custom?.a,
+    root.custom,
+  ].filter((item) => item && typeof item === 'object')
+
+  return (
+    candidates.find(
+      (item) =>
+        String(item.taxio_open_pwa || '') === '1' ||
+        String(item.taxio_open_pwa || '') === 'true'
+    ) || null
+  )
+}
+
+self.addEventListener('notificationclick', (event) => {
+  const data = taxioNotificationData(event.notification)
+  if (!data) return
+
+  event.stopImmediatePropagation()
+  event.notification.close()
+
+  let target = '/dashboard/company'
+  const raw = String(data.taxio_path || data.url || '').trim()
+  if (raw.startsWith('/')) target = raw
+
+  const absolute = new URL(target, self.location.origin).href
+  event.waitUntil(
+    self.clients
+      .openWindow(absolute)
+      .then((client) => (client ? client.focus().catch(() => client) : null))
+      .catch(() => null)
+  )
+})
+
 importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js')
 
 const SHELL_CACHE = 'taxio-shell-v3'
