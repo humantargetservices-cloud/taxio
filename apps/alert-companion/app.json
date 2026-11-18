@@ -1,38 +1,43 @@
 {
-  "expo":{
-    "name":"TAXIO Alert",
-    "slug":"taxio-platform",
-    "owner":"taxio-platform",
-    "version":"0.6.0",
-    "orientation":"portrait",
-    "scheme":"taxiooperator",
-    "userInterfaceStyle":"automatic",
-    "android":{
-      "package":"be.taxio.operator",
-      "googleServicesFile":"./google-services.json",
-      "permissions":[
+  "expo": {
+    "name": "TAXIO Alert",
+    "slug": "taxio-alert-companion",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "taxio-alert",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "be.taxio.alert",
+      "permissions": [
         "POST_NOTIFICATIONS",
         "VIBRATE",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_SPECIAL_USE"
       ]
     },
-    "ios":{
-      "bundleIdentifier":"be.taxio.operator",
-      "supportsTablet":false,
-      "infoPlist":{"UIBackgroundModes":["remote-notification"]}
+    "ios": {
+      "bundleIdentifier": "be.taxio.alert",
+      "supportsTablet": false,
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
     },
-    "plugins":[
-      ["expo-notifications",{
-        "enableBackgroundRemoteNotifications":true,
-        "sounds":["./assets/taxio_offer.wav"]
-      }],
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true,
+          "sounds": ["./assets/taxio_offer.wav"]
+        }
+      ],
       "expo-secure-store",
       "./plugins/withTaxioForegroundService"
     ],
-    "extra":{
-      "taxioApiOrigin":"https://www.taxio.be",
-      "eas":{"projectId":"bda84336-17c9-470c-831f-6680a2be36cf"}
+    "extra": {
+      "taxioApiOrigin": "https://www.taxio.be",
+      "eas": {
+        "projectId": "SET_WITH_EAS_INIT"
+      }
     }
   }
 }

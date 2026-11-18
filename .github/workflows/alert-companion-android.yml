@@ -77,12 +77,29 @@ jobs:
       - name: Inspect Expo config
         run: npx expo config --type public
 
+      - name: Verify separate companion mobile identity
+        run: |
+          node -e "const c=require('./app.json').expo; if(c.android.package!=='be.taxio.alert'||c.ios.bundleIdentifier!=='be.taxio.alert'||c.slug!=='taxio-alert-companion') process.exit(1)"
+          if grep -R 'be.taxio.operator' app.json --exclude-dir=node_modules; then
+            echo 'Operator mobile identity leaked into companion.'
+            exit 1
+          fi
+
+      - name: Require separate Firebase registration before native-push APK
+        run: |
+          if [ ! -f google-services.json ]; then
+            echo 'Missing apps/alert-companion/google-services.json for package be.taxio.alert.'
+            echo 'Create a separate Firebase Android app for be.taxio.alert; never reuse be.taxio.operator.'
+            exit 1
+          fi
+          grep -q '"package_name": "be.taxio.alert"' google-services.json
+
       - name: Generate Android native project
         run: npx expo prebuild --platform android --no-install
 
       - name: Verify mobile identity and foreground-service wiring
         run: |
-          grep -R 'be.taxio.operator' android/app/build.gradle android/app/src/main/AndroidManifest.xml
+          grep -R 'be.taxio.alert' android/app/build.gradle android/app/src/main/AndroidManifest.xml
           grep -R 'FOREGROUND_SERVICE_SPECIAL_USE' android/app/src/main/AndroidManifest.xml
           grep -R 'foregroundServiceType="specialUse"' android/app/src/main/AndroidManifest.xml
           test -f android/app/src/main/res/raw/taxio_offer.wav
