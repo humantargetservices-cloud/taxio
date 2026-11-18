@@ -79,7 +79,7 @@ jobs:
 
       - name: Verify separate companion mobile identity
         run: |
-          node -e "const c=require('./app.json').expo; if(c.android.package!=='be.taxio.alert'||c.ios.bundleIdentifier!=='be.taxio.alert'||c.slug!=='taxio-alert-companion') process.exit(1)"
+          node -e "const c=require('./app.json').expo; if(c.android.package!=='be.taxio.alert'||c.ios.bundleIdentifier!=='be.taxio.alert'||c.slug!=='taxio-alert'||c.owner!=='taxio-platform') process.exit(1)"
           if grep -R 'be.taxio.operator' app.json --exclude-dir=node_modules; then
             echo 'Operator mobile identity leaked into companion.'
             exit 1
