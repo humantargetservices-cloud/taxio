@@ -46,8 +46,10 @@ jobs:
           disable-animations: true
           script: |
             adb install -r /tmp/taxio-alert.apk
-            PACKAGE=$(adb shell pm list packages | sed -n 's/^package:\(.*taxio.*\)$/\1/p' | head -n 1 | tr -d '\r')
-            COMPONENT=$(adb shell cmd package resolve-activity --brief "$PACKAGE" | tail -n 1 | tr -d '\r')
+            echo 'Third-party packages after install:'
+            adb shell pm list packages -3
+            PACKAGE=$(adb shell pm list packages -3 | sed 's/^package://' | head -n 1 | tr -d '\r')
+            COMPONENT=$(adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER "$PACKAGE" | tail -n 1 | tr -d '\r')
             echo "APK package: $PACKAGE"
             echo "Launcher component: $COMPONENT"
             test -n "$PACKAGE"
