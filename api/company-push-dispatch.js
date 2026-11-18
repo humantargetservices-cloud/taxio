@@ -207,6 +207,17 @@ export default async function handler(req, res) {
     const safeCtx = await loadSafePushContext(admin, outbox)
     const content = buildPushNotificationContent(outbox.event_type, safeCtx)
 
+    const currentDedupeKey = String(outbox.dedupe_key || '')
+    if (currentDedupeKey.startsWith('booking-reminder:')) {
+      content.title = '🚨 TAXIO TRIP STILL WAITING'
+      content.body = 'About 25 seconds remaining. Tap now before the request expires.'
+      content.tag = `booking-reminder-${outbox.booking_id || outbox.id}`
+    } else if (currentDedupeKey.startsWith('rescue-reminder:')) {
+      content.title = '🚨 TAXIO RESCUE STILL AVAILABLE'
+      content.body = 'About 25 seconds remaining. Tap now before the Rescue request expires.'
+      content.tag = `rescue-reminder-${outbox.rescue_opportunity_id || outbox.id}`
+    }
+
     // Hard guard: never ship passenger PII fields into OneSignal data
     if (content.data) {
       delete content.data.customer_phone

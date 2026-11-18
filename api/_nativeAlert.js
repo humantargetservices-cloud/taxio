@@ -88,6 +88,14 @@ export async function sendNativeAlertToCompanyBestEffort({ admin, outbox, conten
   const validDevices=(devices||[]).filter(d=>expoTokenLooksValid(d.expo_push_token))
   if (!validDevices.length) return { ok:true, code:'NO_NATIVE_DEVICES', sent:0 }
 
+  // Android already keeps ringing from the initial native alert.
+  // Reminder rows target iOS natively only; OneSignal still sends the Web Push fallback.
+  const reminder=
+    String(outbox.dedupe_key||'').startsWith('booking-reminder:') ||
+    String(outbox.dedupe_key||'').startsWith('rescue-reminder:')
+  const targetDevices=reminder ? validDevices.filter(d=>d.platform==='ios') : validDevices
+  if (!targetDevices.length) return { ok:true, code:reminder?'REMINDER_IOS_ONLY':'NO_NATIVE_DEVICES', sent:0 }
+
   const authority=await loadAuthority(admin,outbox)
   if (!authority.active || !authority.expiresAt) return { ok:true, code:'NO_LONGER_ACTIONABLE', sent:0 }
 
@@ -110,15 +118,15 @@ export async function sendNativeAlertToCompanyBestEffort({ admin, outbox, conten
     title:String(content?.title||'TAXIO').slice(0,80),
     body:pickup && pickup!=='—' ? `${String(content?.body||'Action required.').slice(0,100)} Pickup: ${pickup}` : String(content?.body||'Action required.').slice(0,140),
   }
-  const messages=validDevices.map(device=>{
+  const messages=targetDevices.map(device=>{
     const common={to:device.expo_push_token,priority:'high',ttl,data}
     if(device.platform==='ios') return {...common,title:data.title,body:data.body,sound:'default',interruptionLevel:'time-sensitive'}
     return common
   })
   const {tickets}=await postExpo(messages)
   let sent=0,failed=0
-  for(let i=0;i<validDevices.length;i++){
-    const device=validDevices[i],ticket=tickets[i],ok=ticket?.status==='ok'
+  for(let i=0;i<targetDevices.length;i++){
+    const device=targetDevices[i],ticket=tickets[i],ok=ticket?.status==='ok'
     ok?sent++:failed++
     const providerError=ticket?.details?.error||ticket?.message||null
     await admin.from('company_native_devices').update({
@@ -128,5 +136,5 @@ export async function sendNativeAlertToCompanyBestEffort({ admin, outbox, conten
     }).eq('id',device.id)
   }
   console.info('[native-alert] Expo accepted',{companyId:outbox.company_id,eventType:outbox.event_type,sent,failed,ttl})
-  return {ok:sent>0||failed===0,code:sent>0?'NATIVE_SENT':failed?'NATIVE_FAILED':'NO_NATIVE_DEVICES',sent,failed}
+  return {ok:sent>0||failed===0,code:sent>0?(reminder?'NATIVE_REMINDER_SENT':'NATIVE_SENT'):failed?'NATIVE_FAILED':'NO_NATIVE_DEVICES',sent,failed}
 }
