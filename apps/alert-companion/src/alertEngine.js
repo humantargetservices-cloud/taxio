@@ -9,11 +9,29 @@ import * as Notifications from 'expo-notifications'
 export const ALERT_NOTIFICATION_ID = 'taxio-active-trip-alert'
 export const ALERT_CHANNEL_ID = 'taxio-trip-alert-v2'
 
+function parseJsonObject(value) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 export function extractTaxioAlertData(input) {
+  // Expo SDK 58 serializes Expo Push Service payloads received by the
+  // background notification task as { data: { dataString: "<json>" } }.
+  // Foreground listeners generally expose the already-parsed content.data.
   const candidates = [
+    parseJsonObject(input?.data?.dataString),
     input?.data,
+    parseJsonObject(input?.dataString),
+    parseJsonObject(input?.notification?.request?.content?.data?.dataString),
     input?.notification?.request?.content?.data,
+    parseJsonObject(input?.request?.content?.data?.dataString),
     input?.request?.content?.data,
+    parseJsonObject(input?.remoteMessage?.data?.dataString),
     input?.remoteMessage?.data,
     input,
   ]
