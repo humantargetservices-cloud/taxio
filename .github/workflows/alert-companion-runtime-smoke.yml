@@ -46,16 +46,16 @@ jobs:
           disable-animations: true
           script: |
             adb install -r /tmp/taxio-alert.apk
-            PACKAGE=$(aapt dump badging /tmp/taxio-alert.apk | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
-            ACTIVITY=$(aapt dump badging /tmp/taxio-alert.apk | sed -n "s/^launchable-activity: name='\([^']*\)'.*/\1/p")
+            PACKAGE=$(adb shell pm list packages | sed -n 's/^package:\(.*taxio.*\)$/\1/p' | head -n 1 | tr -d '\r')
+            COMPONENT=$(adb shell cmd package resolve-activity --brief "$PACKAGE" | tail -n 1 | tr -d '\r')
             echo "APK package: $PACKAGE"
-            echo "Launcher activity: $ACTIVITY"
+            echo "Launcher component: $COMPONENT"
             test -n "$PACKAGE"
-            test -n "$ACTIVITY"
+            test -n "$COMPONENT"
 
             adb logcat -c
             adb shell am force-stop "$PACKAGE" || true
-            adb shell am start -n "$PACKAGE/$ACTIVITY"
+            adb shell am start -n "$COMPONENT"
             sleep 8
             adb shell pidof "$PACKAGE" || true
             adb logcat -d > /tmp/taxio-logcat.txt
