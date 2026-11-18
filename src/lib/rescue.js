@@ -2,8 +2,8 @@ import { supabase } from './supabase.js'
 import { apiUrl } from './api.js'
 
 /** Client UX defaults — server deadlines (pg_cron) are authoritative. */
-export const ORIGINAL_COMPANY_DECISION_SECONDS = 25
-export const RESCUE_OPPORTUNITY_SECONDS = 30
+export const ORIGINAL_COMPANY_DECISION_SECONDS = 49
+export const RESCUE_OPPORTUNITY_SECONDS = 49
 
 /** Refresh when access token expires within this window. */
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000
