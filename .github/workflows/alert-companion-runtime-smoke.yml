@@ -48,22 +48,16 @@ jobs:
             adb install -r /tmp/taxio-alert.apk
             echo 'Third-party packages after install:'
             adb shell pm list packages -3
-            PACKAGE=$(adb shell pm list packages -3 | sed 's/^package://' | head -n 1 | tr -d '\r')
-            COMPONENT=$(adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER "$PACKAGE" | tail -n 1 | tr -d '\r')
-            echo "APK package: $PACKAGE"
-            echo "Launcher component: $COMPONENT"
-            test -n "$PACKAGE"
-            test -n "$COMPONENT"
-
+            adb shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER be.taxio.operator
             adb logcat -c
-            adb shell am force-stop "$PACKAGE" || true
-            adb shell am start -n "$COMPONENT"
+            adb shell am force-stop be.taxio.operator || true
+            adb shell monkey -p be.taxio.operator -c android.intent.category.LAUNCHER 1
             sleep 8
-            adb shell pidof "$PACKAGE" || true
+            adb shell pidof be.taxio.operator || true
             adb logcat -d > /tmp/taxio-logcat.txt
             echo '--- fatal/crash lines ---'
-            grep -iE "FATAL EXCEPTION|AndroidRuntime|Process: $PACKAGE|ReactNativeJS|UnsatisfiedLinkError|ClassNotFoundException|IllegalStateException|NoSuchMethodError|SecurityException" /tmp/taxio-logcat.txt | tail -n 250 || true
-            if ! adb shell pidof "$PACKAGE" >/dev/null 2>&1; then
+            grep -iE 'FATAL EXCEPTION|AndroidRuntime|Process: be.taxio.operator|ReactNativeJS|UnsatisfiedLinkError|ClassNotFoundException|IllegalStateException|NoSuchMethodError|SecurityException' /tmp/taxio-logcat.txt | tail -n 300 || true
+            if ! adb shell pidof be.taxio.operator >/dev/null 2>&1; then
               echo 'TAXIO_ALERT_APP_CRASHED'
               exit 1
             fi
