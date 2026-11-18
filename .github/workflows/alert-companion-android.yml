@@ -1,0 +1,115 @@
+name: TAXIO Alert Companion Android Pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/alert-companion/**'
+      - 'api/_nativeAlert.js'
+      - 'api/native-alert-device.js'
+      - 'api/native-alert-status.js'
+      - 'api/company-push-dispatch.js'
+      - 'supabase/migration_native_alert_companion.sql'
+      - 'supabase/migration_native_alert_reminders.sql'
+      - '.github/workflows/alert-companion-android.yml'
+
+concurrency:
+  group: taxio-alert-companion-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/alert-companion
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://gdiamipqrhxbmrcsnqdk.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_4KLbctN5HvEIt2fjS9UTgA_V2aXzt9k
+      EXPO_PUBLIC_TAXIO_API_ORIGIN: https://www.taxio.be
+      CI: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Verify root PWA remains isolated
+        working-directory: .
+        run: |
+          test -f package.json
+          test -d apps/alert-companion
+          node -e "const p=require('./package.json'); if(p.name!=='taxio') process.exit(1)"
+          git diff HEAD^ HEAD --name-only | tee /tmp/taxio-alert-files.txt
+          if grep -E '^(src/|public/onesignal/|public/sw\.js|vite\.config\.js|vercel\.json|package\.json|package-lock\.json)$' /tmp/taxio-alert-files.txt; then
+            echo 'Frozen PWA file changed in alert-companion commit.'
+            exit 1
+          fi
+
+      - name: Check backend native-alert syntax
+        working-directory: .
+        run: |
+          node --check api/_nativeAlert.js
+          node --check api/native-alert-device.js
+          node --check api/native-alert-status.js
+          node --check api/company-push-dispatch.js
+
+      - name: Install companion dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Check Expo dependency compatibility
+        run: npx expo install --check
+
+      - name: Inspect Expo config
+        run: npx expo config --type public
+
+      - name: Generate Android native project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Verify mobile identity and foreground-service wiring
+        run: |
+          grep -R 'be.taxio.operator' android/app/build.gradle android/app/src/main/AndroidManifest.xml
+          grep -R 'FOREGROUND_SERVICE_SPECIAL_USE' android/app/src/main/AndroidManifest.xml
+          grep -R 'foregroundServiceType="specialUse"' android/app/src/main/AndroidManifest.xml
+          test -f android/app/src/main/res/raw/taxio_offer.wav
+
+      - name: Build release APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Verify APK exists
+        run: |
+          APK=$(find android/app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)
+          test -n "$APK"
+          ls -lh "$APK"
+          sha256sum "$APK" | tee /tmp/taxio-alert-apk.sha256
+
+      - name: Upload TAXIO Alert APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxio-alert-companion-pilot-apk
+          path: apps/alert-companion/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxio-alert-companion-apk-sha256
+          path: /tmp/taxio-alert-apk.sha256
+          if-no-files-found: error
+          retention-days: 14
