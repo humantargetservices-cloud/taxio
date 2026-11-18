@@ -58,3 +58,4 @@ jobs:
               echo 'TAXIO_ALERT_APP_CRASHED'
               exit 1
             fi
+
