@@ -28,7 +28,6 @@
         "sounds":["./assets/taxio_offer.wav"]
       }],
       "expo-secure-store",
-      "@notifee/react-native",
       "./plugins/withTaxioForegroundService"
     ],
     "extra":{
