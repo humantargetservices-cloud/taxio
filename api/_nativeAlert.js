@@ -118,23 +118,61 @@ export async function sendNativeAlertToCompanyBestEffort({ admin, outbox, conten
     title:String(content?.title||'TAXIO').slice(0,80),
     body:pickup && pickup!=='—' ? `${String(content?.body||'Action required.').slice(0,100)} Pickup: ${pickup}` : String(content?.body||'Action required.').slice(0,140),
   }
-  const messages=targetDevices.map(device=>{
+  const envelopes=[]
+  for (const device of targetDevices) {
     const common={to:device.expo_push_token,priority:'high',ttl,data}
-    if(device.platform==='ios') return {...common,title:data.title,body:data.body,sound:'taxio_offer.wav',interruptionLevel:'time-sensitive'}
-    return common
-  })
+    if (device.platform==='ios') {
+      envelopes.push({
+        device,
+        kind:'ios-visible',
+        message:{...common,title:data.title,body:data.body,sound:'taxio_offer.wav',interruptionLevel:'time-sensitive'}
+      })
+      continue
+    }
+
+    // Android gets two independent deliveries:
+    // 1) headless data-only wake → starts the 49-second Notifee foreground alert;
+    // 2) OS-visible fallback → ensures the driver still sees/hears something
+    //    even if Android suppresses the headless JS task.
+    envelopes.push({
+      device,
+      kind:'android-headless',
+      message:common,
+    })
+    envelopes.push({
+      device,
+      kind:'android-visible-fallback',
+      message:{
+        ...common,
+        title:data.title,
+        body:data.body,
+        channelId:'taxio-trip-alert-v3',
+        tag:'taxio-native-fallback',
+      },
+    })
+  }
+  const messages=envelopes.map((entry)=>entry.message)
   const {tickets}=await postExpo(messages)
   let sent=0,failed=0
-  for(let i=0;i<targetDevices.length;i++){
-    const device=targetDevices[i],ticket=tickets[i],ok=ticket?.status==='ok'
+  const perDevice=new Map()
+  for(let i=0;i<envelopes.length;i++){
+    const {device,kind}=envelopes[i]
+    const ticket=tickets[i]
+    const ok=ticket?.status==='ok'
     ok?sent++:failed++
     const providerError=ticket?.details?.error||ticket?.message||null
+    const current=perDevice.get(device.id)||{device,errors:[],deviceNotRegistered:false}
+    if(providerError) current.errors.push(`${kind}:${String(providerError).slice(0,160)}`)
+    if(providerError==='DeviceNotRegistered') current.deviceNotRegistered=true
+    perDevice.set(device.id,current)
+  }
+  for(const {device,errors,deviceNotRegistered} of perDevice.values()){
     await admin.from('company_native_devices').update({
       last_seen_at:new Date().toISOString(),
-      last_error:providerError?String(providerError).slice(0,240):null,
-      ...(providerError==='DeviceNotRegistered'?{enabled:false}:{}),
+      last_error:errors.length?errors.join(' | ').slice(0,240):null,
+      ...(deviceNotRegistered?{enabled:false}:{}),
     }).eq('id',device.id)
   }
-  console.info('[native-alert] Expo accepted',{companyId:outbox.company_id,eventType:outbox.event_type,sent,failed,ttl})
+  console.info('[native-alert] Expo accepted',{companyId:outbox.company_id,eventType:outbox.event_type,sent,failed,ttl,messages:messages.length})
   return {ok:sent>0||failed===0,code:sent>0?(reminder?'NATIVE_REMINDER_SENT':'NATIVE_SENT'):failed?'NATIVE_FAILED':'NO_NATIVE_DEVICES',sent,failed}
 }

@@ -7,7 +7,7 @@ import notifee, {
 import * as Notifications from 'expo-notifications'
 
 export const ALERT_NOTIFICATION_ID = 'taxio-active-trip-alert'
-export const ALERT_CHANNEL_ID = 'taxio-trip-alert-v2'
+export const ALERT_CHANNEL_ID = 'taxio-trip-alert-v3'
 
 function parseJsonObject(value) {
   if (typeof value !== 'string' || !value.trim()) return null
@@ -53,7 +53,7 @@ export async function ensureAlertChannel() {
     visibility: AndroidVisibility.PUBLIC,
     vibration: true,
     vibrationPattern: [700, 200, 700, 200, 1000, 200],
-    sound: 'taxio_offer',
+    sound: 'default',
   })
 }
 
@@ -88,7 +88,7 @@ export async function startAndroidAlert(input) {
       ongoing: true,
       autoCancel: false,
       loopSound: true,
-      sound: 'taxio_offer',
+      sound: 'default',
       vibrationPattern: [700, 200, 700, 200, 1000, 200],
       lightUpScreen: true,
       pressAction: {

@@ -79,6 +79,12 @@ export default function App() {
     const pressed = Notifications.addNotificationResponseReceivedListener((response) => {
       void openTaxioFromAlert(response.notification)
     })
+
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (response?.notification) void openTaxioFromAlert(response.notification)
+      })
+      .catch(() => {})
     const foregroundNotifee = notifee.onForegroundEvent(({ type, detail }) => {
       if (type === EventType.PRESS || type === EventType.ACTION_PRESS) {
         void openTaxioFromAlert(detail.notification?.data)

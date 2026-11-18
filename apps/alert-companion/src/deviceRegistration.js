@@ -2,6 +2,7 @@ import { Platform } from 'react-native'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
 import * as SecureStore from 'expo-secure-store'
+import * as TaskManager from 'expo-task-manager'
 import { ensureAlertChannel } from './alertEngine'
 import { expoProjectId, TAXIO_API_ORIGIN } from './config'
 
@@ -22,6 +23,15 @@ export async function requestAlertPermissionAndToken() {
 
   // Android 13+ does not present notification permission until a channel exists.
   await ensureAlertChannel()
+
+  // Do not claim native alerts are connected until the headless notification
+  // task is actually registered. This task is what wakes Android when the app
+  // is minimized/locked/terminated.
+  await Notifications.registerTaskAsync('TAXIO_NATIVE_ALERT_TASK')
+  const taskRegistered = await TaskManager.isTaskRegisteredAsync('TAXIO_NATIVE_ALERT_TASK')
+  if (!taskRegistered) {
+    throw new Error('Android background notification task is not registered.')
+  }
 
   const existing = await Notifications.getPermissionsAsync()
   let status = existing.status
