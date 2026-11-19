@@ -77,6 +77,12 @@ function bookingStartUrl({ slug, origin, hostHeader }) {
   return `${origin}/book/${encodeURIComponent(normalized)}`
 }
 
+function apexWwwOrigin(fallbackOrigin) {
+  const root = bookingRootDomain()
+  if (root) return `https://www.${root}`
+  return String(fallbackOrigin || 'https://taxio.be').replace(/\/$/, '')
+}
+
 function dashboardManifestId(company) {
   if (company?.id) return `taxio-dashboard-${company.id}`
   const slug = slugFromCompanyName(company?.slug)
@@ -86,13 +92,14 @@ function dashboardManifestId(company) {
 
 function dashboardManifest(origin, company) {
   const name = String(company?.name || '').trim()
+  const apex = apexWwwOrigin(origin)
   const displayName = name ? `${name} · TAXIO Dashboard` : 'TAXIO Dashboard'
   return {
     name: displayName,
     short_name: 'TAXIO',
     description: name ? `${name} operator dashboard on TAXIO` : 'TAXIO operator dashboard',
-    start_url: '/dashboard/company',
-    scope: '/dashboard/',
+    start_url: `${apex}/dashboard/company`,
+    scope: `${apex}/dashboard/`,
     id: dashboardManifestId(company),
     display: 'standalone',
     theme_color: THEME_COLOR,
@@ -133,12 +140,13 @@ function bookingManifest(origin, company, slug, hostHeader) {
 }
 
 function genericDashboardManifest(origin) {
+  const apex = apexWwwOrigin(origin)
   return {
     name: 'TAXIO Dashboard',
     short_name: 'TAXIO',
     description: 'TAXIO operator dashboard',
-    start_url: '/dashboard/company',
-    scope: '/dashboard/',
+    start_url: `${apex}/dashboard/company`,
+    scope: `${apex}/dashboard/`,
     id: 'taxio-dashboard',
     display: 'standalone',
     theme_color: THEME_COLOR,

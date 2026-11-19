@@ -105,7 +105,7 @@ export function buildCompanyManifestHref({ context, company, slug }) {
   if (s) params.set('slug', s)
   const v = buildManifestVersion(company, s)
   if (v) params.set('v', v)
-  const base = context === 'booking' ? manifestApiOrigin() : ''
+  const base = manifestApiOrigin() || (typeof window !== 'undefined' ? window.location.origin : '')
   return `${base}/api/company-manifest?${params.toString()}`
 }
 
