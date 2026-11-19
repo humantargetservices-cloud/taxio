@@ -647,11 +647,34 @@ class TaxioOpenPwaReceiver : BroadcastReceiver() {
 
     context.stopService(Intent(context, TaxioAlertService::class.java))
 
-    val openIntent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
+    val uri = Uri.parse(deepLink)
+    val baseIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+      addCategory(Intent.CATEGORY_BROWSABLE)
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
 
     try {
+      val candidates = context.packageManager.queryIntentActivities(
+        baseIntent,
+        android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+      )
+      val pwa = candidates.firstOrNull { resolved ->
+        val pkg = resolved.activityInfo?.packageName.orEmpty()
+        val label = resolved.loadLabel(context.packageManager)?.toString().orEmpty()
+        pkg.startsWith("org.chromium.webapk.") ||
+          pkg.contains("webapk", ignoreCase = true) ||
+          label.equals("TAXIO", ignoreCase = true) ||
+          label.equals("TAXIO Dashboard", ignoreCase = true)
+      }
+
+      val openIntent = Intent(baseIntent)
+      if (pwa != null) {
+        openIntent.setPackage(pwa.activityInfo.packageName)
+        Log.i(TAG, "[TAXIO-NATIVE] PWA_TARGET=" + pwa.activityInfo.packageName)
+      } else {
+        Log.w(TAG, "[TAXIO-NATIVE] PWA_NOT_FOUND_FALLBACK_BROWSER")
+      }
+
       context.startActivity(openIntent)
       Log.i(TAG, "[TAXIO-NATIVE] PWA_OPENED")
     } catch (error: Exception) {
@@ -742,6 +765,23 @@ module.exports = function withTaxioNativePager(config) {
     ensurePermission(manifest, 'android.permission.WAKE_LOCK')
     ensurePermission(manifest, 'android.permission.FOREGROUND_SERVICE')
     ensurePermission(manifest, 'android.permission.FOREGROUND_SERVICE_SPECIAL_USE')
+
+    const queries = manifest.queries || (manifest.queries = [])
+    const hasHttpsViewQuery = queries.some((entry) =>
+      (entry?.intent || []).some((item) =>
+        (item?.action || []).some((a) => a?.$?.['android:name'] === 'android.intent.action.VIEW') &&
+        (item?.data || []).some((d) => d?.$?.['android:scheme'] === 'https')
+      )
+    )
+    if (!hasHttpsViewQuery) {
+      queries.push({
+        intent: [{
+          action: [{ $: { 'android:name': 'android.intent.action.VIEW' } }],
+          category: [{ $: { 'android:name': 'android.intent.category.BROWSABLE' } }],
+          data: [{ $: { 'android:scheme': 'https' } }],
+        }],
+      })
+    }
 
     const application = manifest.application?.[0]
     if (!application) return config
