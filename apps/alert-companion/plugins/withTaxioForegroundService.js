@@ -9,7 +9,7 @@ const WORKMANAGER_R8_RULES = `
 `.trim()
 
 const KOTLIN_FILES = {
-  'TaxioPayload.kt': `package be.taxio.alert
+  'TaxioPayload.kt': `package be.taxio.operator
 
 import android.content.Intent
 import org.json.JSONObject
@@ -85,7 +85,7 @@ data class TaxioPayload(
 }
 `,
 
-  'TaxioFirebaseMessagingService.kt': `package be.taxio.alert
+  'TaxioFirebaseMessagingService.kt': `package be.taxio.operator
 
 import android.content.Intent
 import android.util.Log
@@ -126,7 +126,7 @@ class TaxioFirebaseMessagingService : FirebaseMessagingService() {
 }
 `,
 
-  'TaxioAlertService.kt': `package be.taxio.alert
+  'TaxioAlertService.kt': `package be.taxio.operator
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -378,7 +378,7 @@ class TaxioAlertService : Service() {
 }
 `,
 
-  'TaxioWatchService.kt': `package be.taxio.alert
+  'TaxioWatchService.kt': `package be.taxio.operator
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -583,7 +583,7 @@ class TaxioWatchService : Service() {
 }
 `,
 
-  'TaxioPagerModule.kt': `package be.taxio.alert
+  'TaxioPagerModule.kt': `package be.taxio.operator
 
 import android.content.Intent
 import androidx.core.content.ContextCompat
@@ -632,7 +632,7 @@ class TaxioPagerPackage : ReactPackage {
 }
 `,
 
-  'TaxioOpenPwaReceiver.kt': `package be.taxio.alert
+  'TaxioOpenPwaReceiver.kt': `package be.taxio.operator
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -678,7 +678,7 @@ function withTaxioNativeSources(config) {
     'android',
     async (config) => {
       const androidRoot = config.modRequest.platformProjectRoot
-      const sourceDir = path.join(androidRoot, 'app', 'src', 'main', 'java', 'be', 'taxio', 'alert')
+      const sourceDir = path.join(androidRoot, 'app', 'src', 'main', 'java', 'be', 'taxio', 'operator')
       fs.mkdirSync(sourceDir, { recursive: true })
 
       for (const [name, content] of Object.entries(KOTLIN_FILES)) {
@@ -715,15 +715,15 @@ function withTaxioNativeSources(config) {
       if (!existing.includes('-keep class * extends androidx.room.RoomDatabase { <init>(); }')) {
         existing = `${existing.trimEnd()}\n\n${WORKMANAGER_R8_RULES}\n`
       }
-      if (!existing.includes('-keep class be.taxio.alert.TaxioFirebaseMessagingService')) {
+      if (!existing.includes('-keep class be.taxio.operator.TaxioFirebaseMessagingService')) {
         existing += `
 # TAXIO native pager services are instantiated by Android/FCM.
--keep class be.taxio.alert.TaxioFirebaseMessagingService { *; }
--keep class be.taxio.alert.TaxioAlertService { *; }
+-keep class be.taxio.operator.TaxioFirebaseMessagingService { *; }
+-keep class be.taxio.operator.TaxioAlertService { *; }
 -keep class be.taxio.alert.TaxioWatchService { *; }
 -keep class be.taxio.alert.TaxioPagerModule { *; }
 -keep class be.taxio.alert.TaxioPagerPackage { *; }
--keep class be.taxio.alert.TaxioOpenPwaReceiver { *; }
+-keep class be.taxio.operator.TaxioOpenPwaReceiver { *; }
 `
       }
       fs.writeFileSync(proguard, existing, 'utf8')
