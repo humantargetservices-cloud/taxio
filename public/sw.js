@@ -2,10 +2,70 @@
  * TAXIO root service worker — PWA cache/update + OneSignal Web Push display.
  * Never caches /api/*, Supabase, or booking/Rescue/trip network authority.
  *
- * v4: OneSignal SDK imported here (scope /). Legacy raw push/notificationclick
- * handlers removed — OneSignal is the only push-display handler.
- * Purges older taxio-shell-v1/v2 and taxio-assets-v1/v2 on activate.
+ * Register TAXIO trip click handling before importing OneSignal.
  */
+function isStandaloneDashboard(client) {
+  const url = new URL(client.url)
+  if (url.origin !== self.location.origin || !url.pathname.startsWith('/dashboard/')) {
+    return Promise.resolve(false)
+  }
+
+  return new Promise((resolve) => {
+    const channel = new MessageChannel()
+    const finish = (standalone) => {
+      clearTimeout(timeout)
+      channel.port1.close()
+      resolve(standalone)
+    }
+    const timeout = setTimeout(() => finish(false), 300)
+    channel.port1.onmessage = ({ data }) => finish(data === true)
+    try {
+      client.postMessage({ type: 'TAXIO_IS_STANDALONE_DASHBOARD' }, [channel.port2])
+    } catch {
+      finish(false)
+    }
+  })
+}
+
+async function openTripNotification(target) {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  const standalone = await Promise.all(windows.map(isStandaloneDashboard))
+  const app = windows.find((_, index) => standalone[index])
+  if (app) {
+    try {
+      const destination = app.url === target ? app : await app.navigate(target)
+      if (destination) return await destination.focus()
+    } catch {
+      // The app may have closed after the client list was read.
+    }
+  }
+
+  // Let the platform resolve the in-scope URL against installed apps on cold launch.
+  const opened = await self.clients.openWindow(target)
+  if (opened) await opened.focus()
+}
+
+self.addEventListener('notificationclick', (event) => {
+  const notificationData = event.notification.data
+  const data = notificationData?.additionalData ?? notificationData
+  if (data?.taxio_open_pwa !== '1') return
+
+  const dashboard = new URL('/dashboard/company', self.location.origin)
+  let target = dashboard
+  try {
+    const requested = new URL(data.taxio_path, dashboard)
+    if (requested.origin === dashboard.origin && requested.pathname === dashboard.pathname) {
+      target = requested
+    }
+  } catch {
+    // Fall back to the dashboard for a malformed deep link.
+  }
+
+  event.stopImmediatePropagation()
+  event.notification.close()
+  event.waitUntil(openTripNotification(target.href))
+})
+
 importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js')
 
 const SHELL_CACHE = 'taxio-shell-v3'

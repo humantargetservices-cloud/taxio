@@ -237,7 +237,10 @@ export async function sendOneSignalPushToCompany({ companyId, eventType, content
   delete data.customer_name
   delete data.passenger_phone
   delete data.passenger_name
-  if (Object.keys(data).length) payload.data = data
+  data.taxio_open_pwa = '1'
+  const { pathname, search, hash } = new URL(url)
+  data.taxio_path = `${pathname}${search}${hash}`
+  payload.data = data
 
   const res = await fetch('https://api.onesignal.com/notifications', {
     method: 'POST',
