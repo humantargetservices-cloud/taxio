@@ -10,16 +10,12 @@ import {
   View,
 } from 'react-native'
 import * as Linking from 'expo-linking'
-import * as Notifications from 'expo-notifications'
-import notifee, { EventType } from '@notifee/react-native'
 import { assertSupabaseConfigured } from './src/supabase'
-import { registerNativeDevice, unregisterNativeDevice } from './src/deviceRegistration'
 import {
-  extractTaxioAlertData,
-  openTaxioFromAlert,
-  showLocalTestAlert,
-  startAndroidAlert,
-} from './src/alertEngine'
+  registerNativeDevice,
+  sendNativeTestAlert,
+  unregisterNativeDevice,
+} from './src/deviceRegistration'
 import { TAXIO_API_ORIGIN } from './src/config'
 
 export default function App() {
@@ -70,40 +66,6 @@ export default function App() {
       })
     return () => { cancelled = true }
   }, [session?.access_token])
-
-  useEffect(() => {
-    const received = Notifications.addNotificationReceivedListener((notification) => {
-      const alert = extractTaxioAlertData(notification)
-      if (alert && Platform.OS === 'android') void startAndroidAlert(alert)
-    })
-    const pressed = Notifications.addNotificationResponseReceivedListener((response) => {
-      void openTaxioFromAlert(response.notification)
-    })
-
-    Notifications.getLastNotificationResponseAsync()
-      .then((response) => {
-        if (response?.notification) void openTaxioFromAlert(response.notification)
-      })
-      .catch(() => {})
-    const foregroundNotifee = notifee.onForegroundEvent(({ type, detail }) => {
-      if (type === EventType.PRESS || type === EventType.ACTION_PRESS) {
-        void openTaxioFromAlert(detail.notification?.data)
-      }
-    })
-    if (Platform.OS === 'android') {
-      notifee.getInitialNotification()
-        .then((initial) => {
-          if (initial?.notification?.data) void openTaxioFromAlert(initial.notification.data)
-        })
-        .catch(() => {})
-    }
-
-    return () => {
-      received.remove()
-      pressed.remove()
-      foregroundNotifee()
-    }
-  }, [])
 
   const login = async () => {
     if (!supabase) return
@@ -179,8 +141,23 @@ export default function App() {
           <Text style={styles.muted}>{status}</Text>
         </View>
 
-        <TouchableOpacity style={styles.primary} onPress={() => showLocalTestAlert()}>
-          <Text style={styles.primaryText}>Test aggressive alert</Text>
+        <TouchableOpacity
+          style={styles.primary}
+          disabled={busy}
+          onPress={async () => {
+            setBusy(true)
+            setStatus('Sending native pager test…')
+            try {
+              await sendNativeTestAlert(session.access_token)
+              setStatus('Test sent. The native pager should ring for about 10 seconds.')
+            } catch (err) {
+              setStatus(err?.message || 'Native pager test failed.')
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          <Text style={styles.primaryText}>{busy ? 'Sending…' : 'Test aggressive alert'}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.secondary}

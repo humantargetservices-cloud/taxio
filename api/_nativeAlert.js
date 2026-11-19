@@ -113,6 +113,7 @@ export async function sendNativeAlertToCompanyBestEffort({ admin, outbox, conten
     taxio_native_alert:'1', event_type:outbox.event_type, company_id:String(outbox.company_id),
     booking_id:authority.bookingId||'', rescue_request_id:authority.rescueRequestId||'',
     rescue_opportunity_id:authority.opportunityId||'', expires_at:authority.expiresAt,
+    expires_at_ms:String(expiresMs),
     deep_link:absoluteDeepLink(content),
     status_url:`${publicAppOrigin()}/api/native-alert-status?token=${encodeURIComponent(statusToken)}`,
     title:String(content?.title||'TAXIO').slice(0,80),
@@ -130,25 +131,13 @@ export async function sendNativeAlertToCompanyBestEffort({ admin, outbox, conten
       continue
     }
 
-    // Android gets two independent deliveries:
-    // 1) headless data-only wake → starts the 49-second Notifee foreground alert;
-    // 2) OS-visible fallback → ensures the driver still sees/hears something
-    //    even if Android suppresses the headless JS task.
+    // Android intentionally receives one data-only high-priority message.
+    // Expo is transport only. The custom native FirebaseMessagingService owns
+    // receiving, foreground-service startup, audio, vibration and PWA tap.
     envelopes.push({
       device,
-      kind:'android-headless',
+      kind:'android-native-pager',
       message:common,
-    })
-    envelopes.push({
-      device,
-      kind:'android-visible-fallback',
-      message:{
-        ...common,
-        title:data.title,
-        body:data.body,
-        channelId:'taxio-trip-alert-v3',
-        tag:'taxio-native-fallback',
-      },
     })
   }
   const messages=envelopes.map((entry)=>entry.message)
@@ -175,4 +164,68 @@ export async function sendNativeAlertToCompanyBestEffort({ admin, outbox, conten
   }
   console.info('[native-alert] Expo accepted',{companyId:outbox.company_id,eventType:outbox.event_type,sent,failed,ttl,messages:messages.length})
   return {ok:sent>0||failed===0,code:sent>0?(reminder?'NATIVE_REMINDER_SENT':'NATIVE_SENT'):failed?'NATIVE_FAILED':'NO_NATIVE_DEVICES',sent,failed}
+}
+
+
+export async function sendNativePagerTest({ admin, companyId, userId }) {
+  const { data: devices, error } = await admin
+    .from('company_native_devices')
+    .select('id, expo_push_token, platform')
+    .eq('company_id', companyId)
+    .eq('user_id', userId)
+    .eq('platform', 'android')
+    .eq('enabled', true)
+
+  if (error) throw error
+  const validDevices=(devices||[]).filter(d=>expoTokenLooksValid(d.expo_push_token))
+  if (!validDevices.length) {
+    return { ok:false, code:'NO_ANDROID_DEVICE', sent:0 }
+  }
+
+  const expiresMs=Date.now()+10000
+  const data={
+    taxio_native_alert:'1',
+    event_type:'TEST',
+    company_id:String(companyId),
+    booking_id:'test-'+Date.now(),
+    rescue_request_id:'',
+    rescue_opportunity_id:'',
+    expires_at:new Date(expiresMs).toISOString(),
+    expires_at_ms:String(expiresMs),
+    deep_link:`${publicAppOrigin()}/dashboard/company`,
+    status_url:'',
+    title:'🚕 TAXIO TEST ALERT',
+    body:'Native pager test — should ring and vibrate for about 10 seconds.',
+  }
+
+  const messages=validDevices.map(device=>({
+    to:device.expo_push_token,
+    priority:'high',
+    ttl:10,
+    data,
+  }))
+
+  const { tickets }=await postExpo(messages)
+  let sent=0
+  let failed=0
+  for(let i=0;i<validDevices.length;i++){
+    const device=validDevices[i]
+    const ticket=tickets[i]
+    const ok=ticket?.status==='ok'
+    ok?sent++:failed++
+    const providerError=ticket?.details?.error||ticket?.message||null
+    await admin.from('company_native_devices').update({
+      last_seen_at:new Date().toISOString(),
+      last_error:providerError?String(providerError).slice(0,240):null,
+      ...(providerError==='DeviceNotRegistered'?{enabled:false}:{}),
+    }).eq('id',device.id)
+  }
+
+  console.info('[native-alert-test] Expo transport accepted',{companyId,sent,failed})
+  return {
+    ok: sent>0,
+    code: sent>0?'TEST_SENT':'TEST_FAILED',
+    sent,
+    failed,
+  }
 }

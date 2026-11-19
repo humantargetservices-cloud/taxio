@@ -2,7 +2,7 @@
   "expo": {
     "name": "TAXIO Alert",
     "slug": "taxio-alert",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "orientation": "portrait",
     "scheme": "taxio-alert",
     "userInterfaceStyle": "automatic",
@@ -12,7 +12,8 @@
         "POST_NOTIFICATIONS",
         "VIBRATE",
         "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_SPECIAL_USE"
+        "FOREGROUND_SERVICE_SPECIAL_USE",
+        "WAKE_LOCK"
       ],
       "googleServicesFile": "./google-services.json"
     },

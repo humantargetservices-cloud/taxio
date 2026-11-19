@@ -66,6 +66,7 @@ jobs:
           node --check api/_nativeAlert.js
           node --check api/native-alert-device.js
           node --check api/native-alert-status.js
+          node --check api/native-alert-test.js
           node --check api/company-push-dispatch.js
 
       - name: Install companion dependencies
@@ -102,6 +103,9 @@ jobs:
           grep -R 'be.taxio.alert' android/app/build.gradle android/app/src/main/AndroidManifest.xml
           grep -R 'FOREGROUND_SERVICE_SPECIAL_USE' android/app/src/main/AndroidManifest.xml
           grep -R 'foregroundServiceType="specialUse"' android/app/src/main/AndroidManifest.xml
+          grep -R 'TaxioFirebaseMessagingService' android/app/src/main/AndroidManifest.xml android/app/src/main/java
+          grep -R 'TaxioAlertService' android/app/src/main/AndroidManifest.xml android/app/src/main/java
+          grep -R 'TaxioOpenPwaReceiver' android/app/src/main/AndroidManifest.xml android/app/src/main/java
           test -f android/app/src/main/res/raw/taxio_offer.wav
 
       - name: Build release APK
@@ -109,6 +113,18 @@ jobs:
           chmod +x android/gradlew
           cd android
           ./gradlew assembleRelease --no-daemon
+
+      - name: Verify merged manifest uses TAXIO native pager
+        run: |
+          MERGED=$(find android/app/build/intermediates -path '*merged*manifest*release*' -name AndroidManifest.xml | head -n 1)
+          test -n "$MERGED"
+          echo "Merged manifest: $MERGED"
+          grep -q 'TaxioFirebaseMessagingService' "$MERGED"
+          grep -q 'TaxioAlertService' "$MERGED"
+          if grep -q 'expo.modules.notifications.service.ExpoFirebaseMessagingService' "$MERGED"; then
+            echo 'Expo FirebaseMessagingService still owns FCM delivery; refusing pager build.'
+            exit 1
+          fi
 
       - name: Verify APK exists
         run: |
