@@ -46,8 +46,47 @@ self.addEventListener('notificationclick', (event) => {
   const absolute = new URL(target, self.location.origin).href
   event.waitUntil(
     self.clients
-      .openWindow(absolute)
-      .then((client) => (client ? client.focus().catch(() => client) : null))
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then(async (clients) => {
+        const taxioClient =
+          clients.find((client) => {
+            try {
+              const url = new URL(client.url)
+              return url.origin === self.location.origin && url.pathname.startsWith('/dashboard/company')
+            } catch {
+              return false
+            }
+          }) || clients.find((client) => {
+            try {
+              return new URL(client.url).origin === self.location.origin
+            } catch {
+              return false
+            }
+          })
+
+        if (taxioClient) {
+          try {
+            await taxioClient.navigate(absolute)
+          } catch {
+            /* keep focus fallback */
+          }
+          try {
+            return await taxioClient.focus()
+          } catch {
+            return taxioClient
+          }
+        }
+
+        const opened = await self.clients.openWindow(absolute).catch(() => null)
+        if (opened) {
+          try {
+            await opened.focus()
+          } catch {
+            /* ignore */
+          }
+        }
+        return opened
+      })
       .catch(() => null)
   )
 })
