@@ -65,6 +65,21 @@ let liveWinnerRescueId = ''
 let refreshQueued = false
 /** Soft remount Active Trips when Rescue accept / confirm / cancel (presentation only). */
 let activeTripsRefreshHandler = null
+/** Notification deep-link target consumed once after dashboard launch. */
+let launchBookingId = ''
+let launchRescueId = ''
+
+function readNotificationLaunchTarget() {
+  if (typeof window === 'undefined') return
+  try {
+    const params = new URLSearchParams(window.location.search || '')
+    launchBookingId = String(params.get('booking') || '').trim()
+    launchRescueId = String(params.get('rescue') || '').trim()
+  } catch {
+    launchBookingId = ''
+    launchRescueId = ''
+  }
+}
 
 /** Dashboard registers a soft remount so Active Trips updates without winner overlays. */
 export function setActiveTripsRefreshHandler(fn) {
@@ -458,14 +473,37 @@ async function refreshNotifications() {
     const newIds = new Set((bookings || []).filter((b) => String(b.status || 'new') === 'new').map((b) => b.id))
     dismissedIds = dismissedIds.filter((id) => newIds.has(id))
 
-    const pendingDecision = pickPendingDecisionBooking(bookings, dismissedIds)
-    const openOpp = pickOpenOpportunity(opportunities)
+    let pendingDecision = pickPendingDecisionBooking(bookings, dismissedIds)
+    let openOpp = pickOpenOpportunity(opportunities)
+
+    if (launchBookingId) {
+      const targeted = (bookings || []).find(
+        (b) => String(b?.id || '') === launchBookingId && String(b?.status || 'new') === 'new'
+      )
+      if (targeted) pendingDecision = targeted
+    }
+
+    if (launchRescueId) {
+      const targeted = (opportunities || []).find(
+        (o) =>
+          String(o?.rescue_request_id || o?.rescue?.id || '') === launchRescueId &&
+          String(o?.status || '').toUpperCase() === 'OFFERED'
+      )
+      if (targeted) openOpp = targeted
+    }
     const foregroundAlertKey = openOpp?.id
       ? `rescue:${openOpp.id}`
       : pendingDecision?.id
         ? `booking:${pendingDecision.id}`
         : ''
     syncForegroundTripAlert(foregroundAlertKey)
+    if (launchBookingId && pendingDecision?.id === launchBookingId) launchBookingId = ''
+    if (
+      launchRescueId &&
+      String(openOpp?.rescue_request_id || openOpp?.rescue?.id || '') === launchRescueId
+    ) {
+      launchRescueId = ''
+    }
 
     // Active alert: WAITING only. Never auto-pick historical CONFIRMED/CANCELLED on reopen.
     let won = pickWonRescue(opportunities, companyId, { actionableOnly: true })
@@ -635,6 +673,7 @@ async function refreshNotifications() {
  */
 export function startRescueNotifications({ companyId, accessToken, companyName }) {
   if (!companyId || !accessToken) return
+  readNotificationLaunchTarget()
   if (session?.companyId === companyId && session?.accessToken === accessToken) {
     session.portal = ensurePortal()
     if (companyName) session.companyName = companyName
