@@ -24,7 +24,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/taxio-apk
-          gh run download 44381317454 -n taxio-alert-companion-pilot-apk -D /tmp/taxio-apk
+          gh run download 44540937701 -n taxio-alert-companion-pilot-apk -D /tmp/taxio-apk
           find /tmp/taxio-apk -type f -maxdepth 2 -ls
           APK=$(find /tmp/taxio-apk -name '*.apk' -type f | head -n 1)
           test -n "$APK"
