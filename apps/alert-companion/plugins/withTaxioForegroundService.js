@@ -431,6 +431,17 @@ function withTaxioNativeSources(config) {
         fs.writeFileSync(path.join(sourceDir, name), content, 'utf8')
       }
 
+      const appBuild = path.join(androidRoot, 'app', 'build.gradle')
+      let gradle = fs.readFileSync(appBuild, 'utf8')
+      const firebaseMessagingDependency = "implementation 'com.google.firebase:firebase-messaging:25.0.1'"
+      if (!gradle.includes(firebaseMessagingDependency)) {
+        gradle = gradle.replace(
+          /dependencies\s*\{/,
+          `dependencies {\n    ${firebaseMessagingDependency}`
+        )
+        fs.writeFileSync(appBuild, gradle, 'utf8')
+      }
+
       const proguard = path.join(androidRoot, 'app', 'proguard-rules.pro')
       let existing = fs.existsSync(proguard) ? fs.readFileSync(proguard, 'utf8') : ''
       if (!existing.includes('-keep class * extends androidx.room.RoomDatabase { <init>(); }')) {
