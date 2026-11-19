@@ -8,7 +8,7 @@ function millis(value){
   return Number.isFinite(n)?n:0
 }
 function alertPayload({
-  key,eventType,bookingId='',rescueRequestId='',rescueOpportunityId='',expiresAtMs,title,body
+  key,eventType,bookingId='',rescueRequestId='',rescueOpportunityId='',expiresAtMs,title,body,deepLink=''
 }){
   return {
     key,
@@ -17,7 +17,7 @@ function alertPayload({
     rescue_request_id:rescueRequestId,
     rescue_opportunity_id:rescueOpportunityId,
     expires_at_ms:expiresAtMs,
-    deep_link:`${publicAppOrigin()}/dashboard/company`,
+    deep_link: deepLink || `${publicAppOrigin()}/dashboard/company`,
     title,
     body,
   }
@@ -111,6 +111,7 @@ export default async function handler(req,res){
           expiresAtMs:bookingExpiry,
           title:'🚕 NEW TAXIO TRIP',
           body:'A new Company A request is waiting. Open TAXIO now.',
+          deepLink:`${publicAppOrigin()}/dashboard/company?booking=${encodeURIComponent(booking.id)}`,
         }),
       })
     }
@@ -128,6 +129,7 @@ export default async function handler(req,res){
           expiresAtMs:rescueExpiry,
           title:'🚨 TAXIO RESCUE REQUEST',
           body:'A Rescue opportunity is available. Open TAXIO now.',
+          deepLink:`${publicAppOrigin()}/dashboard/company?rescue=${encodeURIComponent(rescue.rescue_request_id)}`,
         }),
       })
     }
