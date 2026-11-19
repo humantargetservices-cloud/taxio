@@ -378,6 +378,260 @@ class TaxioAlertService : Service() {
 }
 `,
 
+  'TaxioWatchService.kt': `package be.taxio.alert
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
+
+class TaxioWatchService : Service() {
+  private var poller: ScheduledExecutorService? = null
+  private var wakeLock: PowerManager.WakeLock? = null
+  private var watchToken: String = ""
+  private var activeAlertKey: String? = null
+
+  override fun onCreate() {
+    super.onCreate()
+    ensureChannel()
+  }
+
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    val supplied = intent?.getStringExtra("watch_token")?.trim().orEmpty()
+    if (supplied.isNotBlank()) {
+      watchToken = supplied
+      getSharedPreferences(PREFS, MODE_PRIVATE)
+        .edit()
+        .putString(KEY_TOKEN, supplied)
+        .apply()
+    } else if (watchToken.isBlank()) {
+      watchToken = getSharedPreferences(PREFS, MODE_PRIVATE)
+        .getString(KEY_TOKEN, "")
+        .orEmpty()
+    }
+
+    if (watchToken.isBlank()) {
+      stopSelf()
+      return START_NOT_STICKY
+    }
+
+    startForeground(WATCH_NOTIFICATION_ID, buildWatchNotification())
+    acquireWakeLock()
+    startPolling()
+    Log.i(TAG, "[TAXIO-WATCH] WATCH_STARTED")
+
+    return START_STICKY
+  }
+
+  private fun ensureChannel() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    val manager = getSystemService(NotificationManager::class.java)
+    val channel = NotificationChannel(
+      WATCH_CHANNEL_ID,
+      "TAXIO trip monitoring",
+      NotificationManager.IMPORTANCE_LOW
+    ).apply {
+      description = "Keeps TAXIO trip monitoring active while the driver is connected."
+      setSound(null, null)
+      enableVibration(false)
+      lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+    }
+    manager.createNotificationChannel(channel)
+  }
+
+  private fun buildWatchNotification(): android.app.Notification {
+    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+      ?: Intent(this, MainActivity::class.java)
+    launchIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+    val pending = PendingIntent.getActivity(
+      this,
+      49048,
+      launchIntent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    return NotificationCompat.Builder(this, WATCH_CHANNEL_ID)
+      .setSmallIcon(applicationInfo.icon)
+      .setContentTitle("TAXIO alerts active")
+      .setContentText("Monitoring Company A and Rescue requests")
+      .setPriority(NotificationCompat.PRIORITY_LOW)
+      .setOngoing(true)
+      .setOnlyAlertOnce(true)
+      .setContentIntent(pending)
+      .build()
+  }
+
+  private fun acquireWakeLock() {
+    if (wakeLock?.isHeld == true) return
+    val pm = getSystemService(POWER_SERVICE) as PowerManager
+    wakeLock = pm.newWakeLock(
+      PowerManager.PARTIAL_WAKE_LOCK,
+      packageName + ":taxio-watch"
+    ).apply {
+      setReferenceCounted(false)
+      acquire()
+    }
+  }
+
+  private fun startPolling() {
+    if (poller != null) return
+
+    poller = Executors.newSingleThreadScheduledExecutor()
+    poller?.scheduleAtFixedRate({
+      try {
+        pollOnce()
+      } catch (error: Exception) {
+        Log.w(TAG, "[TAXIO-WATCH] POLL_ERROR", error)
+      }
+    }, 0, 3, TimeUnit.SECONDS)
+  }
+
+  private fun pollOnce() {
+    val encoded = URLEncoder.encode(watchToken, StandardCharsets.UTF_8.toString())
+    val url = URL("https://www.taxio.be/api/native-alert-poll?token=" + encoded)
+    val connection = url.openConnection() as HttpURLConnection
+    connection.requestMethod = "GET"
+    connection.connectTimeout = 2200
+    connection.readTimeout = 2200
+    connection.setRequestProperty("Accept", "application/json")
+    connection.setRequestProperty("Cache-Control", "no-store")
+
+    val code = connection.responseCode
+    if (code !in 200..299) {
+      connection.disconnect()
+      return
+    }
+
+    val raw = connection.inputStream.bufferedReader().use { it.readText() }
+    connection.disconnect()
+
+    val root = JSONObject(raw)
+    if (!root.optBoolean("active", false)) {
+      clearActiveAlert()
+      return
+    }
+
+    val alert = root.optJSONObject("alert") ?: return
+    val key = alert.optString("key", "")
+    if (key.isBlank()) return
+
+    if (key == activeAlertKey) return
+    activeAlertKey = key
+
+    val alertIntent = Intent(this, TaxioAlertService::class.java).apply {
+      putExtra("title", alert.optString("title", "🚕 TAXIO TRIP"))
+      putExtra("body", alert.optString("body", "Action required — open TAXIO now."))
+      putExtra("booking_id", alert.optString("booking_id", ""))
+      putExtra("rescue_request_id", alert.optString("rescue_request_id", ""))
+      putExtra("rescue_opportunity_id", alert.optString("rescue_opportunity_id", ""))
+      putExtra("event_type", alert.optString("event_type", ""))
+      putExtra("expires_at_ms", alert.optLong("expires_at_ms", 0L))
+      putExtra("deep_link", alert.optString("deep_link", "https://www.taxio.be/dashboard/company"))
+      putExtra("status_url", "")
+    }
+
+    ContextCompat.startForegroundService(this, alertIntent)
+    Log.i(TAG, "[TAXIO-WATCH] ALERT_STARTED key=" + key)
+  }
+
+  private fun clearActiveAlert() {
+    if (activeAlertKey == null) return
+    stopService(Intent(this, TaxioAlertService::class.java))
+    Log.i(TAG, "[TAXIO-WATCH] ALERT_CLEARED key=" + activeAlertKey)
+    activeAlertKey = null
+  }
+
+  override fun onDestroy() {
+    poller?.shutdownNow()
+    poller = null
+    clearActiveAlert()
+
+    try {
+      wakeLock?.let { if (it.isHeld) it.release() }
+    } catch (_: Exception) {
+    }
+    wakeLock = null
+
+    super.onDestroy()
+  }
+
+  override fun onBind(intent: Intent?): IBinder? = null
+
+  companion object {
+    private const val TAG = "TaxioWatch"
+    private const val WATCH_CHANNEL_ID = "taxio-watch-v1"
+    private const val WATCH_NOTIFICATION_ID = 49048
+    private const val PREFS = "taxio-watch"
+    private const val KEY_TOKEN = "watch-token"
+  }
+}
+`,
+
+  'TaxioPagerModule.kt': `package be.taxio.alert
+
+import android.content.Intent
+import androidx.core.content.ContextCompat
+import com.facebook.react.bridge.NativeModule
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.uimanager.ViewManager
+import com.facebook.react.ReactPackage
+
+class TaxioPagerModule(
+  private val reactContext: ReactApplicationContext
+) : ReactContextBaseJavaModule(reactContext) {
+  override fun getName(): String = "TaxioPager"
+
+  @ReactMethod
+  fun startWatch(token: String) {
+    val cleaned = token.trim()
+    if (cleaned.isBlank()) return
+
+    val intent = Intent(reactContext, TaxioWatchService::class.java).apply {
+      putExtra("watch_token", cleaned)
+    }
+    ContextCompat.startForegroundService(reactContext, intent)
+  }
+
+  @ReactMethod
+  fun stopWatch() {
+    reactContext.getSharedPreferences("taxio-watch", 0)
+      .edit()
+      .remove("watch-token")
+      .apply()
+    reactContext.stopService(Intent(reactContext, TaxioWatchService::class.java))
+    reactContext.stopService(Intent(reactContext, TaxioAlertService::class.java))
+  }
+}
+
+class TaxioPagerPackage : ReactPackage {
+  override fun createNativeModules(
+    reactContext: ReactApplicationContext
+  ): List<NativeModule> = listOf(TaxioPagerModule(reactContext))
+
+  override fun createViewManagers(
+    reactContext: ReactApplicationContext
+  ): List<ViewManager<*, *>> = emptyList()
+}
+`,
+
   'TaxioOpenPwaReceiver.kt': `package be.taxio.alert
 
 import android.content.BroadcastReceiver
@@ -431,6 +685,20 @@ function withTaxioNativeSources(config) {
         fs.writeFileSync(path.join(sourceDir, name), content, 'utf8')
       }
 
+      const mainApplication = path.join(sourceDir, 'MainApplication.kt')
+      let mainSource = fs.readFileSync(mainApplication, 'utf8')
+      if (!mainSource.includes('TaxioPagerPackage()')) {
+        const marker = 'PackageList(this).packages.apply {'
+        if (!mainSource.includes(marker)) {
+          throw new Error('Could not locate React Native package list in MainApplication.kt')
+        }
+        mainSource = mainSource.replace(
+          marker,
+          marker + '\n          add(TaxioPagerPackage())'
+        )
+        fs.writeFileSync(mainApplication, mainSource, 'utf8')
+      }
+
       const appBuild = path.join(androidRoot, 'app', 'build.gradle')
       let gradle = fs.readFileSync(appBuild, 'utf8')
       const firebaseMessagingDependency = "implementation 'com.google.firebase:firebase-messaging:25.0.1'"
@@ -452,6 +720,9 @@ function withTaxioNativeSources(config) {
 # TAXIO native pager services are instantiated by Android/FCM.
 -keep class be.taxio.alert.TaxioFirebaseMessagingService { *; }
 -keep class be.taxio.alert.TaxioAlertService { *; }
+-keep class be.taxio.alert.TaxioWatchService { *; }
+-keep class be.taxio.alert.TaxioPagerModule { *; }
+-keep class be.taxio.alert.TaxioPagerPackage { *; }
 -keep class be.taxio.alert.TaxioOpenPwaReceiver { *; }
 `
       }
@@ -513,6 +784,23 @@ module.exports = function withTaxioNativePager(config) {
           $: {
             'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
             'android:value': 'Urgent taxi dispatch pager during a server-authoritative response window.',
+          },
+        },
+      ],
+    })
+
+    services.push({
+      $: {
+        'android:name': '.TaxioWatchService',
+        'android:exported': 'false',
+        'android:foregroundServiceType': 'specialUse',
+        'android:stopWithTask': 'false',
+      },
+      property: [
+        {
+          $: {
+            'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
+            'android:value': 'Continuous taxi dispatch monitoring while the driver is connected.',
           },
         },
       ],

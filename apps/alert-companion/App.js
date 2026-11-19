@@ -55,7 +55,7 @@ export default function App() {
       .then((result) => {
         if (cancelled) return
         setCompany(result.company)
-        setStatus('Native trip alerts are connected.')
+        setStatus('Native trip monitoring is active.')
       })
       .catch((err) => {
         if (cancelled) return
@@ -149,7 +149,7 @@ export default function App() {
             setStatus('Sending native pager test…')
             try {
               await sendNativeTestAlert(session.access_token)
-              setStatus('Test sent. The native pager should ring for about 10 seconds.')
+              setStatus('Test armed. The native watcher should ring within a few seconds for about 10 seconds.')
             } catch (err) {
               setStatus(err?.message || 'Native pager test failed.')
             } finally {
@@ -170,8 +170,8 @@ export default function App() {
         </TouchableOpacity>
 
         <Text style={styles.foot}>
-          Android: ongoing native alert until the request ends or its 49-second server deadline.
-          iPhone: time-sensitive native notification; Apple sound and Focus settings remain authoritative.
+          Android: TAXIO keeps a small native watcher active while connected. It checks for Company A
+          and Rescue requests and rings until the request ends or its 49-second server deadline.
         </Text>
       </View>
     </SafeAreaView>

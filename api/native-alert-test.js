@@ -1,6 +1,5 @@
 import { json, makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'
 import { getBearerUser, resolveCompanyIdForUser } from './_companyPush.js'
-import { sendNativePagerTest } from './_nativeAlert.js'
 
 function bearer(req){
   return String(req.headers?.authorization||'').replace(/^Bearer\s+/i,'').trim()
@@ -30,21 +29,26 @@ export default async function handler(req,res){
     const companyId=await resolveCompanyIdForUser(admin,user.id)
     if(!companyId)return json(res,403,{ok:false,code:'NO_COMPANY'})
 
-    const {data:company}=await admin.from('companies')
-      .select('id,status')
-      .eq('id',companyId)
+    const {data:device,error}=await admin.from('company_native_devices')
+      .select('id,watch_token_hash')
+      .eq('company_id',companyId)
+      .eq('user_id',user.id)
+      .eq('platform','android')
+      .eq('enabled',true)
+      .not('watch_token_hash','is',null)
+      .order('last_seen_at',{ascending:false})
+      .limit(1)
       .maybeSingle()
-    if(!company||company.status!=='approved'){
-      return json(res,403,{ok:false,code:'COMPANY_NOT_APPROVED'})
-    }
+    if(error)throw error
+    if(!device)return json(res,409,{ok:false,code:'NO_ANDROID_WATCHER'})
 
-    const result=await sendNativePagerTest({
-      admin,
-      companyId,
-      userId:user.id,
-    })
+    const until=new Date(Date.now()+10000).toISOString()
+    const {error:updateError}=await admin.from('company_native_devices')
+      .update({test_alert_until:until,updated_at:new Date().toISOString(),last_error:null})
+      .eq('id',device.id)
+    if(updateError)throw updateError
 
-    return json(res,result.ok?200:409,result)
+    return json(res,200,{ok:true,code:'TEST_ARMED',expires_at:until})
   }catch(err){
     console.error('[native-alert-test]',err?.message||err)
     return json(res,500,{

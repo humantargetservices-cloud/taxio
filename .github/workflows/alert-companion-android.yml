@@ -9,9 +9,12 @@ on:
       - 'api/_nativeAlert.js'
       - 'api/native-alert-device.js'
       - 'api/native-alert-status.js'
+      - 'api/native-alert-poll.js'
+      - 'api/native-alert-test.js'
       - 'api/company-push-dispatch.js'
       - 'supabase/migration_native_alert_companion.sql'
       - 'supabase/migration_native_alert_reminders.sql'
+      - 'supabase/migration_native_alert_watch_service.sql'
       - '.github/workflows/alert-companion-android.yml'
 
 concurrency:
@@ -66,6 +69,7 @@ jobs:
           node --check api/_nativeAlert.js
           node --check api/native-alert-device.js
           node --check api/native-alert-status.js
+          node --check api/native-alert-poll.js
           node --check api/native-alert-test.js
           node --check api/company-push-dispatch.js
 
@@ -105,6 +109,8 @@ jobs:
           grep -R 'foregroundServiceType="specialUse"' android/app/src/main/AndroidManifest.xml
           grep -R 'TaxioFirebaseMessagingService' android/app/src/main/AndroidManifest.xml android/app/src/main/java
           grep -R 'TaxioAlertService' android/app/src/main/AndroidManifest.xml android/app/src/main/java
+          grep -R 'TaxioWatchService' android/app/src/main/AndroidManifest.xml android/app/src/main/java
+          grep -R 'TaxioPagerPackage' android/app/src/main/java
           grep -R 'TaxioOpenPwaReceiver' android/app/src/main/AndroidManifest.xml android/app/src/main/java
           test -f android/app/src/main/res/raw/taxio_offer.wav
 
@@ -121,6 +127,7 @@ jobs:
           echo "Merged manifest: $MERGED"
           grep -q 'TaxioFirebaseMessagingService' "$MERGED"
           grep -q 'TaxioAlertService' "$MERGED"
+          grep -q 'TaxioWatchService' "$MERGED"
           if grep -q 'expo.modules.notifications.service.ExpoFirebaseMessagingService' "$MERGED"; then
             echo 'Expo FirebaseMessagingService still owns FCM delivery; refusing pager build.'
             exit 1

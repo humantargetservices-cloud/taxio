@@ -1,4 +1,4 @@
-import { Platform } from 'react-native'
+import { NativeModules, Platform } from 'react-native'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
 import * as SecureStore from 'expo-secure-store'
@@ -35,6 +35,14 @@ export async function requestAlertPermissionAndToken() {
   return expoPushToken
 }
 
+function pagerModule() {
+  const mod = NativeModules?.TaxioPager
+  if (Platform.OS === 'android' && !mod) {
+    throw new Error('Native TAXIO watcher module is not available in this build.')
+  }
+  return mod
+}
+
 export async function registerNativeDevice(accessToken) {
   const expoPushToken = await requestAlertPermissionAndToken()
   const deviceId = await installationId()
@@ -55,6 +63,10 @@ export async function registerNativeDevice(accessToken) {
   if (!response.ok || payload?.ok !== true) {
     throw new Error(payload?.error || payload?.code || 'Could not register native alerts.')
   }
+  if (Platform.OS === 'android') {
+    if (!payload?.watch_token) throw new Error('Android watch token was not returned.')
+    pagerModule()?.startWatch(payload.watch_token)
+  }
   return { ...payload, expoPushToken }
 }
 
@@ -69,12 +81,15 @@ export async function sendNativeTestAlert(accessToken) {
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok || payload?.ok !== true) {
-    throw new Error(payload?.error || payload?.code || 'Could not send native test alert.')
+    throw new Error(payload?.error || payload?.code || 'Could not arm native test alert.')
   }
   return payload
 }
 
 export async function unregisterNativeDevice(accessToken) {
+  if (Platform.OS === 'android') {
+    try { pagerModule()?.stopWatch() } catch {}
+  }
   const expoPushToken = await SecureStore.getItemAsync(PUSH_TOKEN_KEY)
   if (!expoPushToken || !accessToken) return
   await fetch(`${TAXIO_API_ORIGIN}/api/native-alert-device`, {

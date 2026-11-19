@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto'
 import { json, makeSupabaseServiceClient, validateSupabaseServiceEnv } from './_utils.js'
 import { getBearerUser, resolveCompanyIdForUser } from './_companyPush.js'
 
@@ -6,6 +7,9 @@ function validExpoToken(raw){
   const s=String(raw||'').trim()
   return s.startsWith('ExponentPushToken[')||s.startsWith('ExpoPushToken[')
 }
+function watchToken(){return randomBytes(32).toString('base64url')}
+function hashWatchToken(raw){return createHash('sha256').update(String(raw||'')).digest('hex')}
+
 export default async function handler(req,res){
   res.setHeader('Access-Control-Allow-Origin',req.headers.origin||'*')
   res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS')
@@ -29,19 +33,41 @@ export default async function handler(req,res){
     const pushToken=String(body.expo_push_token||'').trim()
     if(!validExpoToken(pushToken))return json(res,400,{ok:false,code:'INVALID_PUSH_TOKEN'})
     if(action==='unregister'){
-      await admin.from('company_native_devices').update({enabled:false,updated_at:new Date().toISOString()})
-        .eq('expo_push_token',pushToken).eq('user_id',user.id)
+      await admin.from('company_native_devices').update({
+        enabled:false,
+        watch_token_hash:null,
+        test_alert_until:null,
+        updated_at:new Date().toISOString(),
+      }).eq('expo_push_token',pushToken).eq('user_id',user.id)
       return json(res,200,{ok:true,code:'UNREGISTERED'})
     }
     const platform=String(body.platform||'').trim().toLowerCase()
     if(!['android','ios'].includes(platform))return json(res,400,{ok:false,code:'INVALID_PLATFORM'})
-    const row={company_id:companyId,user_id:user.id,expo_push_token:pushToken,platform,
-      device_id:String(body.device_id||'').trim().slice(0,120)||null,enabled:true,
-      last_seen_at:new Date().toISOString(),updated_at:new Date().toISOString(),last_error:null}
+
+    const opaqueWatchToken=watchToken()
+    const row={
+      company_id:companyId,
+      user_id:user.id,
+      expo_push_token:pushToken,
+      platform,
+      device_id:String(body.device_id||'').trim().slice(0,120)||null,
+      enabled:true,
+      watch_token_hash:platform==='android'?hashWatchToken(opaqueWatchToken):null,
+      test_alert_until:null,
+      last_seen_at:new Date().toISOString(),
+      updated_at:new Date().toISOString(),
+      last_error:null,
+    }
     const {data,error}=await admin.from('company_native_devices').upsert(row,{onConflict:'expo_push_token'})
       .select('id, platform, enabled, last_seen_at').single()
     if(error)throw error
-    return json(res,200,{ok:true,code:'REGISTERED',company:{id:company.id,name:company.name},device:data})
+    return json(res,200,{
+      ok:true,
+      code:'REGISTERED',
+      company:{id:company.id,name:company.name},
+      device:data,
+      watch_token:platform==='android'?opaqueWatchToken:null,
+    })
   }catch(err){
     console.error('[native-alert-device]',err?.message||err)
     return json(res,500,{ok:false,code:'SERVER_ERROR',error:err?.message||'Native alert device registration failed.'})
