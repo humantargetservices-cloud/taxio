@@ -32,63 +32,65 @@ function taxioNotificationData(notification) {
   )
 }
 
+function isStandaloneDashboard(client) {
+  const url = new URL(client.url)
+  if (url.origin !== self.location.origin || !url.pathname.startsWith('/dashboard/')) {
+    return Promise.resolve(false)
+  }
+
+  return new Promise((resolve) => {
+    const channel = new MessageChannel()
+    const finish = (standalone) => {
+      clearTimeout(timeout)
+      channel.port1.close()
+      resolve(standalone)
+    }
+    const timeout = setTimeout(() => finish(false), 300)
+    channel.port1.onmessage = ({ data }) => finish(data === true)
+    try {
+      client.postMessage({ type: 'TAXIO_IS_STANDALONE_DASHBOARD' }, [channel.port2])
+    } catch {
+      finish(false)
+    }
+  })
+}
+
+async function openTripNotification(target) {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  const standalone = await Promise.all(windows.map(isStandaloneDashboard))
+  const app = windows.find((_, index) => standalone[index])
+  if (app) {
+    try {
+      const destination = app.url === target ? app : await app.navigate(target)
+      if (destination) return await destination.focus()
+    } catch {
+      // The app may have closed after the client list was read.
+    }
+  }
+
+  // Let the platform resolve the in-scope URL against installed apps on cold launch.
+  const opened = await self.clients.openWindow(target)
+  if (opened) await opened.focus()
+}
+
 self.addEventListener('notificationclick', (event) => {
   const data = taxioNotificationData(event.notification)
   if (!data) return
 
+  const dashboard = new URL('/dashboard/company', self.location.origin)
+  let target = dashboard
+  try {
+    const requested = new URL(data.taxio_path || data.url || dashboard.href, dashboard)
+    if (requested.origin === dashboard.origin && requested.pathname === dashboard.pathname) {
+      target = requested
+    }
+  } catch {
+    // Fall back to the dashboard for a malformed deep link.
+  }
+
   event.stopImmediatePropagation()
   event.notification.close()
-
-  let target = '/dashboard/company'
-  const raw = String(data.taxio_path || data.url || '').trim()
-  if (raw.startsWith('/')) target = raw
-
-  const absolute = new URL(target, self.location.origin).href
-  event.waitUntil(
-    self.clients
-      .matchAll({ type: 'window', includeUncontrolled: true })
-      .then(async (clients) => {
-        const taxioClient =
-          clients.find((client) => {
-            try {
-              const url = new URL(client.url)
-              return url.origin === self.location.origin && url.pathname.startsWith('/dashboard/company')
-            } catch {
-              return false
-            }
-          }) || clients.find((client) => {
-            try {
-              return new URL(client.url).origin === self.location.origin
-            } catch {
-              return false
-            }
-          })
-
-        if (taxioClient) {
-          try {
-            await taxioClient.navigate(absolute)
-          } catch {
-            /* keep focus fallback */
-          }
-          try {
-            return await taxioClient.focus()
-          } catch {
-            return taxioClient
-          }
-        }
-
-        const opened = await self.clients.openWindow(absolute).catch(() => null)
-        if (opened) {
-          try {
-            await opened.focus()
-          } catch {
-            /* ignore */
-          }
-        }
-        return opened
-      })
-      .catch(() => null)
-  )
+  event.waitUntil(openTripNotification(target.href))
 })
 
 importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js')
