@@ -107,7 +107,7 @@ jobs:
           grep -R 'TaxioAlertService' android/app/src/main/AndroidManifest.xml android/app/src/main/java
           grep -R 'TaxioWatchService' android/app/src/main/AndroidManifest.xml android/app/src/main/java
           grep -R 'TaxioPagerPackage' android/app/src/main/java
-          grep -R 'TaxioOpenPwaReceiver' android/app/src/main/AndroidManifest.xml android/app/src/main/java
+          grep -R 'TaxioOpenPwaActivity' android/app/src/main/AndroidManifest.xml android/app/src/main/java
           test -f android/app/src/main/res/raw/taxio_offer.wav
 
       - name: Build release APK
@@ -124,6 +124,11 @@ jobs:
           grep -q 'TaxioFirebaseMessagingService' "$MERGED"
           grep -q 'TaxioAlertService' "$MERGED"
           grep -q 'TaxioWatchService' "$MERGED"
+          grep -q 'TaxioOpenPwaActivity' "$MERGED"
+          if grep -q 'TaxioOpenPwaReceiver' "$MERGED"; then
+            echo 'Notification taps must target the activity directly.'
+            exit 1
+          fi
           if grep -q 'expo.modules.notifications.service.ExpoFirebaseMessagingService' "$MERGED"; then
             echo 'Expo FirebaseMessagingService still owns FCM delivery; refusing pager build.'
             exit 1

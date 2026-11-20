@@ -227,10 +227,11 @@ class TaxioAlertService : Service() {
   }
 
   private fun buildNotification(title: String, body: String, deepLink: String): android.app.Notification {
-    val tapIntent = Intent(this, TaxioOpenPwaReceiver::class.java).apply {
+    val tapIntent = Intent(this, TaxioOpenPwaActivity::class.java).apply {
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       putExtra("deep_link", deepLink)
     }
-    val tapPendingIntent = PendingIntent.getBroadcast(
+    val tapPendingIntent = PendingIntent.getActivity(
       this,
       2201,
       tapIntent,
@@ -632,58 +633,53 @@ class TaxioPagerPackage : ReactPackage {
 }
 `,
 
-  'TaxioOpenPwaReceiver.kt': `package be.taxio.operator
+  'TaxioOpenPwaActivity.kt': `package be.taxio.operator
 
-import android.content.BroadcastReceiver
-import android.content.Context
+import android.app.Activity
+import android.app.AlertDialog
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
-import android.util.Log
+import android.os.Bundle
 
-class TaxioOpenPwaReceiver : BroadcastReceiver() {
-  override fun onReceive(context: Context, intent: Intent) {
-    val deepLink = intent.getStringExtra("deep_link")
-      ?: "https://www.taxio.be/dashboard/company"
+class TaxioOpenPwaActivity : Activity() {
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    stopService(Intent(this, TaxioAlertService::class.java))
 
-    context.stopService(Intent(context, TaxioAlertService::class.java))
+    val dashboard = Uri.parse("https://www.taxio.be/dashboard/company")
+    val requested = intent.getStringExtra("deep_link")?.let(Uri::parse)
+    val target = requested?.takeIf {
+      it.scheme == dashboard.scheme && it.encodedAuthority == dashboard.encodedAuthority &&
+        it.encodedPath == dashboard.encodedPath
+    } ?: dashboard
 
-    val uri = Uri.parse(deepLink)
-    val baseIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+    val openTrip = Intent(Intent.ACTION_VIEW, target).apply {
       addCategory(Intent.CATEGORY_BROWSABLE)
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    // Resolve the actual trip URL to a Chrome-installed web app. A home-screen
+    // shortcut that only opens a browser does not have a WebAPK package.
+    val webApk = packageManager.queryIntentActivities(openTrip, PackageManager.MATCH_DEFAULT_ONLY)
+      .firstOrNull { it.activityInfo.packageName.startsWith("org.chromium.webapk.") }
+    if (webApk != null) {
+      openTrip.setPackage(webApk.activityInfo.packageName)
+      try {
+        startActivity(openTrip)
+        finish()
+        return
+      } catch (_: ActivityNotFoundException) {
+        // The PWA may have been removed between resolving and opening it.
+      }
     }
 
-    try {
-      val candidates = context.packageManager.queryIntentActivities(
-        baseIntent,
-        android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
-      )
-      val pwa = candidates.firstOrNull { resolved ->
-        val pkg = resolved.activityInfo?.packageName.orEmpty()
-        val label = resolved.loadLabel(context.packageManager)?.toString().orEmpty()
-        pkg.startsWith("org.chromium.webapk.") ||
-          pkg.contains("webapk", ignoreCase = true) ||
-          label.equals("TAXIO", ignoreCase = true) ||
-          label.equals("TAXIO Dashboard", ignoreCase = true)
-      }
-
-      val openIntent = Intent(baseIntent)
-      if (pwa != null) {
-        openIntent.setPackage(pwa.activityInfo.packageName)
-        Log.i(TAG, "[TAXIO-NATIVE] PWA_TARGET=" + pwa.activityInfo.packageName)
-      } else {
-        Log.w(TAG, "[TAXIO-NATIVE] PWA_NOT_FOUND_FALLBACK_BROWSER")
-      }
-
-      context.startActivity(openIntent)
-      Log.i(TAG, "[TAXIO-NATIVE] PWA_OPENED")
-    } catch (error: Exception) {
-      Log.e(TAG, "[TAXIO-NATIVE] PWA_OPEN_FAILED", error)
-    }
-  }
-
-  companion object {
-    private const val TAG = "TaxioNative"
+    AlertDialog.Builder(this)
+      .setTitle("Install the TAXIO dashboard")
+      .setMessage("Open www.taxio.be/dashboard/company in Chrome and choose Install app. Open TAXIO once from its home-screen icon and sign in, then tap your next trip alert.")
+      .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
+      .setOnCancelListener { finish() }
+      .show()
   }
 }
 `,
@@ -746,7 +742,7 @@ function withTaxioNativeSources(config) {
 -keep class be.taxio.alert.TaxioWatchService { *; }
 -keep class be.taxio.alert.TaxioPagerModule { *; }
 -keep class be.taxio.alert.TaxioPagerPackage { *; }
--keep class be.taxio.operator.TaxioOpenPwaReceiver { *; }
+-keep class be.taxio.operator.TaxioOpenPwaActivity { *; }
 `
       }
       fs.writeFileSync(proguard, existing, 'utf8')
@@ -846,11 +842,13 @@ module.exports = function withTaxioNativePager(config) {
       ],
     })
 
-    const receivers = application.receiver || (application.receiver = [])
-    receivers.push({
+    const activities = application.activity || (application.activity = [])
+    activities.push({
       $: {
-        'android:name': '.TaxioOpenPwaReceiver',
+        'android:name': '.TaxioOpenPwaActivity',
         'android:exported': 'false',
+        'android:excludeFromRecents': 'true',
+        'android:theme': '@android:style/Theme.Material.Light.Dialog.NoActionBar',
       },
     })
 
